@@ -3,6 +3,8 @@ package com.pomingmatgo.userservice.domain.user.service;
 import com.pomingmatgo.userservice.api.user.request.RegisterRequest;
 import com.pomingmatgo.userservice.domain.user.mapper.UserMapper;
 import com.pomingmatgo.userservice.domain.user.repository.UserRepository;
+import com.pomingmatgo.userservice.global.exception.BusinessException;
+import com.pomingmatgo.userservice.global.exception.ErrorCode;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 
@@ -12,16 +14,13 @@ public class RegisterService {
     private final UserRepository userRepository;
     private final UserMapper userMapper;
     public void register(RegisterRequest req) {
-        //todo: 아래 예외처리 구현 해야함
-        /*if(isEmailDuplicate(req.getEmail())
-            throw;
+        if(isEmailDuplicate(req.getEmail()))
+            throw new BusinessException(ErrorCode.DUPLICATE_EMAIL);
         if(isNicknameDuplicate(req.getNickname()))
-            throw;*/
+            throw new BusinessException(ErrorCode.DUPLICATE_NICKNAME);
         
         //todo: 비밀번호 해싱 구현 해야함
 
-        System.out.println("email: " + req.getEmail());
-        System.out.println("nickname: " + req.getNickname());
         userRepository.save(userMapper.toUser(req));
 
     }

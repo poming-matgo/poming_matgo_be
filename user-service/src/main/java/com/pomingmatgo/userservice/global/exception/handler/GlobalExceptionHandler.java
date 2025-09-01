@@ -1,5 +1,6 @@
 package com.pomingmatgo.userservice.global.exception.handler;
 
+import com.pomingmatgo.userservice.global.exception.BusinessException;
 import com.pomingmatgo.userservice.global.exception.ErrorCode;
 import com.pomingmatgo.userservice.global.exception.dto.ErrorResponseDto;
 import org.springframework.validation.BindException;
@@ -12,6 +13,12 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(BindException.class)
     public ErrorResponseDto handleBindException(BindException e) {
         ErrorCode errorCode = ErrorCode.INVALID_FORM_INPUT;
+        return new ErrorResponseDto(errorCode.name(), errorCode.getStatusCode(), errorCode.getMessage());
+    }
+
+    @ExceptionHandler(BusinessException.class)
+    public ErrorResponseDto handleBusinessException(BusinessException e) {
+        ErrorCode errorCode = e.getErrorCode();
         return new ErrorResponseDto(errorCode.name(), errorCode.getStatusCode(), errorCode.getMessage());
     }
 }
