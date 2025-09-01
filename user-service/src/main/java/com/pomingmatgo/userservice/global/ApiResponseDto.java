@@ -1,5 +1,8 @@
 package com.pomingmatgo.userservice.global;
 
+import lombok.Getter;
+
+@Getter
 public class ApiResponseDto<T> {
     private int status;
     private String message;
