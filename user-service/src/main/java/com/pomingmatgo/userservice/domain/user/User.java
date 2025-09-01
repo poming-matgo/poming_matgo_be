@@ -4,11 +4,12 @@ package com.pomingmatgo.userservice.domain.user;
 import jakarta.persistence.*;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
-import org.springframework.data.jpa.repository.Temporal;
+import lombok.Setter;
 
 import java.time.LocalDateTime;
 
 @Getter
+@Setter
 @NoArgsConstructor
 @Entity
 @Table(name = "User")

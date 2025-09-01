@@ -12,11 +12,16 @@ public class RegisterService {
     private final UserRepository userRepository;
     private final UserMapper userMapper;
     public void register(RegisterRequest req) {
-        if(isEmailDuplicate(req.getEmail())
+        //todo: 아래 예외처리 구현 해야함
+        /*if(isEmailDuplicate(req.getEmail())
             throw;
         if(isNicknameDuplicate(req.getNickname()))
-            throw;
+            throw;*/
+        
+        //todo: 비밀번호 해싱 구현 해야함
 
+        System.out.println("email: " + req.getEmail());
+        System.out.println("nickname: " + req.getNickname());
         userRepository.save(userMapper.toUser(req));
 
     }
@@ -28,6 +33,6 @@ public class RegisterService {
 
     //닉네임 중복 검사
     public boolean isNicknameDuplicate(String nickname) {
-        return userRepository.existsByNickName(nickname);
+        return userRepository.existsByNickname(nickname);
     }
 }

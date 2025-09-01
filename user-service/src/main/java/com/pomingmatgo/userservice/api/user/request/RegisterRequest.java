@@ -21,11 +21,4 @@ public class RegisterRequest {
     @NotBlank
     @Size(min=8, max=15)
     private String password;
-
-    @NotBlank
-    private String confirmPassword;
-
-    public boolean isPasswordMatching() {
-        return this.password.equals(this.confirmPassword);
-    }
 }
