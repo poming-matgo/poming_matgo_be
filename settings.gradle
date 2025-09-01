@@ -2,3 +2,4 @@ rootProject.name = 'poming-matgo'
 
 include 'config-server'
 include 'user-service'
+include 'api-gateway'
