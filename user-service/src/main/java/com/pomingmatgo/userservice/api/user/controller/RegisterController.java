@@ -1,11 +1,11 @@
 package com.pomingmatgo.userservice.api.user.controller;
 
-import com.pomingmatgo.userservice.api.user.request.CheckEmailRequest;
-import com.pomingmatgo.userservice.api.user.request.CheckNicknameRequest;
 import com.pomingmatgo.userservice.api.user.request.RegisterRequest;
 import com.pomingmatgo.userservice.domain.user.service.RegisterService;
 import com.pomingmatgo.userservice.global.ApiResponseDto;
 import jakarta.validation.Valid;
+import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.Size;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.*;
@@ -18,9 +18,9 @@ public class RegisterController {
 
     //중복 이메일 체크
     @GetMapping("/check-email")
-    public ApiResponseDto<Void> checkEmailDuplicate(@RequestParam @Valid CheckEmailRequest req) {
+    public ApiResponseDto<Void> checkEmailDuplicate(@NotBlank String email) {
 
-        boolean isDuplicate = registerService.isEmailDuplicate(req.getEmail());
+        boolean isDuplicate = registerService.isEmailDuplicate(email);
         if(isDuplicate)
             return new ApiResponseDto<>(HttpStatus.CONFLICT.value(), "이메일이 중복됩니다.");
         else
@@ -29,8 +29,8 @@ public class RegisterController {
 
     //중복 닉네임 체크
     @GetMapping("/check-nickname")
-    public ApiResponseDto<Void> checkNicknameDuplicate(@RequestParam  @Valid CheckNicknameRequest req) {
-        boolean isDuplicate = registerService.isNicknameDuplicate(req.getNickName());
+    public ApiResponseDto<Void> checkNicknameDuplicate(@NotBlank @Size(min = 2, max = 8) String nickname) {
+        boolean isDuplicate = registerService.isNicknameDuplicate(nickname);
         if(isDuplicate)
             return new ApiResponseDto<>(HttpStatus.CONFLICT.value(), "닉네임이 중복됩니다.");
         else
@@ -39,7 +39,8 @@ public class RegisterController {
 
     //회원가입 폼 제출
     @PostMapping
-    public void handlePostRegister(@RequestBody @Valid RegisterRequest req) {
+    public ApiResponseDto<Void> handlePostRegister(@RequestBody @Valid RegisterRequest req) {
         registerService.register(req);
+        return new ApiResponseDto<>(HttpStatus.OK.value(), req.getEmail()+"으로 인증 메일이 발송됐습니다.");
     }
 }
