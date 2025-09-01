@@ -1,0 +1,18 @@
+plugins {
+    id 'java'
+}
+
+group = 'com.pomingmatgo'
+version = '1.0'
+
+subprojects {
+    apply plugin: 'java'
+
+    repositories {
+        mavenCentral()
+    }
+
+    dependencies {
+        예: implementation 'org.springframework.boot:spring-boot-starter'
+    }
+}
