@@ -12,13 +12,11 @@ public class GlobalExceptionHandler {
 
     @ExceptionHandler(BindException.class)
     public ErrorResponseDto handleBindException(BindException e) {
-        ErrorCode errorCode = ErrorCode.INVALID_FORM_INPUT;
-        return new ErrorResponseDto(errorCode.name(), errorCode.getStatusCode(), errorCode.getMessage());
+        return new ErrorResponseDto(ErrorCode.INVALID_FORM_INPUT);
     }
 
     @ExceptionHandler(BusinessException.class)
     public ErrorResponseDto handleBusinessException(BusinessException e) {
-        ErrorCode errorCode = e.getErrorCode();
-        return new ErrorResponseDto(errorCode.name(), errorCode.getStatusCode(), errorCode.getMessage());
+        return new ErrorResponseDto(e.getErrorCode());
     }
 }
