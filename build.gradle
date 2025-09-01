@@ -13,6 +13,6 @@ subprojects {
     }
 
     dependencies {
-        예: implementation 'org.springframework.boot:spring-boot-starter'
+        implementation 'org.springframework.boot:spring-boot-starter'
     }
 }
