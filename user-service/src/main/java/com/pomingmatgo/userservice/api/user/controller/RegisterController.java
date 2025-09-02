@@ -124,7 +124,27 @@ public class RegisterController {
         return new ApiResponseDto<>(HttpStatus.OK.value(), req.getEmail()+"으로 인증 메일이 발송됐습니다.");
     }
 
-
+    @Operation(summary = "이메일 인증 확인", description = "이메일 인증을 완료하여 회원가입을 확정합니다.")
+    @ApiResponses({
+            @ApiResponse(responseCode = "200", description = "회원가입 완료",
+                    content = @Content(mediaType = "application/json",
+                            schema = @Schema(example = """
+                {
+                    "status": 200,
+                    "message": "회원가입이 완료됐습니다.",
+                    "data": null
+                }
+                """))),
+            @ApiResponse(responseCode = "400", description = "유효하지 않은 링크",
+                    content = @Content(mediaType = "application/json",
+                            schema = @Schema(example = """
+                {
+                    "status": 400,
+                    "message": "유효하지 않은 링크입니다.",
+                    "data": null
+                }
+                """)))
+    })
     @GetMapping("/emailAuth")
     public ApiResponseDto<Void> checkEmailAuth(String authId) {
         if(registerService.completeRegistration(authId))
