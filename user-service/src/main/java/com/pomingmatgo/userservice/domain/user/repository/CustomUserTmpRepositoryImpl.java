@@ -3,18 +3,31 @@ package com.pomingmatgo.userservice.domain.user.repository;
 import com.pomingmatgo.userservice.domain.user.UserTmp;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.redis.core.RedisTemplate;
+import org.springframework.data.redis.core.StringRedisTemplate;
 
-//todo: 구현해야함
+import java.util.Set;
+
+//데이터 많아지면 오버헤드 클 것 같은데..
 @RequiredArgsConstructor
 public class CustomUserTmpRepositoryImpl implements CustomUserTmpRepository {
-    private final RedisTemplate<String, UserTmp> redisTemplate;
+    private final StringRedisTemplate redisTemplate;
     @Override
     public boolean existsByEmail(String email) {
+        for (String key : redisTemplate.keys("userTmp:" + "*")) {
+            if (email.equals((String)redisTemplate.opsForHash().get(key, "email"))) {
+                return true;
+            }
+        }
         return false;
     }
 
     @Override
     public boolean existsByNickname(String nickname) {
+        for (String key : redisTemplate.keys("userTmp:" + "*")) {
+            if (nickname.equals((String)redisTemplate.opsForHash().get(key, "nickname"))) {
+                return true;
+            }
+        }
         return false;
     }
 }
