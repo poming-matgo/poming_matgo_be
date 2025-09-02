@@ -11,9 +11,11 @@ import java.util.Set;
 @RequiredArgsConstructor
 public class CustomUserTmpRepositoryImpl implements CustomUserTmpRepository {
     private final StringRedisTemplate redisTemplate;
+    private static final String USER_TMP_PREFIX = "userTmp:";
+
     @Override
     public boolean existsByEmail(String email) {
-        for (String key : redisTemplate.keys("userTmp:" + "*")) {
+        for (String key : redisTemplate.keys(USER_TMP_PREFIX + "*")) {
             if (email.equals((String)redisTemplate.opsForHash().get(key, "email"))) {
                 return true;
             }
@@ -23,7 +25,7 @@ public class CustomUserTmpRepositoryImpl implements CustomUserTmpRepository {
 
     @Override
     public boolean existsByNickname(String nickname) {
-        for (String key : redisTemplate.keys("userTmp:" + "*")) {
+        for (String key : redisTemplate.keys(USER_TMP_PREFIX + "*")) {
             if (nickname.equals((String)redisTemplate.opsForHash().get(key, "nickname"))) {
                 return true;
             }

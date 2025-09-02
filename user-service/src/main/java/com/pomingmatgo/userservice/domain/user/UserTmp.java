@@ -15,5 +15,5 @@ public class UserTmp {
     private String password;
     private String nickname;
     @Id
-    private String authLink;
+    private String authId;
 }

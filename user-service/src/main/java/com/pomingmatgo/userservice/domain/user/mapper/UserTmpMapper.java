@@ -12,6 +12,6 @@ public interface UserTmpMapper {
     UserTmpMapper INSTANCE = Mappers.getMapper(UserTmpMapper.class);
 
 
-    @Mapping(target = "authLink", source = "randomString")
+    @Mapping(target = "authId", source = "randomString")
     UserTmp toUserTmp(RegisterRequest request, String randomString);
 }

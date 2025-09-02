@@ -28,7 +28,4 @@ public class User {
     private String nickname;
 
     private LocalDateTime signupDate;
-
-    @Enumerated(EnumType.STRING)
-    private Status status;
 }

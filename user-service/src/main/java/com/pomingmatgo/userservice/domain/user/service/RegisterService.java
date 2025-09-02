@@ -1,6 +1,8 @@
 package com.pomingmatgo.userservice.domain.user.service;
 
 import com.pomingmatgo.userservice.api.user.request.RegisterRequest;
+import com.pomingmatgo.userservice.domain.user.UserTmp;
+import com.pomingmatgo.userservice.domain.user.mapper.UserMapper;
 import com.pomingmatgo.userservice.domain.user.mapper.UserTmpMapper;
 import com.pomingmatgo.userservice.domain.user.repository.UserRepository;
 import com.pomingmatgo.userservice.domain.user.repository.UserTmpRepository;
@@ -19,6 +21,7 @@ import org.springframework.stereotype.Service;
 import jakarta.mail.internet.MimeMessage;
 
 import java.io.UnsupportedEncodingException;
+import java.util.Optional;
 
 import static com.pomingmatgo.userservice.global.exception.ErrorCode.EMAIL_SEND_FAILED;
 import static com.pomingmatgo.userservice.global.exception.ErrorCode.SYSTEM_ERROR;
@@ -28,6 +31,7 @@ import static com.pomingmatgo.userservice.global.exception.ErrorCode.SYSTEM_ERRO
 public class RegisterService {
     private final UserRepository userRepository;
     private final UserTmpMapper userTmpMapper;
+    private final UserMapper userMapper;
     private final UserTmpRepository userTmpRepository;
     private final JavaMailSender mailSender;
 
@@ -81,5 +85,15 @@ public class RegisterService {
     //닉네임 중복 검사
     public boolean isNicknameDuplicate(String nickname) {
         return userRepository.existsByNickname(nickname) || userTmpRepository.existsByNickname(nickname);
+    }
+
+    public boolean completeRegistration(String authId) {
+        return userTmpRepository.findById(authId)
+                .map(tmpUser -> {
+                    userRepository.save(userMapper.toUser(tmpUser));
+                    userTmpRepository.delete(tmpUser);
+                    return true;
+                })
+                .orElse(false);
     }
 }

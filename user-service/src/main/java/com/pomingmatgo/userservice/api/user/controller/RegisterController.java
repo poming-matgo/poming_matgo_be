@@ -33,6 +33,7 @@ public class RegisterController {
                     {
                         "status": 200,
                         "message": "사용 가능한 이메일입니다."
+                        "data": null
                     }
                     """))),
             @ApiResponse(responseCode = "407", description = "이메일 중복",
@@ -41,6 +42,7 @@ public class RegisterController {
                     {
                         "status": 200,
                         "message": "이메일이 중복됩니다."
+                        "data": null
                     }
                     """))),
     })
@@ -63,6 +65,7 @@ public class RegisterController {
                     {
                         "status": 200,
                         "message": "사용 가능한 닉네임입니다."
+                        "data": null
                     }
                     """))),
             @ApiResponse(responseCode = "407", description = "닉네임 중복",
@@ -71,6 +74,7 @@ public class RegisterController {
                     {
                         "status": 200,
                         "message": "닉네임이 중복됩니다."
+                        "data": null
                     }
                     """))),
     })
@@ -92,6 +96,7 @@ public class RegisterController {
                     {
                         "status": 200,
                         "message": "grace527@naver.com으로 인증 메일이 발송됐습니다."
+                        "data": null
                     }
                     """))),
             @ApiResponse(responseCode = "407", description = "이메일 또는 닉네임 중복.",
@@ -118,4 +123,14 @@ public class RegisterController {
         registerService.register(req);
         return new ApiResponseDto<>(HttpStatus.OK.value(), req.getEmail()+"으로 인증 메일이 발송됐습니다.");
     }
+
+
+    @GetMapping("/emailAuth")
+    public ApiResponseDto<Void> checkEmailAuth(String authId) {
+        if(registerService.completeRegistration(authId))
+            return new ApiResponseDto<>(HttpStatus.OK.value(), "회원가입이 완료됐습니다.");
+        else
+            return new ApiResponseDto<>(HttpStatus.BAD_REQUEST.value(), "유효하지 않은 링크입니다.");
+    }
+
 }
