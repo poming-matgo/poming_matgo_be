@@ -1,7 +1,6 @@
 package com.pomingmatgo.userservice.domain.user.service;
 
 import com.pomingmatgo.userservice.api.user.request.RegisterRequest;
-import com.pomingmatgo.userservice.domain.user.UserTmp;
 import com.pomingmatgo.userservice.domain.user.mapper.UserMapper;
 import com.pomingmatgo.userservice.domain.user.mapper.UserTmpMapper;
 import com.pomingmatgo.userservice.domain.user.repository.UserRepository;
@@ -16,12 +15,12 @@ import jakarta.mail.internet.InternetAddress;
 import lombok.RequiredArgsConstructor;
 import org.springframework.mail.MailException;
 import org.springframework.mail.javamail.JavaMailSender;
+import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 
 import jakarta.mail.internet.MimeMessage;
 
 import java.io.UnsupportedEncodingException;
-import java.util.Optional;
 
 import static com.pomingmatgo.userservice.global.exception.ErrorCode.EMAIL_SEND_FAILED;
 import static com.pomingmatgo.userservice.global.exception.ErrorCode.SYSTEM_ERROR;
@@ -34,19 +33,19 @@ public class RegisterService {
     private final UserMapper userMapper;
     private final UserTmpRepository userTmpRepository;
     private final JavaMailSender mailSender;
+    private final PasswordEncoder passwordEncoder;
 
-    //todo: 링크 유효성 검사 구현해야함
     public void register(RegisterRequest req) {
         if(isEmailDuplicate(req.getEmail()))
             throw new BusinessException(ErrorCode.DUPLICATE_EMAIL);
         if(isNicknameDuplicate(req.getNickname()))
             throw new BusinessException(ErrorCode.DUPLICATE_NICKNAME);
-        
-        //todo: 비밀번호 해싱 구현 해야함
+
+        String encodedPassword = passwordEncoder.encode(req.getPassword());
 
         String randomString = StringUtil.generateString(20);
         sendAuthMessage(req.getEmail(), randomString);
-        userTmpRepository.save(userTmpMapper.toUserTmp(req, randomString)); //메일 인증 전까지는 redis에 임시 저장
+        userTmpRepository.save(userTmpMapper.toUserTmp(req, randomString, encodedPassword)); //메일 인증 전까지는 redis에 임시 저장
     }
 
     private MimeMessage createMessage(String email, String randomString) {
