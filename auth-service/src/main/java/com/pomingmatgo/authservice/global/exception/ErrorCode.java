@@ -5,10 +5,9 @@ import lombok.Getter;
 @Getter
 public enum ErrorCode {
     //비즈니스 예외
+    INVALID_ID_OR_PASSWORD(401, "로그인 정보가 일치하지 않습니다."),
     //입력 값 에러
     INVALID_FORM_INPUT(400, "폼의 입력 데이터가 유효하지 않습니다."),
-    DUPLICATE_EMAIL(407, "이메일이 중복됩니다."),
-    DUPLICATE_NICKNAME(407, "닉네임이 중복됩니다."),
 
 
     //시스템 예외

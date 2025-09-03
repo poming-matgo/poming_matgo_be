@@ -1,19 +1,22 @@
 package com.pomingmatgo.userservice.domain.user.service;
 
 import com.pomingmatgo.userservice.api.user.request.LoginInfo;
+import com.pomingmatgo.userservice.domain.user.AuthUser;
 import com.pomingmatgo.userservice.domain.user.repository.UserRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
+
+import java.util.Optional;
 
 @Service
 @RequiredArgsConstructor
 public class LoginService {
     private final UserRepository userRepository;
     private final PasswordEncoder passwordEncoder;
-    public boolean isLogin(LoginInfo loginInfo) {
+    public Optional<AuthUser> isLogin(LoginInfo loginInfo) {
         return userRepository.findByEmail(loginInfo.getEmail())
                 .filter(user -> passwordEncoder.matches(loginInfo.getPassword(), user.getPassword()))
-                .isPresent();
+                .map(user -> new AuthUser(user.getId(), user.getEmail()));
     }
 }

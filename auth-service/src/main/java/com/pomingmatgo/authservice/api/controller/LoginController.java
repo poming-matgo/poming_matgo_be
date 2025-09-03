@@ -1,6 +1,7 @@
 package com.pomingmatgo.authservice.api.controller;
 
 import com.pomingmatgo.authservice.api.request.LoginInfo;
+import com.pomingmatgo.authservice.api.response.AuthCodeResponse;
 import com.pomingmatgo.authservice.domain.login.service.LoginService;
 import com.pomingmatgo.authservice.global.ApiResponseDto;
 import lombok.RequiredArgsConstructor;
@@ -9,12 +10,12 @@ import org.springframework.web.bind.annotation.*;
 
 @RestController
 @RequiredArgsConstructor
-@RequestMapping("/login")
+@RequestMapping("/custom-login")
 public class LoginController {
     private final LoginService loginService;
     @PostMapping
-    public ApiResponseDto<Void> handleLogin(@RequestBody LoginInfo loginInfo) {
-        loginService.login(loginInfo);
-        return new ApiResponseDto<>(HttpStatus.OK.value(), "로그인 성공");
+    public ApiResponseDto<AuthCodeResponse> handleLogin(@RequestBody LoginInfo loginInfo) {
+        AuthCodeResponse authorizationCode = loginService.authenticate(loginInfo);
+        return new ApiResponseDto<>(HttpStatus.OK.value(), "인증코드가 발급됐습니다.", authorizationCode);
     }
 }
