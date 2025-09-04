@@ -18,4 +18,9 @@ public class LoginController {
         AuthCodeResponse authorizationCode = loginService.authenticate(loginInfo);
         return new ApiResponseDto<>(HttpStatus.OK.value(), "인증코드가 발급됐습니다.", authorizationCode);
     }
+
+    @PostMapping
+    public ApiResponseDto<Void> handleOauth2Login(String code) {
+        return null;
+    }
 }

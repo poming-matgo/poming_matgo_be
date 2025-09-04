@@ -2,16 +2,16 @@ package com.pomingmatgo.userservice.domain.user;
 
 
 import jakarta.persistence.*;
-import lombok.Getter;
-import lombok.NoArgsConstructor;
-import lombok.Setter;
+import lombok.*;
 
 import java.time.LocalDateTime;
 
 @Getter
 @Setter
 @NoArgsConstructor
+@AllArgsConstructor
 @Entity
+@Builder
 @Table(name = "User")
 public class User {
     @Id
@@ -28,4 +28,7 @@ public class User {
     private String nickname;
 
     private LocalDateTime signupDate;
+
+    @Enumerated(EnumType.STRING)
+    private LoginType loginType;
 }

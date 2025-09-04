@@ -1,6 +1,8 @@
 package com.pomingmatgo.userservice.domain.user.service;
 
+import com.pomingmatgo.userservice.api.user.request.OAuth2RegisterRequest;
 import com.pomingmatgo.userservice.api.user.request.RegisterRequest;
+import com.pomingmatgo.userservice.domain.user.User;
 import com.pomingmatgo.userservice.domain.user.mapper.UserMapper;
 import com.pomingmatgo.userservice.domain.user.mapper.UserTmpMapper;
 import com.pomingmatgo.userservice.domain.user.repository.UserRepository;
@@ -21,6 +23,7 @@ import org.springframework.stereotype.Service;
 import jakarta.mail.internet.MimeMessage;
 
 import java.io.UnsupportedEncodingException;
+import java.time.LocalDateTime;
 
 import static com.pomingmatgo.userservice.global.exception.ErrorCode.EMAIL_SEND_FAILED;
 import static com.pomingmatgo.userservice.global.exception.ErrorCode.SYSTEM_ERROR;
@@ -46,6 +49,16 @@ public class RegisterService {
         String randomString = StringUtil.generateString(20);
         sendAuthMessage(req.getEmail(), randomString);
         userTmpRepository.save(userTmpMapper.toUserTmp(req, randomString, encodedPassword)); //메일 인증 전까지는 redis에 임시 저장
+    }
+
+    public void oauth2Register(OAuth2RegisterRequest req) {
+        User user = User.builder()
+                .email(req.getLoginType().name() + " "+req.getOauth2Id())
+                .nickname(req.getNickname())
+                .loginType(req.getLoginType())
+                .signupDate(LocalDateTime.now())
+                .build();
+        userRepository.save(user);
     }
 
     private MimeMessage createMessage(String email, String randomString) {

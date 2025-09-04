@@ -1,5 +1,6 @@
 package com.pomingmatgo.userservice.api.user.controller;
 
+import com.pomingmatgo.userservice.api.user.request.OAuth2RegisterRequest;
 import com.pomingmatgo.userservice.api.user.request.RegisterRequest;
 import com.pomingmatgo.userservice.domain.user.service.RegisterService;
 import com.pomingmatgo.userservice.global.ApiResponseDto;
@@ -151,6 +152,13 @@ public class RegisterController {
             return new ApiResponseDto<>(HttpStatus.OK.value(), "회원가입이 완료됐습니다.");
         else
             return new ApiResponseDto<>(HttpStatus.BAD_REQUEST.value(), "유효하지 않은 링크입니다.");
+    }
+
+    //인증 서비스에서 호출하는 함수
+    @PostMapping("/oauth2signup")
+    public ApiResponseDto<Void> oauth2Signup(@RequestBody OAuth2RegisterRequest req) {
+        registerService.oauth2Register(req);
+        return new ApiResponseDto<>(HttpStatus.OK.value(), "회원가입이 완료됐습니다.");
     }
 
 }
