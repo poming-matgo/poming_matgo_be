@@ -57,8 +57,6 @@ public class AuthServerConfig {
     public SecurityFilterChain authorizationServerSecurityFilterChain(HttpSecurity http)
             throws Exception {
         OAuth2AuthorizationServerConfiguration.applyDefaultSecurity(http);
-
-
         http.exceptionHandling(exceptions -> exceptions.defaultAuthenticationEntryPointFor( // 인가 실패에 대한 처리를 정의
                 new LoginUrlAuthenticationEntryPoint("/custom-login"),
                 new MediaTypeRequestMatcher(MediaType.TEXT_HTML)
@@ -73,18 +71,19 @@ public class AuthServerConfig {
     public SecurityFilterChain defaultSecurityFilterChain(HttpSecurity http)
             throws Exception {
         http
-                .authorizeHttpRequests(authorizeRequests -> authorizeRequests
-                        .requestMatchers("/custom-login").permitAll()
-                        .requestMatchers("/oauth2/**").permitAll()
-                        .anyRequest().authenticated()
-                );
-                 http.formLogin(AbstractHttpConfigurer::disable)
-                .csrf(AbstractHttpConfigurer::disable)
-                .httpBasic(AbstractHttpConfigurer::disable)
-                .sessionManagement(session -> session
-                        .sessionCreationPolicy(SessionCreationPolicy.STATELESS))
+            .authorizeHttpRequests(authorizeRequests -> authorizeRequests
+                    .requestMatchers("/custom-login").permitAll()
+                    .requestMatchers("/oauth2/**").permitAll()
+                    .requestMatchers("/login/**").permitAll()
+                    .anyRequest().authenticated()
+            );
+             http.formLogin(AbstractHttpConfigurer::disable)
+            .csrf(AbstractHttpConfigurer::disable)
+            .httpBasic(AbstractHttpConfigurer::disable)
+            .sessionManagement(session -> session
+                    .sessionCreationPolicy(SessionCreationPolicy.STATELESS))
 
-                .authenticationProvider(authenticationProvider);
+            .authenticationProvider(authenticationProvider);
         return http.build();
     }
 
@@ -103,10 +102,11 @@ public class AuthServerConfig {
                 .redirectUri(redirectUri)
                 .postLogoutRedirectUri("http://127.0.0.1:8082")
                 .scope("general_scope")
-                .clientSettings(ClientSettings.builder()
+                /*.clientSettings(ClientSettings.builder()
                         .requireProofKey(true)
-                        .build())
+                        .build())*/
                 .build();
+
 
         return new InMemoryRegisteredClientRepository(oidcClient);
     }
