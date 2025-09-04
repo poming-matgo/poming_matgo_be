@@ -9,4 +9,5 @@ public class LoginInfo {
 
     private String email;
     private String password;
+    private String codeVerifier;
 }

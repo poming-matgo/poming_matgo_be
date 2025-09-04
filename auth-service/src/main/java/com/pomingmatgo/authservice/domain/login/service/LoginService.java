@@ -2,6 +2,7 @@ package com.pomingmatgo.authservice.domain.login.service;
 
 import com.pomingmatgo.authservice.api.request.LoginInfo;
 import com.pomingmatgo.authservice.api.response.AuthCodeResponse;
+import com.pomingmatgo.authservice.global.security.PKCEUtil;
 import lombok.RequiredArgsConstructor;
 import org.springframework.security.authentication.AuthenticationProvider;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
@@ -26,42 +27,44 @@ public class LoginService {
     private final OAuth2AuthorizationService authorizationService;
     private final AuthenticationProvider authenticationProvider;
     private final RegisteredClientRepository registeredClientRepository;
+
     public AuthCodeResponse authenticate(LoginInfo loginInfo) {
-        // 사용자의 이메일과 비밀번호로 인증 객체 생성
+
         Authentication authentication = new UsernamePasswordAuthenticationToken(
-                loginInfo.getEmail(), // 사용자가 입력한 이메일
-                loginInfo.getPassword() // 사용자가 입력한 비밀번호
+                loginInfo.getEmail(),
+                loginInfo.getPassword()
         );
 
-        // AuthenticationProvider를 통해 인증 처리
         Authentication authResult = authenticationProvider.authenticate(authentication);
 
-        // 등록된 클라이언트 정보 가져오기 (react 클라이언트 기준)
         RegisteredClient registeredClient = registeredClientRepository.findByClientId("react");
 
         String authorizationCode = UUID.randomUUID().toString();
-
-        // OAuth2AuthorizationRequest 생성
+        String codeChallenge = PKCEUtil.generateCodeChallenge(loginInfo.getCodeVerifier());
         OAuth2AuthorizationRequest authorizationRequest = OAuth2AuthorizationRequest.authorizationCode()
-                .clientId(registeredClient.getClientId()) // 클라이언트 ID
-                .authorizationUri("/oauth2/authorize") // 인증 엔드포인트 URI
-                .redirectUri("http://localhost:8082/callback") // 리다이렉션 URI
-                .scopes(registeredClient.getScopes()) // 허용된 스코프
-                .state(UUID.randomUUID().toString()) // 상태 값
+                .clientId(registeredClient.getClientId())
+                .authorizationUri("/oauth2/authorize")
+                .redirectUri("http://localhost:8082/callback")
+                .scopes(registeredClient.getScopes())
+                .state(UUID.randomUUID().toString())
+                .additionalParameters(params -> {
+                    params.put("code_challenge", codeChallenge);
+                    params.put("code_challenge_method", "S256");
+                })
                 .build();
 
 // OAuth2Authorization 객체 생성 시 속성으로 추가
         OAuth2Authorization authorization = OAuth2Authorization.withRegisteredClient(registeredClient)
-                .principalName(authResult.getName()) // 인증된 사용자 이름
+                .principalName(authResult.getName())
                 .attributes(attribute -> {
                     attribute.put(Principal.class.getName(), authResult);
                     attribute.put(OAuth2AuthorizationRequest.class.getName(), authorizationRequest);
                 })
-                .authorizationGrantType(AuthorizationGrantType.AUTHORIZATION_CODE) // Authorization Code Grant 타입
+                .authorizationGrantType(AuthorizationGrantType.AUTHORIZATION_CODE)
                 .token(new OAuth2AuthorizationCode(
-                        authorizationCode, // 생성된 인증 코드
-                        Instant.now(), // 발급 시간
-                        Instant.now().plus(5, ChronoUnit.MINUTES) // 만료 시간 (5분 후)
+                        authorizationCode,
+                        Instant.now(),
+                        Instant.now().plus(5, ChronoUnit.MINUTES)
                 ))
                 .build();
 

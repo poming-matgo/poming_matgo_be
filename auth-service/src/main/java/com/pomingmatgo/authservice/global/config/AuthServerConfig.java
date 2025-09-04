@@ -23,6 +23,7 @@ import org.springframework.security.oauth2.server.authorization.client.Registere
 import org.springframework.security.oauth2.server.authorization.client.RegisteredClientRepository;
 import org.springframework.security.oauth2.server.authorization.config.annotation.web.configuration.OAuth2AuthorizationServerConfiguration;
 import org.springframework.security.oauth2.server.authorization.settings.AuthorizationServerSettings;
+import org.springframework.security.oauth2.server.authorization.settings.ClientSettings;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.authentication.LoginUrlAuthenticationEntryPoint;
 import org.springframework.security.web.util.matcher.MediaTypeRequestMatcher;
@@ -56,6 +57,8 @@ public class AuthServerConfig {
     public SecurityFilterChain authorizationServerSecurityFilterChain(HttpSecurity http)
             throws Exception {
         OAuth2AuthorizationServerConfiguration.applyDefaultSecurity(http);
+
+
         http.exceptionHandling(exceptions -> exceptions.defaultAuthenticationEntryPointFor( // 인가 실패에 대한 처리를 정의
                 new LoginUrlAuthenticationEntryPoint("/custom-login"),
                 new MediaTypeRequestMatcher(MediaType.TEXT_HTML)
@@ -100,6 +103,9 @@ public class AuthServerConfig {
                 .redirectUri(redirectUri)
                 .postLogoutRedirectUri("http://127.0.0.1:8082")
                 .scope("general_scope")
+                .clientSettings(ClientSettings.builder()
+                        .requireProofKey(true)
+                        .build())
                 .build();
 
         return new InMemoryRegisteredClientRepository(oidcClient);
