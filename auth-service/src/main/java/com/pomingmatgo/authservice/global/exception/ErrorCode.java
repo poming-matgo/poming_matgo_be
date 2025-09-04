@@ -14,7 +14,10 @@ public enum ErrorCode {
     //범용
     SYSTEM_ERROR(500, "시스템 에러가 발생했습니다. 관리자에게 문의하세요."),
     //이메일
-    EMAIL_SEND_FAILED(502, "이메일 서버와의 연결중 에러가 발생했습니다.");
+    EMAIL_SEND_FAILED(502, "이메일 서버와의 연결중 에러가 발생했습니다."),
+
+    //외부 서버 응답 에러
+    EXTERNAL_SERVER_ERROR(503, "외부 서버와의 통신에 실패했습니다.");
 
 
     private final int statusCode;

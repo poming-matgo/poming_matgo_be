@@ -14,6 +14,7 @@ import org.springframework.security.config.annotation.web.configurers.AbstractHt
 import org.springframework.security.config.http.SessionCreationPolicy;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.security.crypto.password.PasswordEncoder;
+import org.springframework.security.oauth2.client.registration.ClientRegistrationRepository;
 import org.springframework.security.oauth2.core.AuthorizationGrantType;
 import org.springframework.security.oauth2.core.ClientAuthenticationMethod;
 import org.springframework.security.oauth2.server.authorization.InMemoryOAuth2AuthorizationService;
@@ -38,6 +39,7 @@ import static org.springframework.security.config.Customizer.withDefaults;
 public class AuthServerConfig {
 
     private final AuthenticationProvider authenticationProvider;
+    private final ClientRegistrationRepository clientRegistrationRepository;
 
     @Value("${oauth.react.clientId}")
     private String clientId;
@@ -62,7 +64,6 @@ public class AuthServerConfig {
                 new MediaTypeRequestMatcher(MediaType.TEXT_HTML)
         ));
         http.oauth2ResourceServer(resourceServer -> resourceServer.jwt(withDefaults()));
-
         return http.build();
     }
 
@@ -82,7 +83,11 @@ public class AuthServerConfig {
             .httpBasic(AbstractHttpConfigurer::disable)
             .sessionManagement(session -> session
                     .sessionCreationPolicy(SessionCreationPolicy.STATELESS))
-
+                     //.oauth2Login(oauth2 ->
+                     //oauth2.clientRegistrationRepository(clientRegistrationRepository)
+                             //.successHandler()
+                             //.authorizedClientService(authorizedClientService())
+                    // )
             .authenticationProvider(authenticationProvider);
         return http.build();
     }
@@ -102,14 +107,16 @@ public class AuthServerConfig {
                 .redirectUri(redirectUri)
                 .postLogoutRedirectUri("http://127.0.0.1:8082")
                 .scope("general_scope")
-                /*.clientSettings(ClientSettings.builder()
+                .clientSettings(ClientSettings.builder()
                         .requireProofKey(true)
-                        .build())*/
+                        .build())
                 .build();
 
 
         return new InMemoryRegisteredClientRepository(oidcClient);
     }
+
+
 
 
     @Bean
