@@ -9,6 +9,6 @@ import lombok.Setter;
 @NoArgsConstructor
 public class LoginInfo {
 
-    private String email;
+    private String identifier;
     private String password;
 }

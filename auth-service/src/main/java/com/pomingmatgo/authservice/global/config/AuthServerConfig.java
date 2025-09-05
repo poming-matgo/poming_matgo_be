@@ -1,6 +1,7 @@
 package com.pomingmatgo.authservice.global.config;
 
 import com.pomingmatgo.authservice.global.security.ExternalUserAuthenticationProvider;
+import com.pomingmatgo.authservice.global.security.SocialLoginSuccessHandler;
 import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
@@ -40,6 +41,7 @@ public class AuthServerConfig {
 
     private final AuthenticationProvider authenticationProvider;
     private final ClientRegistrationRepository clientRegistrationRepository;
+    private final SocialLoginSuccessHandler socialLoginSuccessHandler;
 
     @Value("${oauth.react.clientId}")
     private String clientId;
@@ -83,11 +85,11 @@ public class AuthServerConfig {
             .httpBasic(AbstractHttpConfigurer::disable)
             .sessionManagement(session -> session
                     .sessionCreationPolicy(SessionCreationPolicy.STATELESS))
-                     //.oauth2Login(oauth2 ->
-                     //oauth2.clientRegistrationRepository(clientRegistrationRepository)
-                             //.successHandler()
+                     .oauth2Login(oauth2 ->
+                     oauth2.clientRegistrationRepository(clientRegistrationRepository)
+                             .successHandler(socialLoginSuccessHandler)
                              //.authorizedClientService(authorizedClientService())
-                    // )
+                     )
             .authenticationProvider(authenticationProvider);
         return http.build();
     }

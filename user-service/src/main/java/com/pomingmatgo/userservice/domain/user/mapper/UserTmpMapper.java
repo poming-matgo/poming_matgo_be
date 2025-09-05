@@ -14,5 +14,6 @@ public interface UserTmpMapper {
 
     @Mapping(target = "authId", source = "randomString")
     @Mapping(target = "password", source = "encodedPassword")
+    @Mapping(target = "identifier", source = "request.email")
     UserTmp toUserTmp(RegisterRequest request, String randomString, String encodedPassword);
 }

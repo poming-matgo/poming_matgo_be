@@ -1,4 +1,4 @@
-package com.pomingmatgo.authservice.domain.login.service;
+package com.pomingmatgo.authservice.domain.service.login.service;
 
 import com.pomingmatgo.authservice.api.request.LoginInfo;
 import com.pomingmatgo.authservice.api.response.AuthCodeResponse;

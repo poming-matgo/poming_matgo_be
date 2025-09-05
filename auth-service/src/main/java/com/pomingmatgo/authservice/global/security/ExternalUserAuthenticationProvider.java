@@ -20,16 +20,16 @@ public class ExternalUserAuthenticationProvider implements AuthenticationProvide
 
     @Override
     public Authentication authenticate(Authentication authentication) {
-        String email = authentication.getName();
+        String identifier = authentication.getName();
         String password = authentication.getCredentials().toString();
 
         // 외부 User 서버로 인증 요청
-        String url = String.format("http://localhost:8082/login-process?email=%s&password=%s", email, password);
+        String url = String.format("http://localhost:8082/login-process?identifier=%s&password=%s", identifier, password);
 
         try {
             User user = restTemplate.getForObject(url, User.class);
             if (user != null)
-                return new UsernamePasswordAuthenticationToken(user.getEmail(), null, Collections.emptyList());
+                return new UsernamePasswordAuthenticationToken(user.getIdentifier(), null, Collections.emptyList());
             else
                 throw new BusinessException(ErrorCode.INVALID_ID_OR_PASSWORD);
 

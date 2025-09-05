@@ -1,7 +1,7 @@
 package com.pomingmatgo.userservice.domain.user.service;
 
-import com.pomingmatgo.userservice.api.user.request.OAuth2RegisterRequest;
 import com.pomingmatgo.userservice.api.user.request.RegisterRequest;
+import com.pomingmatgo.userservice.api.user.request.SocialRegisterRequest;
 import com.pomingmatgo.userservice.domain.user.User;
 import com.pomingmatgo.userservice.domain.user.mapper.UserMapper;
 import com.pomingmatgo.userservice.domain.user.mapper.UserTmpMapper;
@@ -51,14 +51,16 @@ public class RegisterService {
         userTmpRepository.save(userTmpMapper.toUserTmp(req, randomString, encodedPassword)); //메일 인증 전까지는 redis에 임시 저장
     }
 
-    public void oauth2Register(OAuth2RegisterRequest req) {
+    public User socialRegister(SocialRegisterRequest req) {
+        String identifier = req.getIdentifier();
         User user = User.builder()
-                .email(req.getLoginType().name() + " "+req.getOauth2Id())
-                .nickname(req.getNickname())
+                .identifier(identifier)
+                .password(null)
+                .nickname(identifier.substring(0, 10))
                 .loginType(req.getLoginType())
                 .signupDate(LocalDateTime.now())
                 .build();
-        userRepository.save(user);
+        return userRepository.save(user);
     }
 
     private MimeMessage createMessage(String email, String randomString) {
@@ -91,7 +93,7 @@ public class RegisterService {
 
     //이메일 중복 검사
     public boolean isEmailDuplicate(String email) {
-        return userRepository.existsByEmail(email) || userTmpRepository.existsByEmail(email);
+        return userRepository.existsByIdentifier(email) || userTmpRepository.existsByEmail(email);
     }
 
     //닉네임 중복 검사
