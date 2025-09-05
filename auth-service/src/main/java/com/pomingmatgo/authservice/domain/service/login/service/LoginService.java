@@ -4,6 +4,7 @@ import com.pomingmatgo.authservice.api.request.LoginInfo;
 import com.pomingmatgo.authservice.api.response.AuthCodeResponse;
 import com.pomingmatgo.authservice.global.security.PKCEUtil;
 import lombok.RequiredArgsConstructor;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.security.authentication.AuthenticationProvider;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.Authentication;
@@ -28,6 +29,9 @@ public class LoginService {
     private final AuthenticationProvider authenticationProvider;
     private final RegisteredClientRepository registeredClientRepository;
 
+    @Value("${oauth.react.authorization-uri}")
+    private String authorizationUri;
+
     public AuthCodeResponse authenticate(LoginInfo loginInfo) {
 
         Authentication authentication = new UsernamePasswordAuthenticationToken(
@@ -43,7 +47,7 @@ public class LoginService {
         String codeChallenge = PKCEUtil.generateCodeChallenge(loginInfo.getCodeVerifier());
         OAuth2AuthorizationRequest authorizationRequest = OAuth2AuthorizationRequest.authorizationCode()
                 .clientId(registeredClient.getClientId())
-                .authorizationUri("/oauth2/authorize")
+                .authorizationUri(authorizationUri)
                 .redirectUri(registeredClient.getRedirectUris().stream().findFirst().get())
                 .scopes(registeredClient.getScopes())
                 .state(UUID.randomUUID().toString())

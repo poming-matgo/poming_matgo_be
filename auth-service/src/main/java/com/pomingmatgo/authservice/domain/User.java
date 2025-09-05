@@ -8,7 +8,7 @@ import lombok.Setter;
 @Setter
 @Builder
 public class User {
-    private long id;
+    private Long id;
     private String identifier;
     private LoginType loginType;
 }

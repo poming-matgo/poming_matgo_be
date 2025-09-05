@@ -1,14 +1,12 @@
 package com.pomingmatgo.authservice.global.config;
 
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.context.annotation.Bean;
-import org.springframework.context.annotation.Configuration;
 import org.springframework.security.oauth2.client.registration.ClientRegistration;
 import org.springframework.security.oauth2.client.registration.ClientRegistrationRepository;
 import org.springframework.security.oauth2.client.registration.InMemoryClientRegistrationRepository;
 import org.springframework.security.oauth2.core.AuthorizationGrantType;
 
-@Configuration
+//@Configuration
 public class SocialLoginConfig {
 
     @Value("${spring.security.oauth2.client.registration.naver.client-id}")
@@ -35,7 +33,7 @@ public class SocialLoginConfig {
     @Value("${spring.security.oauth2.client.provider.naver.user-name-attribute}")
     private String naverUserNameAttribute;
 
-    @Bean
+    //@Bean
     public ClientRegistrationRepository clientRegistrationRepository() {
         ClientRegistration naverRegistration = ClientRegistration.withRegistrationId("naver")
                 .clientId(naverClientId)

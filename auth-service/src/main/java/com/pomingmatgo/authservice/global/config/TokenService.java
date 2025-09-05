@@ -9,8 +9,8 @@ import org.springframework.stereotype.Service;
 
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
-import java.util.Collections;
 import java.util.Map;
+import java.util.UUID;
 import java.util.function.Consumer;
 
 @Service
@@ -36,8 +36,10 @@ public class TokenService {
         JwtClaimsSet claims = JwtClaimsSet.builder()
                 .issuer("pomingMatgo") // 토큰 발급자
                 .issuedAt(now)
+                .notBefore(now)
                 .expiresAt(now.plus(30, ChronoUnit.DAYS))
                 .subject(String.valueOf(user.getId()))
+                .id(UUID.randomUUID().toString())
                 .build();
 
         return jwtEncoder.encode(JwtEncoderParameters.from(claims)).getTokenValue();
@@ -47,7 +49,7 @@ public class TokenService {
     private Consumer<Map<String, Object>> createClaims(User user) {
         return claims -> {
             //claims.put("identifier", user.getIdentifier());
-            claims.put("role", Collections.emptySet());
+            claims.put("role", "USER"); //임시
         };
     }
 }

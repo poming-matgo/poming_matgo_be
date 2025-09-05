@@ -43,8 +43,11 @@ public class CustomOauth2UserService implements OAuth2UserService<OAuth2UserRequ
                 ));
 
         attributes.put("user", user);
-
-        return new DefaultOAuth2User(Collections.emptyList(), attributes, "response");
+        return switch (registrationId) {
+            case "naver" -> new DefaultOAuth2User(Collections.emptyList(), attributes, "response");
+            case "google" -> new DefaultOAuth2User(Collections.emptyList(), attributes, "sub");
+            default -> null;
+        };
     }
 
     private LoginType getSocialType(String registrationId) {
