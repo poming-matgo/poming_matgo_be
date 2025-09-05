@@ -12,6 +12,7 @@ import org.springframework.security.oauth2.core.user.OAuth2User;
 import org.springframework.stereotype.Service;
 
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.Map;
 
 @Service
@@ -26,20 +27,22 @@ public class CustomOauth2UserService implements OAuth2UserService<OAuth2UserRequ
         OAuth2User oAuth2User = delegate.loadUser(userRequest);
         String registrationId = userRequest.getClientRegistration().getRegistrationId();
         LoginType loginType = getSocialType(registrationId);
-        Map<String, Object> attributes = oAuth2User.getAttributes();
+        Map<String, Object> attributes = new HashMap<>(oAuth2User.getAttributes());
         final String providerId = switch (registrationId) {
             case "naver" -> (String) ((Map<String, Object>) attributes.get("response")).get("id");
             case "google" -> (String) attributes.get("sub");
             default -> null; // 또는 적절한 기본값 처리
         };
 
-        userRepository.findByIdentifier(providerId)
+        User user = userRepository.findByIdentifier(providerId)
                 .orElseGet(() -> userRepository.save(
                         User.builder()
                                 .identifier(providerId)
                                 .loginType(loginType)
                                 .build()
                 ));
+
+        attributes.put("user", user);
 
         return new DefaultOAuth2User(Collections.emptyList(), attributes, "response");
     }

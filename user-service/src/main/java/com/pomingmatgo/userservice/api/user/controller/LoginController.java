@@ -1,7 +1,7 @@
 package com.pomingmatgo.userservice.api.user.controller;
 
 import com.pomingmatgo.userservice.api.user.request.LoginInfo;
-import com.pomingmatgo.userservice.domain.user.AuthUser;
+import com.pomingmatgo.userservice.domain.user.User;
 import com.pomingmatgo.userservice.domain.user.service.LoginService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.*;
@@ -13,7 +13,8 @@ import org.springframework.web.bind.annotation.*;
 public class LoginController {
     private final LoginService loginService;
     @GetMapping
-    public AuthUser isLogin(LoginInfo loginInfo) {
-        return loginService.isLogin(loginInfo).orElse(null);
+    public User isLogin(LoginInfo loginInfo) {
+        User user = loginService.isLogin(loginInfo).orElse(null);
+        return user;
     }
 }

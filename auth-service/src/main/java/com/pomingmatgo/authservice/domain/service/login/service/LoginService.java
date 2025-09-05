@@ -44,7 +44,7 @@ public class LoginService {
         OAuth2AuthorizationRequest authorizationRequest = OAuth2AuthorizationRequest.authorizationCode()
                 .clientId(registeredClient.getClientId())
                 .authorizationUri("/oauth2/authorize")
-                .redirectUri("http://localhost:8082/callback")
+                .redirectUri(registeredClient.getRedirectUris().stream().findFirst().get())
                 .scopes(registeredClient.getScopes())
                 .state(UUID.randomUUID().toString())
                 .additionalParameters(params -> {
@@ -53,6 +53,9 @@ public class LoginService {
                 })
                 .build();
 
+        //User user = (User)authResult.getPrincipal();
+        //String sub = String.valueOf(user.getId());
+       // String identifier = user.getIdentifier();
 // OAuth2Authorization 객체 생성 시 속성으로 추가
         OAuth2Authorization authorization = OAuth2Authorization.withRegisteredClient(registeredClient)
                 .principalName(authResult.getName())

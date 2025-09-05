@@ -11,6 +11,8 @@ import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestClientException;
 import org.springframework.web.client.RestTemplate;
 
+import java.net.URLEncoder;
+import java.nio.charset.StandardCharsets;
 import java.util.Collections;
 
 
@@ -24,12 +26,17 @@ public class ExternalUserAuthenticationProvider implements AuthenticationProvide
         String password = authentication.getCredentials().toString();
 
         // 외부 User 서버로 인증 요청
-        String url = String.format("http://localhost:8082/login-process?identifier=%s&password=%s", identifier, password);
+        // todo: userRepository로 책임 분리
+        String url = String.format(
+                "http://localhost:8082/login-process?identifier=%s&password=%s",
+                URLEncoder.encode(identifier, StandardCharsets.UTF_8),
+                URLEncoder.encode(password, StandardCharsets.UTF_8)
+        );
 
         try {
             User user = restTemplate.getForObject(url, User.class);
             if (user != null)
-                return new UsernamePasswordAuthenticationToken(user.getIdentifier(), null, Collections.emptyList());
+                return new UsernamePasswordAuthenticationToken(user.getId(), null, Collections.emptyList());
             else
                 throw new BusinessException(ErrorCode.INVALID_ID_OR_PASSWORD);
 

@@ -7,7 +7,6 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.core.annotation.Order;
-import org.springframework.http.MediaType;
 import org.springframework.security.authentication.AuthenticationProvider;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
@@ -27,8 +26,6 @@ import org.springframework.security.oauth2.server.authorization.config.annotatio
 import org.springframework.security.oauth2.server.authorization.settings.AuthorizationServerSettings;
 import org.springframework.security.oauth2.server.authorization.settings.ClientSettings;
 import org.springframework.security.web.SecurityFilterChain;
-import org.springframework.security.web.authentication.LoginUrlAuthenticationEntryPoint;
-import org.springframework.security.web.util.matcher.MediaTypeRequestMatcher;
 
 import java.util.UUID;
 
@@ -61,10 +58,10 @@ public class AuthServerConfig {
     public SecurityFilterChain authorizationServerSecurityFilterChain(HttpSecurity http)
             throws Exception {
         OAuth2AuthorizationServerConfiguration.applyDefaultSecurity(http);
-        http.exceptionHandling(exceptions -> exceptions.defaultAuthenticationEntryPointFor( // 인가 실패에 대한 처리를 정의
-                new LoginUrlAuthenticationEntryPoint("/custom-login"),
-                new MediaTypeRequestMatcher(MediaType.TEXT_HTML)
-        ));
+        //http.exceptionHandling(exceptions -> exceptions.defaultAuthenticationEntryPointFor( // 인가 실패에 대한 처리를 정의
+                //new LoginUrlAuthenticationEntryPoint("/custom-login"),
+                //new MediaTypeRequestMatcher(MediaType.TEXT_HTML)
+        //));
         http.oauth2ResourceServer(resourceServer -> resourceServer.jwt(withDefaults()));
         return http.build();
     }

@@ -13,7 +13,7 @@ import java.util.Optional;
 public class UserRepository {
     private final RestTemplate restTemplate = new RestTemplate();
     public Optional<User> findByIdentifier(String identifier) {
-        String url = String.format("http://localhost:8082/login-process?identifier=%s&password=%s", identifier, null);
+        String url = String.format("http://localhost:8082/login-process?identifier=%s&password=%s", identifier, "");
 
         try {
             User user = restTemplate.getForObject(url, User.class);
