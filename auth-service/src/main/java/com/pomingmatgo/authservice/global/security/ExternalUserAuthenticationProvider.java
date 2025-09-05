@@ -4,6 +4,7 @@ import com.pomingmatgo.authservice.domain.User;
 import com.pomingmatgo.authservice.global.exception.BusinessException;
 import com.pomingmatgo.authservice.global.exception.ErrorCode;
 import com.pomingmatgo.authservice.global.exception.SystemException;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.security.authentication.AuthenticationProvider;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.Authentication;
@@ -19,6 +20,8 @@ import java.util.Collections;
 @Component
 public class ExternalUserAuthenticationProvider implements AuthenticationProvider {
     private final RestTemplate restTemplate = new RestTemplate();
+    @Value("${user.service.address}")
+    private String userServiceAddress;
 
     @Override
     public Authentication authenticate(Authentication authentication) {
@@ -28,7 +31,7 @@ public class ExternalUserAuthenticationProvider implements AuthenticationProvide
         // 외부 User 서버로 인증 요청
         // todo: userRepository로 책임 분리
         String url = String.format(
-                "http://localhost:8082/login-process?identifier=%s&password=%s",
+                userServiceAddress+"login-process?identifier=%s&password=%s",
                 URLEncoder.encode(identifier, StandardCharsets.UTF_8),
                 URLEncoder.encode(password, StandardCharsets.UTF_8)
         );
