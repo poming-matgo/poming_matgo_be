@@ -14,7 +14,6 @@ import org.springframework.web.bind.annotation.*;
 @RequestMapping("/custom-login")
 public class LoginController {
     private final LoginService loginService;
-    private final SocialLoginService socialLoginService;
     @PostMapping
     public ApiResponseDto<AuthCodeResponse> handleLogin(@RequestBody LoginInfo loginInfo) {
         AuthCodeResponse authorizationCode = loginService.authenticate(loginInfo);
