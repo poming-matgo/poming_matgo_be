@@ -31,7 +31,7 @@ public class ExternalUserAuthenticationProvider implements AuthenticationProvide
         // 외부 User 서버로 인증 요청
         // todo: userRepository로 책임 분리
         String url = String.format(
-                userServiceAddress+"login-process?identifier=%s&password=%s",
+                userServiceAddress+"/login-process?identifier=%s&password=%s",
                 URLEncoder.encode(identifier, StandardCharsets.UTF_8),
                 URLEncoder.encode(password, StandardCharsets.UTF_8)
         );
