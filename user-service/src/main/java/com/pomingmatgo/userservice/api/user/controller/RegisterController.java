@@ -1,8 +1,6 @@
 package com.pomingmatgo.userservice.api.user.controller;
 
 import com.pomingmatgo.userservice.api.user.request.RegisterRequest;
-import com.pomingmatgo.userservice.api.user.request.SocialRegisterRequest;
-import com.pomingmatgo.userservice.domain.user.User;
 import com.pomingmatgo.userservice.domain.user.service.RegisterService;
 import com.pomingmatgo.userservice.global.ApiResponseDto;
 import io.swagger.v3.oas.annotations.Operation;
@@ -152,12 +150,6 @@ public class RegisterController {
             return new ApiResponseDto<>(HttpStatus.OK.value(), "회원가입이 완료됐습니다.");
         else
             return new ApiResponseDto<>(HttpStatus.BAD_REQUEST.value(), "유효하지 않은 링크입니다.");
-    }
-
-    //인증 서비스에서 호출하는 함수
-    @PostMapping("/social-signup")
-    public User oauth2Signup(@RequestBody SocialRegisterRequest req) {
-        return registerService.socialRegister(req);
     }
 
 }
