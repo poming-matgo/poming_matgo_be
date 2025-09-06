@@ -12,7 +12,7 @@ import org.springframework.web.bind.annotation.*;
 @RequiredArgsConstructor
 @Hidden
 @RequestMapping("/login-process")
-public class LoginController {
+public class internalLoginController {
     private final LoginService loginService;
     @GetMapping
     public User isLogin(LoginInfo loginInfo) {
