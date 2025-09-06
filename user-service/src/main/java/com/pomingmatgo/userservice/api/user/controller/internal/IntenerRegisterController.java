@@ -14,7 +14,7 @@ import org.springframework.web.bind.annotation.RestController;
 @RestController
 @RequiredArgsConstructor
 @Hidden
-public class RegisterController {
+public class IntenerRegisterController {
     private final RegisterService registerService;
 
     @PostMapping("/social-signup")
