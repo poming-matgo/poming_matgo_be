@@ -1,5 +1,5 @@
 package com.pomingmatgo.userservice.domain.user;
 
-public enum Status {
-    PENDING, ACTIVE;
+public enum SocialType {
+    NAVER, GOOGLE;
 }

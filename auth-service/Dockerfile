@@ -8,5 +8,5 @@ FROM openjdk:17-jdk-alpine
 ARG JAR_FILE=build/libs/*.jar
 COPY --from=builder /app/${JAR_FILE} app.jar
 
-EXPOSE 8082
-ENTRYPOINT ["java", "-Dspring.profiles.active=prod", "-jar", "/app.jar"]
+EXPOSE 8083
+ENTRYPOINT ["java", "-jar", "/app.jar"]

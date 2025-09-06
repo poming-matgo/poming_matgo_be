@@ -3,7 +3,6 @@ package com.pomingmatgo.userservice.api.user.controller;
 import com.pomingmatgo.userservice.api.user.request.RegisterRequest;
 import com.pomingmatgo.userservice.domain.user.service.RegisterService;
 import com.pomingmatgo.userservice.global.ApiResponseDto;
-import com.pomingmatgo.userservice.global.exception.dto.ErrorResponseDto;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.media.Content;
 import io.swagger.v3.oas.annotations.media.ExampleObject;

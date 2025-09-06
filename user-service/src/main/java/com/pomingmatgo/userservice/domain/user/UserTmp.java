@@ -11,7 +11,7 @@ import org.springframework.data.redis.core.RedisHash;
 @Setter
 @NoArgsConstructor
 public class UserTmp {
-    private String email;
+    private String identifier;
     private String password;
     private String nickname;
     @Id

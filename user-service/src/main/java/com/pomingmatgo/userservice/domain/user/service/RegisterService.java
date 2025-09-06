@@ -1,6 +1,8 @@
 package com.pomingmatgo.userservice.domain.user.service;
 
 import com.pomingmatgo.userservice.api.user.request.RegisterRequest;
+import com.pomingmatgo.userservice.api.user.request.SocialRegisterRequest;
+import com.pomingmatgo.userservice.domain.user.User;
 import com.pomingmatgo.userservice.domain.user.mapper.UserMapper;
 import com.pomingmatgo.userservice.domain.user.mapper.UserTmpMapper;
 import com.pomingmatgo.userservice.domain.user.repository.UserRepository;
@@ -21,6 +23,7 @@ import org.springframework.stereotype.Service;
 import jakarta.mail.internet.MimeMessage;
 
 import java.io.UnsupportedEncodingException;
+import java.time.LocalDateTime;
 
 import static com.pomingmatgo.userservice.global.exception.ErrorCode.EMAIL_SEND_FAILED;
 import static com.pomingmatgo.userservice.global.exception.ErrorCode.SYSTEM_ERROR;
@@ -46,6 +49,18 @@ public class RegisterService {
         String randomString = StringUtil.generateString(20);
         sendAuthMessage(req.getEmail(), randomString);
         userTmpRepository.save(userTmpMapper.toUserTmp(req, randomString, encodedPassword)); //메일 인증 전까지는 redis에 임시 저장
+    }
+
+    public User socialRegister(SocialRegisterRequest req) {
+        String identifier = req.getIdentifier();
+        User user = User.builder()
+                .identifier(identifier)
+                .password(null)
+                .nickname(identifier.substring(0, 10))
+                .loginType(req.getLoginType())
+                .signupDate(LocalDateTime.now())
+                .build();
+        return userRepository.save(user);
     }
 
     private MimeMessage createMessage(String email, String randomString) {
@@ -78,7 +93,7 @@ public class RegisterService {
 
     //이메일 중복 검사
     public boolean isEmailDuplicate(String email) {
-        return userRepository.existsByEmail(email) || userTmpRepository.existsByEmail(email);
+        return userRepository.existsByIdentifier(email) || userTmpRepository.existsByIdentifier(email);
     }
 
     //닉네임 중복 검사
