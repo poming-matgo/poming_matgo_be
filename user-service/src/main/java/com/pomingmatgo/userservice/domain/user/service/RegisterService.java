@@ -93,7 +93,7 @@ public class RegisterService {
 
     //이메일 중복 검사
     public boolean isEmailDuplicate(String email) {
-        return userRepository.existsByIdentifier(email) || userTmpRepository.existsByEmail(email);
+        return userRepository.existsByIdentifier(email) || userTmpRepository.existsByIdentifier(email);
     }
 
     //닉네임 중복 검사
