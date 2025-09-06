@@ -35,5 +35,13 @@ public class GlobalExceptionHandler {
                 .status(e.getErrorCode().getStatusCode())
                 .body(errorResponse);
     }
+
+    @ExceptionHandler(Exception.class)
+    public ResponseEntity<ErrorResponseDto> handleException(Exception e) {
+        ErrorResponseDto errorResponse = new ErrorResponseDto(ErrorCode.SYSTEM_ERROR);
+        return ResponseEntity
+                .status(errorResponse.getHttpStatus())
+                .body(errorResponse);
+    }
 }
 
