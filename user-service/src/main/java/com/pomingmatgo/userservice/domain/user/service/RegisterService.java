@@ -15,6 +15,7 @@ import jakarta.mail.Message;
 import jakarta.mail.MessagingException;
 import jakarta.mail.internet.InternetAddress;
 import lombok.RequiredArgsConstructor;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.mail.MailException;
 import org.springframework.mail.javamail.JavaMailSender;
 import org.springframework.security.crypto.password.PasswordEncoder;
@@ -37,6 +38,8 @@ public class RegisterService {
     private final UserTmpRepository userTmpRepository;
     private final JavaMailSender mailSender;
     private final PasswordEncoder passwordEncoder;
+    @Value("user.service.address")
+    private String userServiceAddress;
 
     public void register(RegisterRequest req) {
         if(isEmailDuplicate(req.getEmail()))
@@ -65,7 +68,10 @@ public class RegisterService {
 
     private MimeMessage createMessage(String email, String randomString) {
         MimeMessage message = mailSender.createMimeMessage();
-        String sendMsg = String.format("<p>아래 링크를 클릭하여 회원가입을 완료하시오. 이 링크는 10분간 유효합니다.<br>localhost:8082/user/register/auth?code=%s</p>", randomString);
+        String sendMsg = String.format(
+                "<p>아래 링크를 클릭하여 회원가입을 완료하시오. 이 링크는 10분간 유효합니다.<br>" +
+                        "<a href='%s/user/register/auth?code=%s'>회원가입 링크</a></p>",
+                userServiceAddress, randomString);
         try {
             message.setRecipients(Message.RecipientType.TO, email);
             message.setSubject("포밍맞고 인증 메일 입니다.");
