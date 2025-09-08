@@ -34,7 +34,7 @@ public class GameWebSocketHandler implements WebSocketHandler {
     }
 
     private Mono<Void> handleEvent(RequestEvent event, WebSocketSession session) {
-        switch (event.getType()) {
+        switch (/*todo: 작성 필요*/"AAA") {
             case "SET_LEAD_PLAYER":
                 prePlayService.setLeadPlayer();
                 return Mono.empty();

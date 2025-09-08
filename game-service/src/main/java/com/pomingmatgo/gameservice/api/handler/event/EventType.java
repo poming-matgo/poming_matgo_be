@@ -1,13 +1,11 @@
 package com.pomingmatgo.gameservice.api.handler.event;
 
-
 import lombok.Getter;
 import lombok.Setter;
 
 @Getter
 @Setter
-public class RequestEvent<T> {
-    private EventType eventType;
-    private long userId;
-    private T data;
+public class EventType {
+    private String type;
+    private String subType;
 }
