@@ -1,6 +1,7 @@
 package com.example.gameservice.api.handler;
 
 import com.example.gameservice.api.handler.event.RequestEvent;
+import com.example.gameservice.domain.service.matgo.PrePlayService;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.stereotype.Component;
@@ -12,12 +13,13 @@ import reactor.core.publisher.Mono;
 @Component
 public class GameWebSocketHandler implements WebSocketHandler {
     private final ObjectMapper objectMapper = new ObjectMapper();
+    private final PrePlayService prePlayService = new PrePlayService();
     @Override
     public Mono<Void> handle(WebSocketSession session) {
         return session.receive()
                 .flatMap(message -> handleMessage(message, session))
                 .onErrorResume(e -> {
-                    return Mono.empty();
+                    return Mono.empty(); //todo: error handling
                 })
                 .then();
     }
@@ -34,6 +36,7 @@ public class GameWebSocketHandler implements WebSocketHandler {
     private Mono<Void> handleEvent(RequestEvent event, WebSocketSession session) {
         switch (event.getType()) {
             case "SET_LEAD_PLAYER":
+                prePlayService.setLeadPlayer();
                 return Mono.empty();
             default:
                 return Mono.empty();
