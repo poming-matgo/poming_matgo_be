@@ -1,4 +1,4 @@
-package com.example.gameservice.domain.service.matgo;
+package com.pomingmatgo.gameservice.domain.service.matgo;
 
 import org.springframework.stereotype.Service;
 

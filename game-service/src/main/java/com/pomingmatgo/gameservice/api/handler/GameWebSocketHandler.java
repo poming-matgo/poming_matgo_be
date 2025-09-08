@@ -1,7 +1,7 @@
-package com.example.gameservice.api.handler;
+package com.pomingmatgo.gameservice.api.handler;
 
-import com.example.gameservice.api.handler.event.RequestEvent;
-import com.example.gameservice.domain.service.matgo.PrePlayService;
+import com.pomingmatgo.gameservice.api.handler.event.RequestEvent;
+import com.pomingmatgo.gameservice.domain.service.matgo.PrePlayService;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.stereotype.Component;

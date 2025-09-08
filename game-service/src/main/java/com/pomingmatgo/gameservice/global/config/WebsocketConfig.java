@@ -1,4 +1,4 @@
-package com.example.gameservice.global.config;
+package com.pomingmatgo.gameservice.global.config;
 
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;

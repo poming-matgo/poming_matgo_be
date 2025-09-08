@@ -1,4 +1,4 @@
-package com.example.gameservice.api.handler.event;
+package com.pomingmatgo.gameservice.api.handler.event;
 
 public class RequestEvent<T> {
     private String type;
