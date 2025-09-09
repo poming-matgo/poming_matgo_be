@@ -3,6 +3,7 @@ package com.pomingmatgo.gameservice.domain;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.Setter;
+import org.springframework.data.annotation.Id;
 import org.springframework.data.redis.core.RedisHash;
 
 import java.util.List;
@@ -12,6 +13,7 @@ import java.util.List;
 @Setter
 @NoArgsConstructor
 public class GameState {
+    @Id
     long roomId;
     long player1Id;
     long player2Id;
