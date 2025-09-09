@@ -39,7 +39,7 @@ public class GameWebSocketHandler implements WebSocketHandler {
     }
 
     private Mono<Void> handleEvent(RequestEvent event, WebSocketSession session) {
-        switch (/*todo: 작성 필요*/"AAA") {
+        switch (event.getEventType().getType()) {
             case "CREATE_ROOM":
                 long roomId = roomService.createRoom();
                 session.getAttributes().put("roomId", roomId);
