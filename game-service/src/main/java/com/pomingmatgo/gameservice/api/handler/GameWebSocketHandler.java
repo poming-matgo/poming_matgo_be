@@ -30,12 +30,9 @@ public class GameWebSocketHandler implements WebSocketHandler {
     }
 
     private Mono<Void> handleMessage(WebSocketMessage message, WebSocketSession session) {
-        try {
-            RequestEvent event = objectMapper.readValue(message.getPayloadAsText(), RequestEvent.class);
-            return handleEvent(event, session);
-        } catch (JsonProcessingException e) {
-            return Mono.empty();
-        }
+        return Mono.fromCallable(() -> objectMapper.readValue(message.getPayloadAsText(), RequestEvent.class))
+                .flatMap(event -> handleEvent(event, session))
+                .onErrorResume(JsonProcessingException.class, e -> Mono.empty());
     }
 
     private Mono<Void> handleEvent(RequestEvent event, WebSocketSession session) {
