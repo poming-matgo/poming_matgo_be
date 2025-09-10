@@ -1,6 +1,5 @@
 package com.pomingmatgo.gameservice.global.config;
 
-import com.pomingmatgo.gameservice.domain.GameState;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.EnableAutoConfiguration;
 import org.springframework.boot.autoconfigure.data.redis.RedisAutoConfiguration;
@@ -30,9 +29,7 @@ public class RedisConfig {
     }
 
     @Bean
-    public ReactiveRedisOperations<String, Object> redisTemplate() {
-        ReactiveRedisConnectionFactory rrcf = redisConnectionFactory();
-
+    public ReactiveRedisOperations<String, Object> reactiveRedisTemplate(ReactiveRedisConnectionFactory redisConnectionFactory) {
         Jackson2JsonRedisSerializer<Object> serializer = new Jackson2JsonRedisSerializer<>(Object.class);
 
         RedisSerializationContext.RedisSerializationContextBuilder<String, Object> builder = RedisSerializationContext
@@ -41,6 +38,6 @@ public class RedisConfig {
         RedisSerializationContext<String, Object> context = builder.value(serializer).hashValue(serializer)
                 .hashKey(serializer).build();
 
-        return new ReactiveRedisTemplate<>(rrcf, context);
+        return new ReactiveRedisTemplate<>(redisConnectionFactory, context);
     }
 }

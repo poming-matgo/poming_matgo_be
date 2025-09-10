@@ -1,6 +1,7 @@
 package com.pomingmatgo.gameservice.global.config;
 
 import com.pomingmatgo.gameservice.api.handler.GameWebSocketHandler;
+import lombok.RequiredArgsConstructor;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.web.reactive.HandlerMapping;
@@ -13,12 +14,14 @@ import java.util.HashMap;
 import java.util.Map;
 
 @Configuration
+@RequiredArgsConstructor
 public class WebsocketConfig {
+    private final GameWebSocketHandler gameWebSocketHandler;
 
     @Bean
     public HandlerMapping handlerMapping() {
         Map<String, WebSocketHandler> map = new HashMap<>();
-        map.put("/gostop", new GameWebSocketHandler());
+        map.put("/gostop", gameWebSocketHandler);
 
         int order = -1;
         return new SimpleUrlHandlerMapping(map, order);
