@@ -27,6 +27,7 @@ dependencies {
     implementation 'org.springframework.boot:spring-boot-starter-mail:3.3.5'
     implementation 'org.springframework.boot:spring-boot-starter-data-redis'
     implementation 'org.testng:testng:7.1.0'
+
     testImplementation 'org.springframework.boot:spring-boot-starter-test'
     runtimeOnly 'com.mysql:mysql-connector-j'
     compileOnly 'org.projectlombok:lombok:1.18.30'

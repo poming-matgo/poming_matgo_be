@@ -10,6 +10,7 @@ import org.springframework.stereotype.Component;
 import org.springframework.web.reactive.socket.WebSocketHandler;
 import org.springframework.web.reactive.socket.WebSocketMessage;
 import org.springframework.web.reactive.socket.WebSocketSession;
+import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 
 import java.util.concurrent.ConcurrentHashMap;
@@ -23,27 +24,36 @@ public class GameWebSocketHandler implements WebSocketHandler {
     private final ConcurrentHashMap<String, Long> userRoomMap = new ConcurrentHashMap<>();
     @Override
     public Mono<Void> handle(WebSocketSession session) {
-        return session.receive()
-                .flatMap(message -> handleMessage(message, session))
-                .onErrorResume(e -> Mono.empty()) //todo: error handling
-                .then();
+        Flux<WebSocketMessage> receiver = session.receive()
+                .flatMap(message -> handleMessage(message, session)
+                        .map(success -> success ? "Success" : "Failure")) // Boolean -> String 변환
+                .onErrorResume(e -> Mono.just("Error" + e.getMessage())) // Error 메시지 처리
+                .map(session::textMessage);
+
+        return session.send(receiver);
     }
 
-    private Mono<Long> handleMessage(WebSocketMessage message, WebSocketSession session) {
+    private Mono<Boolean> handleMessage(WebSocketMessage message, WebSocketSession session) {
         return Mono.fromCallable(() -> objectMapper.readValue(message.getPayloadAsText(), RequestEvent.class))
                 .flatMap(event -> handleEvent(event, session))
                 .onErrorResume(JsonProcessingException.class, e -> Mono.empty());
     }
 
-    private Mono<Long> handleEvent(RequestEvent event, WebSocketSession session) {
+    private Mono<Boolean> handleEvent(RequestEvent event, WebSocketSession session) {
         switch (event.getEventType().getSubType()) {
-            case "JOIN_ROOM":
-                return roomService.joinRoom(event.getUserId())
+            case "JOIN_ROOM": //todo: 일반 컨트롤러에서 담당하게 변경할거임
+                return roomService.joinRoom(event.getUserId(), 2)
                         .flatMap(roomId -> {
                             session.getAttributes().put("roomId", roomId);
-                            userRoomMap.put(session.getId(), roomId);
-                            return Mono.just(roomId);
+                            return Mono.just(true);
+                        })
+                        .onErrorResume(e -> {
+                            session.send(Mono.just(session.textMessage("Error: " + e.getMessage()))).subscribe();
+                            return Mono.just(false);
                         });
+            case "CREATE_ROOM": //todo: 일반 컨트롤러에서 담당하게 변경할거임
+                return roomService.createRoom(2)
+                        .then(Mono.just(true));
             case "CONNECT_USER":
                 prePlayService.connectUser(event.getUserId());
                 return Mono.empty();
@@ -51,7 +61,7 @@ public class GameWebSocketHandler implements WebSocketHandler {
                 prePlayService.setLeadPlayer();
                 return Mono.empty();
             default:
-                return Mono.empty();
+                return Mono.just(false);
         }
     }
 }

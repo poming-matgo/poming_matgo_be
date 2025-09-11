@@ -1,5 +1,4 @@
 package com.pomingmatgo.gameservice.domain.repository;
-
 import com.pomingmatgo.gameservice.domain.GameState;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.redis.core.ReactiveRedisOperations;
@@ -9,38 +8,34 @@ import reactor.core.publisher.Mono;
 @Repository
 @RequiredArgsConstructor
 public class GameStateRepository {
-    private final ReactiveRedisOperations<String, Object> redisOps;
+    private final ReactiveRedisOperations<String, GameState> redisOps;
 
     private static final String GAME_STATE_KEY_PREFIX = "gameState:";
-    private static final String GAME_STATE_ID_KEY = "gameState:roomId";
+
+    public Mono<GameState> findById(long roomId) {
+        String redisKey = GAME_STATE_KEY_PREFIX + roomId;
+
+        return redisOps.opsForValue().get(redisKey);
+    }
+
+    public Mono<Long> create(GameState gameState) {
+        String redisKey = GAME_STATE_KEY_PREFIX + gameState.getRoomId();
+        return checkKeyExists(redisKey)
+                .flatMap(exists -> exists ? Mono.error(new IllegalStateException()) : saveState(gameState, redisKey))
+                .flatMap(saved -> saved ? Mono.just(gameState.getRoomId()) : Mono.error(new IllegalStateException()));
+    }
 
     public Mono<Long> save(GameState gameState) {
-        if (gameState.getRoomId() == 0) {
-            return generateNewId()
-                    .flatMap(newId -> {
-                        gameState.setRoomId(newId);
-                        return saveGameState(gameState);
-                    });
-        } else {
-            return saveGameState(gameState);
-        }
+        String redisKey = GAME_STATE_KEY_PREFIX + gameState.getRoomId();
+        return saveState(gameState, redisKey)
+                .flatMap(saved -> saved ? Mono.just(gameState.getRoomId()) : Mono.error(new IllegalStateException()));
     }
 
-    private Mono<Long> generateNewId() {
-        return redisOps.opsForValue()
-                .increment(GAME_STATE_ID_KEY)
-                .switchIfEmpty(Mono.error(new IllegalStateException()));
+    private Mono<Boolean> checkKeyExists(String redisKey) {
+        return redisOps.hasKey(redisKey);
     }
 
-    private Mono<Long> saveGameState(GameState gameState) {
-        return redisOps.opsForValue()
-                .set(GAME_STATE_KEY_PREFIX + gameState.getRoomId(), gameState)
-                .flatMap(success -> {
-                    if (success) {
-                        return Mono.just(gameState.getRoomId());
-                    } else {
-                        return Mono.error(new IllegalStateException());
-                    }
-                });
+    public Mono<Boolean> saveState(GameState gameState, String redisKey) {
+        return redisOps.opsForValue().set(redisKey, gameState);
     }
 }
