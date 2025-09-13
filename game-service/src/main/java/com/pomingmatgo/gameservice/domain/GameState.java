@@ -17,8 +17,8 @@ public class GameState implements Serializable {
     private static final long serialVersionUID = 1L;
     @Id
     Long roomId;
-    long player1Id;
-    long player2Id;
+    Long player1Id;
+    Long player2Id;
     int round;
     int currentTurn;
     List<Integer> cardStack;

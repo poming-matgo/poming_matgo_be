@@ -28,23 +28,23 @@ public class RoomService {
     }
 
     private boolean isRoomFull(GameState gameState) {
-        return gameState.getPlayer1Id() != 0 && gameState.getPlayer2Id() != 0;
+        return gameState.getPlayer1Id() != null && gameState.getPlayer2Id() != null;
     }
 
-    private boolean isUserAlreadyInRoom(GameState gameState, long userId) {
-        return userId == gameState.getPlayer1Id() || userId == gameState.getPlayer2Id();
+    private boolean isUserAlreadyInRoom(GameState gameState, Long userId) {
+        return userId.equals(gameState.getPlayer1Id()) || userId.equals(gameState.getPlayer2Id());
     }
 
     private Mono<Void> updateGameState(GameState gameState, long userId) {
-        if (gameState.getPlayer1Id() == 0) {
+        if (gameState.getPlayer1Id() == null) {
             gameState.setPlayer1Id(userId);
-        } else if (gameState.getPlayer2Id() == 0) {
+        } else if (gameState.getPlayer2Id() == null) {
             gameState.setPlayer2Id(userId);
         }
         return gameStateRepository.save(gameState).then();
     }
 
-    public Mono<Long> createRoom(long roomId) {
+    public Mono<Long> createRoom(Long roomId) {
         GameState gameState = new GameState();
         gameState.setRoomId(roomId);
         return gameStateRepository.create(gameState);
