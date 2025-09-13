@@ -10,7 +10,7 @@ import reactor.core.publisher.Mono;
 @RequiredArgsConstructor
 public class RoomService {
     private final GameStateRepository gameStateRepository;
-    public Mono<Long> joinRoom(long userId, long roomId) {
+    public Mono<Void> joinRoom(long userId, long roomId) {
         return gameStateRepository.findById(roomId)
                 .switchIfEmpty(Mono.error(new IllegalStateException("Room does not exist"))) // 방이 없으면 예외
                 .flatMap(gameState -> {
@@ -20,7 +20,8 @@ public class RoomService {
                         return Mono.error(new IllegalStateException("Player already in the room")); // 이미 입장했으면 예외
                     // 방에 유저를 추가하고 저장
                     return updateGameState(gameState, userId)
-                            .thenReturn(isRoomFull(gameState)? gameState.getRoomId() : 0L);
+                            .then();
+                            //.thenReturn(isRoomFull(gameState)? gameState.getRoomId() : 0L);
                 });
     }
 
