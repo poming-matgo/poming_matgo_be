@@ -41,19 +41,6 @@ public class GameWebSocketHandler implements WebSocketHandler {
 
     private Mono<Boolean> handleEvent(RequestEvent event, WebSocketSession session) {
         switch (event.getEventType().getSubType()) {
-            case "JOIN_ROOM": //todo: 일반 컨트롤러에서 담당하게 변경할거임
-                return roomService.joinRoom(event.getUserId(), 2)
-                        .flatMap(roomId -> {
-                            session.getAttributes().put("roomId", roomId);
-                            return Mono.just(true);
-                        })
-                        .onErrorResume(e -> {
-                            session.send(Mono.just(session.textMessage("Error: " + e.getMessage()))).subscribe();
-                            return Mono.just(false);
-                        });
-            case "CREATE_ROOM": //todo: 일반 컨트롤러에서 담당하게 변경할거임
-                return roomService.createRoom(2)
-                        .then(Mono.just(true));
             case "CONNECT_USER":
                 prePlayService.connectUser(event.getUserId());
                 return Mono.empty();
