@@ -1,6 +1,7 @@
 package com.pomingmatgo.gameservice.api.handler;
 
 import com.pomingmatgo.gameservice.api.request.CreateRoomRequest;
+import com.pomingmatgo.gameservice.api.request.JoinRoomRequest;
 import com.pomingmatgo.gameservice.domain.service.matgo.RoomService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
@@ -20,6 +21,14 @@ public class RoomHandler {
                 .flatMap(req -> roomService.createRoom(req.getRoomId()))
                 .flatMap(roomId -> ServerResponse
                         .created(URI.create(String.format("/room/%d", roomId)))
+                        .build());
+    }
+
+    public Mono<ServerResponse> joinRoom(ServerRequest request) {
+        return request.bodyToMono(JoinRoomRequest.class)
+                .flatMap(req -> roomService.joinRoom(req.getUserId(), req.getRoomId()))
+                .flatMap(roomId -> ServerResponse
+                        .ok()
                         .build());
     }
 }

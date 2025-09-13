@@ -14,6 +14,7 @@ public class RoomRouter {
     public RouterFunction<ServerResponse> routeRoom(RoomHandler handler) {
         return route()
                 .POST("/room", handler::createRoom)
+                .POST("/room/join", handler::joinRoom)
                 .build();
     }
 }
