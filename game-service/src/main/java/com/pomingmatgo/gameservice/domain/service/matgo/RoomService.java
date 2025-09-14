@@ -78,7 +78,7 @@ public class RoomService {
         return gameStateRepository.create(gameState);
     }
 
-    public Mono<Long> ready(Mono<GameState> gameState, int playerNum, boolean flag) {
+    public Mono<GameState> ready(Mono<GameState> gameState, int playerNum, boolean flag) {
         return gameState
                 .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.NOT_EXISTED_ROOM)))
                 .flatMap(gs -> {
@@ -87,8 +87,12 @@ public class RoomService {
                     else
                         gs.setPlayer2Ready(flag);
 
-                    return gameStateRepository.save(gs);
+                    return gameStateRepository.save(gs)
+                            .thenReturn(gs);
                 });
     }
 
+    private Mono<Boolean> checkAllPlayersReady(GameState gameState) {
+        return Mono.just(gameState.isPlayer1Ready() && gameState.isPlayer2Ready());
+    }
 }

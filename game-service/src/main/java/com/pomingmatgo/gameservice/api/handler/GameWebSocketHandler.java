@@ -8,6 +8,8 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.pomingmatgo.gameservice.global.WebSocketResDto;
 import com.pomingmatgo.gameservice.global.exception.BusinessException;
 import com.pomingmatgo.gameservice.global.exception.ErrorCode;
+import com.pomingmatgo.gameservice.global.exception.WebSocketBusinessException;
+import com.pomingmatgo.gameservice.global.exception.dto.WebSocketErrorResDto;
 import com.pomingmatgo.gameservice.global.session.SessionManager;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
@@ -17,7 +19,10 @@ import org.springframework.web.reactive.socket.WebSocketSession;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 
+import java.io.IOException;
 import java.util.Collection;
+
+import static com.pomingmatgo.gameservice.global.exception.WebSocketErrorCode.SYSTEM_ERROR;
 
 
 @Component
@@ -49,13 +54,28 @@ public class GameWebSocketHandler implements WebSocketHandler {
                         .flatMap(playerNum -> {
                             sessionManager.addPlayer(roomId, playerNum, session);
                             return handleEventType(event, gameState, playerNum);
-                        })
-                        .onErrorResume(Exception.class, error ->
-                                session.send(Mono.just(session.textMessage(error.getMessage()))) //todo: 에러처리 명확하게
-                                        .then()
-                        )
-                );
+                        }))
+                .onErrorResume(error -> handleWebSocketError(session, error));
     }
+
+    private Mono<Void> handleWebSocketError(WebSocketSession session, Throwable error) {
+        WebSocketErrorResDto dto;
+
+        if (error instanceof WebSocketBusinessException businessException) {
+            dto = new WebSocketErrorResDto(businessException.getWebsocketErrorCode());
+        } else {
+            dto = new WebSocketErrorResDto(SYSTEM_ERROR);
+        }
+
+        try {
+            String jsonMessage = objectMapper.writeValueAsString(dto);
+            WebSocketMessage webSocketMessage = session.textMessage(jsonMessage);
+            return session.send(Mono.just(webSocketMessage));
+        } catch (IOException e) {
+            return Mono.error(e);
+        }
+    }
+
 
     private Mono<Integer> determinePlayerNum(long userId, GameState gameState) {
         return Mono.justOrEmpty(gameState)
