@@ -88,7 +88,15 @@ public class GameWebSocketHandler implements WebSocketHandler {
     private Mono<Void> handleEventType(RequestEvent event, GameState gameState, int playerNum) {
         String eventType = event.getEventType().getSubType();
         Collection<WebSocketSession> allUser = sessionManager.getAllUser(gameState.getRoomId());
-        if ("READY".equals(eventType)) {
+        if ("CONNECT".equals(eventType)) {
+            WebSocketResDto<Void> dto = new WebSocketResDto<>(
+                    playerNum,
+                    "CONNECT",
+                    "접속했습니다."
+            );
+            return sendMessageToUsers(allUser, dto);
+        }
+        else if ("READY".equals(eventType)) {
             return roomService.ready(Mono.just(gameState), playerNum, true)
                     .flatMap(pid-> {
                         WebSocketResDto<Void> dto = new WebSocketResDto<>(
