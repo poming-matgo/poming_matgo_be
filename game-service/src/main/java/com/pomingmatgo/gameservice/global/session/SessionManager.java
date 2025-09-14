@@ -48,8 +48,14 @@ public class SessionManager {
     public Collection<WebSocketSession> getAllUser(long roomId) {
         Collection<WebSocketSession> userSessions = new ArrayList<>();
         RoomSessionData roomSessionData = sessions.get(roomId);
-        userSessions.add(roomSessionData.getPlayer1Session());
-        userSessions.add(roomSessionData.getPlayer1Session());
+
+        if (roomSessionData.getPlayer1Session() != null) {
+            userSessions.add(roomSessionData.getPlayer1Session());
+        }
+        if (roomSessionData.getPlayer2Session() != null) {
+            userSessions.add(roomSessionData.getPlayer2Session());
+        }
+
         return userSessions;
     }
 }

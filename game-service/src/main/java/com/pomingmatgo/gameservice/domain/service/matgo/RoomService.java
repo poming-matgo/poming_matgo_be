@@ -7,7 +7,12 @@ import com.pomingmatgo.gameservice.global.exception.ErrorCode;
 import com.pomingmatgo.gameservice.global.session.SessionManager;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
+import org.springframework.web.reactive.socket.WebSocketMessage;
+import org.springframework.web.reactive.socket.WebSocketSession;
+import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
+
+import java.util.Collection;
 
 @Service
 @RequiredArgsConstructor
@@ -59,11 +64,20 @@ public class RoomService {
         return gameState
                 .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.NOT_EXISTED_ROOM)))
                 .flatMap(gs -> {
-                    if (playerNum==1)
+                    if (playerNum == 1)
                         gs.setPlayer1Ready(true);
                     else
                         gs.setPlayer2Ready(true);
-                    return gameStateRepository.save(gs).then();
+
+                    Collection<WebSocketSession> allUser = sessionManager.getAllUser(gs.getRoomId());
+
+                    return Flux.fromIterable(allUser)
+                            .flatMap(session -> {
+                                WebSocketMessage message = session.textMessage("test");
+                                return session.send(Mono.just(message));
+                            })
+                            .then(gameStateRepository.save(gs))
+                            .then();
                 });
     }
 
