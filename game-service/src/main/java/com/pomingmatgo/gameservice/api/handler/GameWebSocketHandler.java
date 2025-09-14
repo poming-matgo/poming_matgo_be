@@ -54,9 +54,16 @@ public class GameWebSocketHandler implements WebSocketHandler {
     }
 
     private Mono<Integer> determinePlayerNum(long userId, GameState gameState) {
-        if (userId == gameState.getPlayer1Id()) return Mono.just(1);
-        if (userId == gameState.getPlayer2Id()) return Mono.just(2);
-        return Mono.error(new BusinessException(ErrorCode.NOT_IN_ROOM));
+        return Mono.justOrEmpty(gameState)
+                .flatMap(gs -> {
+                    if (userId == gs.getPlayer1Id()) {
+                        return Mono.just(1);
+                    } else if (userId == gs.getPlayer2Id()) {
+                        return Mono.just(2);
+                    } else {
+                        return Mono.error(new BusinessException(ErrorCode.NOT_IN_ROOM));
+                    }
+                });
     }
 
     private Mono<Void> handleEventType(RequestEvent event, GameState gameState, int playerNum) {
