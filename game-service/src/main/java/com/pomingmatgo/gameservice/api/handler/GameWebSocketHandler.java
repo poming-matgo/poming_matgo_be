@@ -5,6 +5,7 @@ import com.pomingmatgo.gameservice.domain.GameState;
 import com.pomingmatgo.gameservice.domain.service.matgo.RoomService;
 import com.pomingmatgo.gameservice.domain.service.matgo.PrePlayService;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.pomingmatgo.gameservice.global.WebSocketResDto;
 import com.pomingmatgo.gameservice.global.exception.BusinessException;
 import com.pomingmatgo.gameservice.global.exception.ErrorCode;
 import com.pomingmatgo.gameservice.global.session.SessionManager;
@@ -13,7 +14,10 @@ import org.springframework.stereotype.Component;
 import org.springframework.web.reactive.socket.WebSocketHandler;
 import org.springframework.web.reactive.socket.WebSocketMessage;
 import org.springframework.web.reactive.socket.WebSocketSession;
+import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
+
+import java.util.Collection;
 
 
 @Component
@@ -47,7 +51,7 @@ public class GameWebSocketHandler implements WebSocketHandler {
                             return handleEventType(event, gameState, playerNum);
                         })
                         .onErrorResume(Exception.class, error ->
-                                session.send(Mono.just(session.textMessage("ERROR")))
+                                session.send(Mono.just(session.textMessage(error.getMessage()))) //todo: 에러처리 명확하게
                                         .then()
                         )
                 );
@@ -66,13 +70,45 @@ public class GameWebSocketHandler implements WebSocketHandler {
                 });
     }
 
+    public <T> Mono<Void> sendMessageToUsers(Collection<WebSocketSession> users, WebSocketResDto<T> response) {
+        return Flux.fromIterable(users)
+                .flatMap(session -> {
+                    try {
+                        String jsonMessage = objectMapper.writeValueAsString(response);
+                        WebSocketMessage webSocketMessage = session.textMessage(jsonMessage);
+                        return session.send(Mono.just(webSocketMessage));
+                    } catch (Exception e) {
+                        return Mono.empty(); //todo: 에러처리로직 추가해야함
+                    }
+                })
+                .then();
+    }
+
+
     private Mono<Void> handleEventType(RequestEvent event, GameState gameState, int playerNum) {
         String eventType = event.getEventType().getSubType();
+        Collection<WebSocketSession> allUser = sessionManager.getAllUser(gameState.getRoomId());
         if ("READY".equals(eventType)) {
-            return roomService.ready(Mono.just(gameState), playerNum, true);
+            return roomService.ready(Mono.just(gameState), playerNum, true)
+                    .flatMap(pid-> {
+                        WebSocketResDto<Void> dto = new WebSocketResDto<>(
+                                playerNum,
+                                "READY",
+                                "Ready 했습니다."
+                        );
+                        return sendMessageToUsers(allUser, dto);
+                    });
         }
         else if("UNREADY".equals(eventType)) {
-            return roomService.ready(Mono.just(gameState), playerNum, false);
+            return roomService.ready(Mono.just(gameState), playerNum, true)
+                    .flatMap(pid-> {
+                        WebSocketResDto<Void> dto = new WebSocketResDto<>(
+                                playerNum,
+                                "UNREADY",
+                                "Ready 취소 했습니다."
+                        );
+                        return sendMessageToUsers(allUser, dto);
+                    });
         }
         return Mono.empty();
     }
