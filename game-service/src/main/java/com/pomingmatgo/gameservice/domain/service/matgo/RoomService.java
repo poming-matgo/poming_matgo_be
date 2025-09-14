@@ -94,7 +94,10 @@ public class RoomService {
                 });
     }
 
-    private Mono<Boolean> checkAllPlayersReady(GameState gameState) {
-        return Mono.just(gameState.isPlayer1Ready() && gameState.isPlayer2Ready());
+    public Mono<Boolean> checkAllPlayersReady(Mono<GameState> gameState) {
+        return gameState.map(gs ->
+                gs.isPlayer1Ready() && gs.isPlayer2Ready()
+        );
     }
+
 }

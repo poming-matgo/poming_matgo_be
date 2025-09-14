@@ -118,13 +118,14 @@ public class GameWebSocketHandler implements WebSocketHandler {
         }
         else if ("READY".equals(eventType)) {
             return roomService.ready(Mono.just(gameState), playerNum, true)
-                    .flatMap(pid-> {
+                    .flatMap(pid -> {
                         WebSocketResDto<Void> dto = new WebSocketResDto<>(
                                 playerNum,
                                 "READY",
                                 "Ready 했습니다."
                         );
-                        return sendMessageToUsers(allUser, dto);
+                        return sendMessageToUsers(allUser, dto)
+                                .then(handleAllReadyEvent(allUser, gameState));
                     });
         }
         else if("UNREADY".equals(eventType)) {
@@ -139,5 +140,22 @@ public class GameWebSocketHandler implements WebSocketHandler {
                     });
         }
         return Mono.empty();
+    }
+
+    private Mono<Void> handleAllReadyEvent(Collection<WebSocketSession> allUser, GameState gameState) {
+        return Mono.defer(() ->
+                roomService.checkAllPlayersReady(Mono.just(gameState))
+                        .flatMap(allReady -> {
+                            if (Boolean.TRUE.equals(allReady)) {
+                                WebSocketResDto<Void> startDto = new WebSocketResDto<>(
+                                        0,
+                                        "START",
+                                        "게임이 시작됐습니다."
+                                );
+                                return sendMessageToUsers(allUser, startDto);
+                            }
+                            return Mono.empty();
+                        })
+        );
     }
 }
