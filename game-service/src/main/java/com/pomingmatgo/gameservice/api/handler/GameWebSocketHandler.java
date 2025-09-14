@@ -29,7 +29,7 @@ import static com.pomingmatgo.gameservice.global.exception.WebSocketErrorCode.SY
 @RequiredArgsConstructor
 public class GameWebSocketHandler implements WebSocketHandler {
     private final ObjectMapper objectMapper;
-    private final GameService prePlayService;
+    private final GameService gameService;
     private final RoomService roomService;
     private final SessionManager sessionManager;
     private Collection<WebSocketSession> allUser;
