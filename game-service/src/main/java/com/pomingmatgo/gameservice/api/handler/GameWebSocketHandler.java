@@ -3,7 +3,7 @@ package com.pomingmatgo.gameservice.api.handler;
 import com.pomingmatgo.gameservice.api.handler.event.RequestEvent;
 import com.pomingmatgo.gameservice.domain.GameState;
 import com.pomingmatgo.gameservice.domain.service.matgo.RoomService;
-import com.pomingmatgo.gameservice.domain.service.matgo.PrePlayService;
+import com.pomingmatgo.gameservice.domain.service.matgo.GameService;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.pomingmatgo.gameservice.global.WebSocketResDto;
 import com.pomingmatgo.gameservice.global.exception.BusinessException;
@@ -29,9 +29,10 @@ import static com.pomingmatgo.gameservice.global.exception.WebSocketErrorCode.SY
 @RequiredArgsConstructor
 public class GameWebSocketHandler implements WebSocketHandler {
     private final ObjectMapper objectMapper;
-    private final PrePlayService prePlayService;
+    private final GameService prePlayService;
     private final RoomService roomService;
     private final SessionManager sessionManager;
+    private Collection<WebSocketSession> allUser;
     @Override
     public Mono<Void> handle(WebSocketSession session) {
         return session.receive()
@@ -53,7 +54,7 @@ public class GameWebSocketHandler implements WebSocketHandler {
                 .flatMap(gameState -> determinePlayerNum(userId, gameState)
                         .flatMap(playerNum -> {
                             sessionManager.addPlayer(roomId, playerNum, session);
-                            return handleEventType(event, gameState, playerNum);
+                            return handleEvent(event, gameState, playerNum);
                         }))
                 .onErrorResume(error -> handleWebSocketError(session, error));
     }
@@ -104,10 +105,8 @@ public class GameWebSocketHandler implements WebSocketHandler {
                 .then();
     }
 
-
-    private Mono<Void> handleEventType(RequestEvent event, GameState gameState, int playerNum) {
+    private Mono<Void> handleRoomEvent(RequestEvent event, GameState gameState, int playerNum) {
         String eventType = event.getEventType().getSubType();
-        Collection<WebSocketSession> allUser = sessionManager.getAllUser(gameState.getRoomId());
         if ("CONNECT".equals(eventType)) {
             WebSocketResDto<Void> dto = new WebSocketResDto<>(
                     playerNum,
@@ -138,6 +137,23 @@ public class GameWebSocketHandler implements WebSocketHandler {
                         );
                         return sendMessageToUsers(allUser, dto);
                     });
+        }
+        return Mono.empty();
+    }
+
+    private Mono<Void> handleGameEvent(RequestEvent event, GameState gameState, int playerNum) {
+        String eventType = event.getEventType().getSubType();
+        return Mono.empty();
+    }
+
+    private Mono<Void> handleEvent(RequestEvent event, GameState gameState, int playerNum) {
+        String eventType = event.getEventType().getSubType();
+        allUser = sessionManager.getAllUser(gameState.getRoomId());
+        if("ROOM".equals(eventType)) {
+            return handleRoomEvent(event, gameState, playerNum);
+        }
+        else if("GAME".equals(eventType)) {
+            return handleGameEvent(event,gameState, playerNum);
         }
         return Mono.empty();
     }
