@@ -32,6 +32,23 @@ public class RoomService {
                 });
     }
 
+    public Mono<Void> leaveRoom(long userId, long roomId) {
+        return gameStateRepository.findById(roomId)
+                .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.NOT_EXISTED_ROOM)))
+                .flatMap(gameState -> {
+                    if(gameState.getPlayer1Id() == userId) {
+                        gameState.setPlayer1Id(null);
+                        gameState.setPlayer1Ready(false);
+                    }
+                    else if(gameState.getPlayer2Id() == userId) {
+                        gameState.setPlayer2Id(null);
+                        gameState.setPlayer2Ready(false);
+                    }
+                    return saveWithUserId(gameState, userId)
+                            .then();
+                });
+    }
+
     public Mono<Void> deleteRoom(long roomId) {
         return gameStateRepository.delete(roomId)
                 .then();

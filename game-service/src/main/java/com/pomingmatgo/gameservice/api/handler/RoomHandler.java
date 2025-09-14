@@ -3,6 +3,7 @@ package com.pomingmatgo.gameservice.api.handler;
 import com.pomingmatgo.gameservice.api.request.CreateRoomRequest;
 import com.pomingmatgo.gameservice.api.request.DeleteRoomRequest;
 import com.pomingmatgo.gameservice.api.request.JoinRoomRequest;
+import com.pomingmatgo.gameservice.api.request.LeaveRoomRequest;
 import com.pomingmatgo.gameservice.domain.service.matgo.RoomService;
 import com.pomingmatgo.gameservice.global.ApiResponseDto;
 import lombok.RequiredArgsConstructor;
@@ -36,6 +37,18 @@ public class RoomHandler {
                         new ApiResponseDto<>(
                                 HttpStatus.OK.value(),
                                 String.format("%d번 게임방에 %d번 플레이어가 조인했습니다.", req.getRoomId(), req.getUserId())
+                        )
+                ));
+    }
+
+    public Mono<ServerResponse> leaveRoom(ServerRequest request) {
+        return request.bodyToMono(LeaveRoomRequest.class)
+                .flatMap(req -> roomService.leaveRoom(req.getUserId(), req.getRoomId())
+                        .thenReturn(req))
+                .flatMap(req -> ServerResponse.ok().bodyValue(
+                        new ApiResponseDto<>(
+                                HttpStatus.OK.value(),
+                                String.format("%d번 게임방에서 %d번 플레이어가 나갔습니다.", req.getRoomId(), req.getUserId())
                         )
                 ));
     }
