@@ -69,7 +69,10 @@ public class GameWebSocketHandler implements WebSocketHandler {
     private Mono<Void> handleEventType(RequestEvent event, GameState gameState, int playerNum) {
         String eventType = event.getEventType().getSubType();
         if ("READY".equals(eventType)) {
-            return roomService.ready(Mono.just(gameState), playerNum);
+            return roomService.ready(Mono.just(gameState), playerNum, true);
+        }
+        else if("UNREADY".equals(eventType)) {
+            return roomService.ready(Mono.just(gameState), playerNum, false);
         }
         return Mono.empty();
     }

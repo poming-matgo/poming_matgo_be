@@ -82,14 +82,14 @@ public class RoomService {
         return gameStateRepository.create(gameState);
     }
 
-    public Mono<Void> ready(Mono<GameState> gameState, int playerNum) {
+    public Mono<Void> ready(Mono<GameState> gameState, int playerNum, boolean flag) {
         return gameState
                 .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.NOT_EXISTED_ROOM)))
                 .flatMap(gs -> {
                     if (playerNum == 1)
-                        gs.setPlayer1Ready(true);
+                        gs.setPlayer1Ready(flag);
                     else
-                        gs.setPlayer2Ready(true);
+                        gs.setPlayer2Ready(flag);
 
                     Collection<WebSocketSession> allUser = sessionManager.getAllUser(gs.getRoomId());
 
