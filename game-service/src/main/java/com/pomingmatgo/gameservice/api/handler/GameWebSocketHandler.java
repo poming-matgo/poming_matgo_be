@@ -4,7 +4,6 @@ import com.pomingmatgo.gameservice.api.handler.event.RequestEvent;
 import com.pomingmatgo.gameservice.domain.GameState;
 import com.pomingmatgo.gameservice.domain.service.matgo.RoomService;
 import com.pomingmatgo.gameservice.domain.service.matgo.PrePlayService;
-import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.pomingmatgo.gameservice.global.exception.BusinessException;
 import com.pomingmatgo.gameservice.global.exception.ErrorCode;
@@ -34,7 +33,7 @@ public class GameWebSocketHandler implements WebSocketHandler {
     private Mono<Void> handleMessage(WebSocketMessage message, WebSocketSession session) {
         return Mono.fromCallable(() -> objectMapper.readValue(message.getPayloadAsText(), RequestEvent.class))
                 .flatMap(event -> routeEvent(event, session))
-                .onErrorResume(JsonProcessingException.class, e -> Mono.empty());
+                .then(Mono.empty());
     }
 
     private Mono<Void> routeEvent(RequestEvent event, WebSocketSession session) {
@@ -47,6 +46,10 @@ public class GameWebSocketHandler implements WebSocketHandler {
                             sessionManager.addPlayer(roomId, playerNum, session);
                             return handleEventType(event, gameState, playerNum);
                         })
+                        .onErrorResume(Exception.class, error ->
+                                session.send(Mono.just(session.textMessage("ERROR")))
+                                        .then()
+                        )
                 );
     }
 
