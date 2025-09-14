@@ -42,11 +42,11 @@ public class GameWebSocketHandler implements WebSocketHandler {
 
     private Mono<Void> handleMessage(WebSocketMessage message, WebSocketSession session) {
         return Mono.fromCallable(() -> objectMapper.readValue(message.getPayloadAsText(), RequestEvent.class))
-                .flatMap(event -> routeEvent(event, session))
-                .then(Mono.empty());
+                .flatMap(event -> processEvent(event, session))
+                .then();
     }
 
-    private Mono<Void> routeEvent(RequestEvent event, WebSocketSession session) {
+    private Mono<Void> processEvent(RequestEvent event, WebSocketSession session) {
         long userId = event.getUserId();
         long roomId = event.getRoomId();
 
@@ -54,7 +54,7 @@ public class GameWebSocketHandler implements WebSocketHandler {
                 .flatMap(gameState -> determinePlayerNum(userId, gameState)
                         .flatMap(playerNum -> {
                             sessionManager.addPlayer(roomId, playerNum, session);
-                            return handleEvent(event, gameState, playerNum);
+                            return routeEvent(event, gameState, playerNum);
                         }))
                 .onErrorResume(error -> handleWebSocketError(session, error));
     }
@@ -124,7 +124,7 @@ public class GameWebSocketHandler implements WebSocketHandler {
                                 "Ready 했습니다."
                         );
                         return sendMessageToUsers(allUser, dto)
-                                .then(handleAllReadyEvent(allUser, gameState));
+                                .then(Mono.defer(() -> handleAllReadyEvent(allUser, gameState)));
                     });
         }
         else if("UNREADY".equals(eventType)) {
@@ -146,7 +146,7 @@ public class GameWebSocketHandler implements WebSocketHandler {
         return Mono.empty();
     }
 
-    private Mono<Void> handleEvent(RequestEvent event, GameState gameState, int playerNum) {
+    private Mono<Void> routeEvent(RequestEvent event, GameState gameState, int playerNum) {
         String eventType = event.getEventType().getSubType();
         allUser = sessionManager.getAllUser(gameState.getRoomId());
         if("ROOM".equals(eventType)) {
@@ -158,20 +158,18 @@ public class GameWebSocketHandler implements WebSocketHandler {
         return Mono.empty();
     }
 
-    private Mono<Void> handleAllReadyEvent(Collection<WebSocketSession> allUser, GameState gameState) {
-        return Mono.defer(() ->
-                roomService.checkAllPlayersReady(Mono.just(gameState))
-                        .flatMap(allReady -> {
-                            if (Boolean.TRUE.equals(allReady)) {
-                                WebSocketResDto<Void> startDto = new WebSocketResDto<>(
-                                        0,
-                                        "START",
-                                        "게임이 시작됐습니다."
-                                );
-                                return sendMessageToUsers(allUser, startDto);
-                            }
-                            return Mono.empty();
-                        })
-        );
+    private Mono<Void> handleAllReadyEvent(Collection<WebSocketSession> allUsers, GameState gameState) {
+        return roomService.checkAllPlayersReady(Mono.just(gameState))
+                .flatMap(allReady -> {
+                    if (Boolean.TRUE.equals(allReady)) {
+                        WebSocketResDto<Void> startDto = new WebSocketResDto<>(
+                                0,
+                                "START",
+                                "게임이 시작됐습니다."
+                        );
+                        return sendMessageToUsers(allUsers, startDto);
+                    }
+                    return Mono.empty();
+                });
     }
 }
