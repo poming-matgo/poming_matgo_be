@@ -14,16 +14,14 @@ public class RoomService {
     private final GameStateRepository gameStateRepository;
     public Mono<Void> joinRoom(long userId, long roomId) {
         return gameStateRepository.findById(roomId)
-                .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.NOT_EXISTED_ROOM))) // 방이 없으면 예외
+                .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.NOT_EXISTED_ROOM)))
                 .flatMap(gameState -> {
                     if (isRoomFull(gameState))
-                        return Mono.error(new BusinessException(ErrorCode.FULL_ROOM)); // 방이 꽉 찼으면 예외
-                    if (isUserAlreadyInRoom(gameState, userId))
-                        return Mono.error(new BusinessException(ErrorCode.ALREADY_IN_ROOM)); // 이미 입장했으면 예외
-                    // 방에 유저를 추가하고 저장
+                        return Mono.error(new BusinessException(ErrorCode.FULL_ROOM));
+                    if (isUserInRoom(gameState, userId))
+                        return Mono.error(new BusinessException(ErrorCode.ALREADY_IN_ROOM));
                     return updateGameState(gameState, userId)
                             .then();
-                            //.thenReturn(isRoomFull(gameState)? gameState.getRoomId() : 0L);
                 });
     }
 
@@ -31,7 +29,7 @@ public class RoomService {
         return gameState.getPlayer1Id() != null && gameState.getPlayer2Id() != null;
     }
 
-    private boolean isUserAlreadyInRoom(GameState gameState, Long userId) {
+    private boolean isUserInRoom(GameState gameState, Long userId) {
         return userId.equals(gameState.getPlayer1Id()) || userId.equals(gameState.getPlayer2Id());
     }
 
@@ -48,6 +46,22 @@ public class RoomService {
         GameState gameState = new GameState();
         gameState.setRoomId(roomId);
         return gameStateRepository.create(gameState);
+    }
+
+    public Mono<Void> ready(Long userId, Long roomId) {
+        return gameStateRepository.findById(roomId)
+                .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.NOT_EXISTED_ROOM)))
+                .flatMap(gameState -> {
+                    if (gameState.getPlayer1Id().equals(userId)) {
+                        gameState.setPlayer1Ready(true);
+                    } else if (gameState.getPlayer2Id().equals(userId)) {
+                        gameState.setPlayer2Ready(true);
+                    } else {
+                        return Mono.error(new BusinessException(ErrorCode.NOT_IN_ROOM));
+                    }
+                    return updateGameState(gameState, userId)
+                            .then();
+                });
     }
 
 }

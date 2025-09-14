@@ -19,6 +19,8 @@ public class GameState implements Serializable {
     Long roomId;
     Long player1Id;
     Long player2Id;
+    boolean player1Ready;
+    boolean player2Ready;
     int round;
     int currentTurn;
     List<Integer> cardStack;

@@ -29,7 +29,6 @@ public class SocialLoginSuccessHandler implements AuthenticationSuccessHandler {
             DefaultOAuth2User oAuth2User = (DefaultOAuth2User) authentication.getPrincipal();
             Map<String, Object> attributes = oAuth2User.getAttributes();
 
-            // "user" 키에 해당하는 값 가져오기
             if (attributes.containsKey("user")) {
                 user = (User) attributes.get("user");
             }

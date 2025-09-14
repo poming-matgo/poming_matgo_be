@@ -9,5 +9,6 @@ import lombok.Setter;
 public class RequestEvent<T> {
     private EventType eventType;
     private long userId;
+    private long roomId;
     private T data;
 }
