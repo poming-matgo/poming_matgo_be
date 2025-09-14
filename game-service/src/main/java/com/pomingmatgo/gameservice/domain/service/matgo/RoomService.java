@@ -4,6 +4,7 @@ import com.pomingmatgo.gameservice.domain.GameState;
 import com.pomingmatgo.gameservice.domain.repository.GameStateRepository;
 import com.pomingmatgo.gameservice.global.exception.BusinessException;
 import com.pomingmatgo.gameservice.global.exception.ErrorCode;
+import com.pomingmatgo.gameservice.global.session.SessionManager;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import reactor.core.publisher.Mono;
@@ -12,6 +13,7 @@ import reactor.core.publisher.Mono;
 @RequiredArgsConstructor
 public class RoomService {
     private final GameStateRepository gameStateRepository;
+    private final SessionManager sessionManager;
     public Mono<Void> joinRoom(long userId, long roomId) {
         return gameStateRepository.findById(roomId)
                 .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.NOT_EXISTED_ROOM)))
@@ -20,7 +22,7 @@ public class RoomService {
                         return Mono.error(new BusinessException(ErrorCode.FULL_ROOM));
                     if (isUserInRoom(gameState, userId))
                         return Mono.error(new BusinessException(ErrorCode.ALREADY_IN_ROOM));
-                    return updateGameState(gameState, userId)
+                    return saveWithUserId(gameState, userId)
                             .then();
                 });
     }
@@ -33,7 +35,11 @@ public class RoomService {
         return userId.equals(gameState.getPlayer1Id()) || userId.equals(gameState.getPlayer2Id());
     }
 
-    private Mono<Void> updateGameState(GameState gameState, long userId) {
+    public Mono<GameState> getGameState(Long roomId) {
+        return gameStateRepository.findById(roomId);
+    }
+
+    private Mono<Void> saveWithUserId(GameState gameState, long userId) {
         if (gameState.getPlayer1Id() == null) {
             gameState.setPlayer1Id(userId);
         } else if (gameState.getPlayer2Id() == null) {
@@ -45,22 +51,19 @@ public class RoomService {
     public Mono<Long> createRoom(Long roomId) {
         GameState gameState = new GameState();
         gameState.setRoomId(roomId);
+        sessionManager.addRoom(roomId);
         return gameStateRepository.create(gameState);
     }
 
-    public Mono<Void> ready(Long userId, Long roomId) {
-        return gameStateRepository.findById(roomId)
+    public Mono<Void> ready(Mono<GameState> gameState, int playerNum) {
+        return gameState
                 .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.NOT_EXISTED_ROOM)))
-                .flatMap(gameState -> {
-                    if (gameState.getPlayer1Id().equals(userId)) {
-                        gameState.setPlayer1Ready(true);
-                    } else if (gameState.getPlayer2Id().equals(userId)) {
-                        gameState.setPlayer2Ready(true);
-                    } else {
-                        return Mono.error(new BusinessException(ErrorCode.NOT_IN_ROOM));
-                    }
-                    return updateGameState(gameState, userId)
-                            .then();
+                .flatMap(gs -> {
+                    if (playerNum==1)
+                        gs.setPlayer1Ready(true);
+                    else
+                        gs.setPlayer2Ready(true);
+                    return gameStateRepository.save(gs).then();
                 });
     }
 
