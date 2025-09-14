@@ -32,6 +32,11 @@ public class RoomService {
                 });
     }
 
+    public Mono<Void> deleteRoom(long roomId) {
+        return gameStateRepository.delete(roomId)
+                .then();
+    }
+
     private boolean isRoomFull(GameState gameState) {
         return gameState.getPlayer1Id() != null && gameState.getPlayer2Id() != null;
     }

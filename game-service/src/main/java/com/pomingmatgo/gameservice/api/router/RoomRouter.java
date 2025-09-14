@@ -15,6 +15,7 @@ public class RoomRouter {
         return route()
                 .POST("/room", handler::createRoom)
                 .POST("/room/join", handler::joinRoom)
+                .DELETE("/room", handler::deleteRoom)
                 .build();
     }
 }

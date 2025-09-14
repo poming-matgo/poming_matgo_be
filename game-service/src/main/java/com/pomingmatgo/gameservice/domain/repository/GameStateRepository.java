@@ -37,6 +37,17 @@ public class GameStateRepository {
                 });
     }
 
+    public Mono<Long> delete(long roomId) {
+        String redisKey = GAME_STATE_KEY_PREFIX + roomId;
+        return redisOps.hasKey(redisKey)
+                .flatMap(exists -> {
+                    if (Boolean.TRUE.equals(exists)) {
+                        return redisOps.delete(redisKey);
+                    }
+                    return Mono.just(roomId);
+                });
+    }
+
     public Mono<Long> save(GameState gameState) {
         String redisKey = GAME_STATE_KEY_PREFIX + gameState.getRoomId();
         return saveState(gameState, redisKey)
