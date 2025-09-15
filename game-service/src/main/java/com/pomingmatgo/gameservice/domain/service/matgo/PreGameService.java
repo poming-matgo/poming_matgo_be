@@ -6,10 +6,10 @@ import com.pomingmatgo.gameservice.domain.card.Card;
 import com.pomingmatgo.gameservice.domain.repository.SelectedCardRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
+import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 
 import java.util.*;
-import java.util.stream.Collectors;
 
 @Service
 @RequiredArgsConstructor
@@ -19,24 +19,23 @@ public class PreGameService {
 
     //선 플레이어 정하는 과정
     public Mono<Void> pickFiveCardsAndSave(Long roomId) {
-        Map<Integer, List<Card>> cardsByMonth = Arrays.stream(Card.values())
-                .collect(Collectors.groupingBy(Card::getMonth));
-
-        List<Integer> months = new ArrayList<>(cardsByMonth.keySet());
-        Collections.shuffle(months, RANDOM);
-        List<Integer> selectedMonths = months.subList(0, 5);
-
-        List<Card> selectedCards = selectedMonths.stream()
-                .map(month -> {
-                    List<Card> cards = cardsByMonth.get(month);
-                    return cards.get(RANDOM.nextInt(cards.size()));
+        return Flux.fromArray(Card.values())
+                .collectMultimap(Card::getMonth)
+                .flatMapMany(cardsByMonth -> {
+                    List<Integer> months = new ArrayList<>(cardsByMonth.keySet());
+                    Collections.shuffle(months, RANDOM);
+                    return Flux.fromIterable(months.subList(0, 5))
+                            .map(month -> {
+                                List<Card> cards = new ArrayList<>(cardsByMonth.get(month));
+                                return cards.get(RANDOM.nextInt(cards.size()));
+                            });
                 })
-                .toList();
-
-        return selectedCardRepository.saveSelectedCard(selectedCards, roomId);
+                .collectList()
+                .flatMap(selectedCards -> selectedCardRepository.saveSelectedCard(selectedCards, roomId));
     }
 
-    public Mono<Void> selectCard(RequestEvent<LeadSelectionReq> event) {
 
+    public Mono<Void> selectCard(RequestEvent<LeadSelectionReq> event) {
+        return Mono.empty();
     }
 }
