@@ -124,7 +124,14 @@ public class GameWebSocketHandler implements WebSocketHandler {
                                 "Ready 했습니다."
                         );
                         return sendMessageToUsers(allUser, dto)
-                                .then(Mono.defer(() -> handleAllReadyEvent(allUser, gameState)));
+                                .then(roomService.checkAllPlayersReady(Mono.just(gameState))
+                                        .flatMap(allReady -> {
+                                            if (Boolean.TRUE.equals(allReady)) {
+                                                return handleAllReadyEvent(allUser)
+                                                .then(Mono.defer(gameService::pickFiveCardsAndSave));
+                                            }
+                                            return Mono.empty();
+                                        }));
                     });
         }
         else if("UNREADY".equals(eventType)) {
@@ -147,7 +154,7 @@ public class GameWebSocketHandler implements WebSocketHandler {
     }
 
     private Mono<Void> routeEvent(RequestEvent event, GameState gameState, int playerNum) {
-        String eventType = event.getEventType().getSubType();
+        String eventType = event.getEventType().getType();
         allUser = sessionManager.getAllUser(gameState.getRoomId());
         if("ROOM".equals(eventType)) {
             return handleRoomEvent(event, gameState, playerNum);
@@ -158,18 +165,13 @@ public class GameWebSocketHandler implements WebSocketHandler {
         return Mono.empty();
     }
 
-    private Mono<Void> handleAllReadyEvent(Collection<WebSocketSession> allUsers, GameState gameState) {
-        return roomService.checkAllPlayersReady(Mono.just(gameState))
-                .flatMap(allReady -> {
-                    if (Boolean.TRUE.equals(allReady)) {
-                        WebSocketResDto<Void> startDto = new WebSocketResDto<>(
-                                0,
-                                "START",
-                                "게임이 시작됐습니다."
-                        );
-                        return sendMessageToUsers(allUsers, startDto);
-                    }
-                    return Mono.empty();
-                });
+    private Mono<Void> handleAllReadyEvent(Collection<WebSocketSession> allUsers) {
+        // 게임이 시작되었다는 메시지를 모든 사용자에게 전송
+        WebSocketResDto<Void> startDto = new WebSocketResDto<>(
+                0,
+                "START",
+                "게임이 시작됐습니다."
+        );
+        return sendMessageToUsers(allUsers, startDto);
     }
 }

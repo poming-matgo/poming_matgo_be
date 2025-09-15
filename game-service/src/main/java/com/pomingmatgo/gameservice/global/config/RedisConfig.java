@@ -1,6 +1,7 @@
 package com.pomingmatgo.gameservice.global.config;
 
 import com.pomingmatgo.gameservice.domain.GameState;
+import com.pomingmatgo.gameservice.domain.card.Card;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.EnableAutoConfiguration;
 import org.springframework.boot.autoconfigure.data.redis.RedisAutoConfiguration;
@@ -29,8 +30,8 @@ public class RedisConfig {
         return new LettuceConnectionFactory(host, port);
     }
 
-    @Bean
-    public ReactiveRedisOperations<String, GameState> reactiveRedisTemplate(ReactiveRedisConnectionFactory redisConnectionFactory) {
+    @Bean(name="gameStateRedisTemplate")
+    public ReactiveRedisOperations<String, GameState> gameStateRedisTemplate(ReactiveRedisConnectionFactory redisConnectionFactory) {
         Jackson2JsonRedisSerializer<GameState> serializer = new Jackson2JsonRedisSerializer<>(GameState.class);
 
         RedisSerializationContext.RedisSerializationContextBuilder<String, GameState> builder = RedisSerializationContext
@@ -41,5 +42,19 @@ public class RedisConfig {
 
         return new ReactiveRedisTemplate<>(redisConnectionFactory, context);
     }
+
+    @Bean(name="cardRedisTemplate")
+    public ReactiveRedisOperations<String, Card> cardRedisTemplate(ReactiveRedisConnectionFactory redisConnectionFactory) {
+        Jackson2JsonRedisSerializer<Card> serializer = new Jackson2JsonRedisSerializer<>(Card.class);
+
+        RedisSerializationContext.RedisSerializationContextBuilder<String, Card> builder = RedisSerializationContext
+                .newSerializationContext(new StringRedisSerializer());
+
+        RedisSerializationContext<String, Card> context = builder.value(serializer).hashValue(serializer)
+                .hashKey(serializer).build();
+
+        return new ReactiveRedisTemplate<>(redisConnectionFactory, context);
+    }
+
 
 }

@@ -2,15 +2,18 @@ package com.pomingmatgo.gameservice.domain.repository;
 import com.pomingmatgo.gameservice.domain.GameState;
 import com.pomingmatgo.gameservice.global.exception.BusinessException;
 import com.pomingmatgo.gameservice.global.exception.ErrorCode;
-import lombok.RequiredArgsConstructor;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.data.redis.core.ReactiveRedisOperations;
 import org.springframework.stereotype.Repository;
 import reactor.core.publisher.Mono;
 
 @Repository
-@RequiredArgsConstructor
+//@RequiredArgsConstructor
 public class GameStateRepository {
-    private final ReactiveRedisOperations<String, GameState> redisOps;
+    @Qualifier("gameStateRedisTemplate")
+    @Autowired
+    private ReactiveRedisOperations<String, GameState> redisOps;
 
     private static final String GAME_STATE_KEY_PREFIX = "gameState:";
 
