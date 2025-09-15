@@ -108,42 +108,40 @@ public class GameWebSocketHandler implements WebSocketHandler {
     private Mono<Void> handleRoomEvent(RequestEvent event, GameState gameState, int playerNum) {
         String eventType = event.getEventType().getSubType();
         if ("CONNECT".equals(eventType)) {
-            WebSocketResDto<Void> dto = new WebSocketResDto<>(
+            return sendMessageToUsers(allUser, new WebSocketResDto<>(
                     playerNum,
                     "CONNECT",
                     "접속했습니다."
-            );
-            return sendMessageToUsers(allUser, dto);
+            ));
         }
         else if ("READY".equals(eventType)) {
             return roomService.ready(Mono.just(gameState), playerNum, true)
-                    .flatMap(pid -> {
-                        WebSocketResDto<Void> dto = new WebSocketResDto<>(
-                                playerNum,
-                                "READY",
-                                "Ready 했습니다."
-                        );
-                        return sendMessageToUsers(allUser, dto)
-                                .then(roomService.checkAllPlayersReady(Mono.just(gameState))
-                                        .flatMap(allReady -> {
-                                            if (Boolean.TRUE.equals(allReady)) {
-                                                return handleAllReadyEvent(allUser)
-                                                .then(Mono.defer(gameService::pickFiveCardsAndSave));
-                                            }
-                                            return Mono.empty();
-                                        }));
-                    });
+                    .flatMap(updatedGameState ->
+                            sendMessageToUsers(
+                                    allUser,
+                                    new WebSocketResDto<>(playerNum, "READY", "Ready 했습니다.")
+                            )
+                                    .then(roomService.checkAllPlayersReady(Mono.just(updatedGameState)))
+                                    .flatMap(allReady -> Boolean.TRUE.equals(allReady)
+                                            ? handleAllReadyEvent(allUser)
+                                            .then(Mono.defer(gameService::pickFiveCardsAndSave))
+                                            : Mono.empty()
+                                    )
+                    );
         }
-        else if("UNREADY".equals(eventType)) {
+        else if ("UNREADY".equals(eventType)) {
             return roomService.ready(Mono.just(gameState), playerNum, true)
-                    .flatMap(pid-> {
-                        WebSocketResDto<Void> dto = new WebSocketResDto<>(
-                                playerNum,
-                                "UNREADY",
-                                "Ready 취소 했습니다."
-                        );
-                        return sendMessageToUsers(allUser, dto);
-                    });
+                    .then(
+                            sendMessageToUsers(
+                                    allUser,
+                                    new WebSocketResDto<>(
+                                            playerNum,
+                                            "UNREADY",
+                                            "Ready 취소 했습니다."
+                                    )
+                            )
+                    )
+                    .then(Mono.empty());
         }
         return Mono.empty();
     }
