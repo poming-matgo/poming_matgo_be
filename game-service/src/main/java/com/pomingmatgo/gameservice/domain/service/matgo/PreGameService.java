@@ -1,9 +1,10 @@
 package com.pomingmatgo.gameservice.domain.service.matgo;
 
+import com.pomingmatgo.gameservice.api.handler.event.RequestEvent;
+import com.pomingmatgo.gameservice.api.request.WebSocket.LeadSelectionReq;
 import com.pomingmatgo.gameservice.domain.card.Card;
-import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.beans.factory.annotation.Qualifier;
-import org.springframework.data.redis.core.ReactiveRedisOperations;
+import com.pomingmatgo.gameservice.domain.repository.SelectedCardRepository;
+import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import reactor.core.publisher.Mono;
 
@@ -11,15 +12,13 @@ import java.util.*;
 import java.util.stream.Collectors;
 
 @Service
-public class GameService {
+@RequiredArgsConstructor
+public class PreGameService {
     private static final Random RANDOM = new Random();
-
-    @Qualifier("cardRedisTemplate")
-    @Autowired
-    private ReactiveRedisOperations<String, Card> redisOps;
+    private final SelectedCardRepository selectedCardRepository;
 
     //선 플레이어 정하는 과정
-    public Mono<Void> pickFiveCardsAndSave() {
+    public Mono<Void> pickFiveCardsAndSave(Long roomId) {
         Map<Integer, List<Card>> cardsByMonth = Arrays.stream(Card.values())
                 .collect(Collectors.groupingBy(Card::getMonth));
 
@@ -34,9 +33,10 @@ public class GameService {
                 })
                 .toList();
 
-        String redisKey = "selectedCards";
-        return redisOps.opsForList()
-                .rightPushAll(redisKey, selectedCards)
-                .then();
+        return selectedCardRepository.saveSelectedCard(selectedCards, roomId);
+    }
+
+    public Mono<Void> selectCard(RequestEvent<LeadSelectionReq> event) {
+
     }
 }
