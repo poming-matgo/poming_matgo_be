@@ -16,7 +16,7 @@ public class SelectedCardRepository {
     @Qualifier("cardRedisTemplate")
     @Autowired
     private ReactiveRedisOperations<String, Card> redisOps;
-    private static final String SELECTED_CARD_KEY_PREFIX = "selectedCards";
+    private static final String SELECTED_CARD_KEY_PREFIX = "selectedCards:";
 
     public Mono<Void> saveSelectedCard(List<Card> cards, Long roomId) {
         String redisKey = SELECTED_CARD_KEY_PREFIX + roomId;
