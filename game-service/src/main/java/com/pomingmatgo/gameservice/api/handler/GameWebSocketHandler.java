@@ -1,6 +1,8 @@
 package com.pomingmatgo.gameservice.api.handler;
 
+import com.fasterxml.jackson.core.type.TypeReference;
 import com.pomingmatgo.gameservice.api.handler.event.RequestEvent;
+import com.pomingmatgo.gameservice.api.request.WebSocket.LeadSelectionReq;
 import com.pomingmatgo.gameservice.domain.GameState;
 import com.pomingmatgo.gameservice.domain.service.matgo.RoomService;
 import com.pomingmatgo.gameservice.domain.service.matgo.PreGameService;
@@ -21,6 +23,8 @@ import reactor.core.publisher.Mono;
 
 import java.io.IOException;
 import java.util.Collection;
+import java.util.HashMap;
+import java.util.Map;
 
 import static com.pomingmatgo.gameservice.global.exception.WebSocketErrorCode.SYSTEM_ERROR;
 
@@ -33,6 +37,11 @@ public class GameWebSocketHandler implements WebSocketHandler {
     private final RoomService roomService;
     private final SessionManager sessionManager;
     private Collection<WebSocketSession> allUser;
+
+    private static final Map<String, Class<?>> typeMappings = new HashMap<>() {{
+        put("LEADER_SELECTION", LeadSelectionReq.class);
+    }};
+
     @Override
     public Mono<Void> handle(WebSocketSession session) {
         return session.receive()
@@ -41,13 +50,26 @@ public class GameWebSocketHandler implements WebSocketHandler {
     }
 
     private Mono<Void> handleMessage(WebSocketMessage message, WebSocketSession session) {
-        return Mono.fromCallable(() -> objectMapper.readValue(message.getPayloadAsText(), RequestEvent.class))
-                .flatMap(event -> processEvent(event, session))
+        return Mono.fromCallable(() -> objectMapper.readValue(message.getPayloadAsText(),
+                        new TypeReference<RequestEvent<Object>>() {}))
+                .flatMap(event -> {
+                    Class<?> targetType = typeMappings.getOrDefault(event.getEventType().getSubType(), Object.class);
+
+                    Object data = objectMapper.convertValue(event.getData(), targetType);
+
+                    RequestEvent<Object> typedEvent = new RequestEvent<>();
+                    typedEvent.setEventType(event.getEventType());
+                    typedEvent.setPlayerNum(event.getPlayerNum());
+                    typedEvent.setRoomId(event.getRoomId());
+                    typedEvent.setData(data);
+
+                    return processEvent(typedEvent, session);
+                })
                 .then();
     }
 
     private Mono<Void> processEvent(RequestEvent<?> event, WebSocketSession session) {
-        long userId = event.getUserId();
+        long userId = event.getPlayerNum();
         long roomId = event.getRoomId();
 
         return roomService.getGameState(roomId)
@@ -151,10 +173,11 @@ public class GameWebSocketHandler implements WebSocketHandler {
         if("LEADER_SELECTION".equals(eventType)) {
 
         }
+
         return Mono.empty();
     }
 
-    private Mono<Void> routeEvent(RequestEvent event, GameState gameState, int playerNum) {
+    private Mono<Void> routeEvent(RequestEvent<?> event, GameState gameState, int playerNum) {
         String eventType = event.getEventType().getType();
         allUser = sessionManager.getAllUser(gameState.getRoomId());
         if("ROOM".equals(eventType)) {
