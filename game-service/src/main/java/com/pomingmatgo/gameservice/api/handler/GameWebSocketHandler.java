@@ -171,6 +171,20 @@ public class GameWebSocketHandler implements WebSocketHandler {
     private Mono<Void> handlePreGameEvent(RequestEvent<?> event, GameState gameState, int playerNum) {
         String eventType = event.getEventType().getSubType();
         if("LEADER_SELECTION".equals(eventType)) {
+            if (event.getData() instanceof LeadSelectionReq) {
+                return preGameService.selectCard((RequestEvent<LeadSelectionReq>) event)
+                        .then(
+                                sendMessageToUsers(
+                                        allUser,
+                                        new WebSocketResDto<>(
+                                                playerNum,
+                                                "LEADER_SELECTION",
+                                                "선을 선택했습니다."
+                                        )
+                                )
+                        )
+                        .then(Mono.empty());
+            }
 
         }
 

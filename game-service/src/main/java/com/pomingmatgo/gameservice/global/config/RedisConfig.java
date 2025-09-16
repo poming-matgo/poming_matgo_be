@@ -1,7 +1,7 @@
 package com.pomingmatgo.gameservice.global.config;
 
 import com.pomingmatgo.gameservice.domain.GameState;
-import com.pomingmatgo.gameservice.domain.card.Card;
+import com.pomingmatgo.gameservice.domain.leadingPlayer.ChooseLeadPlayer;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.EnableAutoConfiguration;
 import org.springframework.boot.autoconfigure.data.redis.RedisAutoConfiguration;
@@ -44,13 +44,26 @@ public class RedisConfig {
     }
 
     @Bean(name="cardRedisTemplate")
-    public ReactiveRedisOperations<String, Card> cardRedisTemplate(ReactiveRedisConnectionFactory redisConnectionFactory) {
-        Jackson2JsonRedisSerializer<Card> serializer = new Jackson2JsonRedisSerializer<>(Card.class);
+    public ReactiveRedisOperations<String, String> cardRedisTemplate(ReactiveRedisConnectionFactory redisConnectionFactory) {
+        Jackson2JsonRedisSerializer<String> serializer = new Jackson2JsonRedisSerializer<>(String.class);
 
-        RedisSerializationContext.RedisSerializationContextBuilder<String, Card> builder = RedisSerializationContext
+        RedisSerializationContext.RedisSerializationContextBuilder<String, String> builder = RedisSerializationContext
                 .newSerializationContext(new StringRedisSerializer());
 
-        RedisSerializationContext<String, Card> context = builder.value(serializer).hashValue(serializer)
+        RedisSerializationContext<String, String> context = builder.value(serializer).hashValue(serializer)
+                .hashKey(serializer).build();
+
+        return new ReactiveRedisTemplate<>(redisConnectionFactory, context);
+    }
+
+    @Bean(name="chooseLeadPlayerTemplate")
+    public ReactiveRedisOperations<String, ChooseLeadPlayer> chooseLeadPlayerRedisTemplate(ReactiveRedisConnectionFactory redisConnectionFactory) {
+        Jackson2JsonRedisSerializer<ChooseLeadPlayer> serializer = new Jackson2JsonRedisSerializer<>(ChooseLeadPlayer.class);
+
+        RedisSerializationContext.RedisSerializationContextBuilder<String, ChooseLeadPlayer> builder = RedisSerializationContext
+                .newSerializationContext(new StringRedisSerializer());
+
+        RedisSerializationContext<String, ChooseLeadPlayer> context = builder.value(serializer).hashValue(serializer)
                 .hashKey(serializer).build();
 
         return new ReactiveRedisTemplate<>(redisConnectionFactory, context);

@@ -2,8 +2,9 @@ package com.pomingmatgo.gameservice.domain.service.matgo;
 
 import com.pomingmatgo.gameservice.api.handler.event.RequestEvent;
 import com.pomingmatgo.gameservice.api.request.WebSocket.LeadSelectionReq;
+import com.pomingmatgo.gameservice.domain.leadingPlayer.ChooseLeadPlayer;
 import com.pomingmatgo.gameservice.domain.card.Card;
-import com.pomingmatgo.gameservice.domain.repository.SelectedCardRepository;
+import com.pomingmatgo.gameservice.domain.repository.LeadingPlayerRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import reactor.core.publisher.Flux;
@@ -15,7 +16,7 @@ import java.util.*;
 @RequiredArgsConstructor
 public class PreGameService {
     private static final Random RANDOM = new Random();
-    private final SelectedCardRepository selectedCardRepository;
+    private final LeadingPlayerRepository leadingPlayerRepository;
 
     //선 플레이어 정하는 과정
     public Mono<Void> pickFiveCardsAndSave(Long roomId) {
@@ -31,11 +32,21 @@ public class PreGameService {
                             });
                 })
                 .collectList()
-                .flatMap(selectedCards -> selectedCardRepository.saveSelectedCard(selectedCards, roomId));
+                .flatMap(selectedCards -> leadingPlayerRepository.saveSelectedCard(selectedCards, roomId));
     }
 
 
     public Mono<Void> selectCard(RequestEvent<LeadSelectionReq> event) {
-        return Mono.empty();
+        return leadingPlayerRepository.getCardByIndex(event.getRoomId(), event.getData().getCardIndex())
+                .flatMap(selectedCard -> {
+                    ChooseLeadPlayer chooseLeadPlayer = new ChooseLeadPlayer();
+                    int playerNum = event.getPlayerNum();
+                    if (playerNum == 1) {
+                        chooseLeadPlayer.setPlayer1Month(selectedCard.getMonth());
+                    } else {
+                        chooseLeadPlayer.setPlayer2Month(selectedCard.getMonth());
+                    }
+                    return leadingPlayerRepository.savePlayerSelectedCard(event.getRoomId(), chooseLeadPlayer);
+                });
     }
 }
