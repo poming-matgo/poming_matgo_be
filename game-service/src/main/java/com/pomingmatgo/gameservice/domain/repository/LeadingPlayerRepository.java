@@ -49,4 +49,9 @@ public class LeadingPlayerRepository {
                 .then();
     }
 
+    public Mono<ChooseLeadPlayer> getPlayerSelectedCard(Long roomId) {
+        String redisKey = PLAYER_SELECTED_CARD_KEY_PREFIX + roomId;
+        return chooseLeadPlayerRedisOps.opsForValue().get(redisKey)
+                .defaultIfEmpty(new ChooseLeadPlayer());
+    }
 }

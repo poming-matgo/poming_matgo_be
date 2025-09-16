@@ -35,18 +35,26 @@ public class PreGameService {
                 .flatMap(selectedCards -> leadingPlayerRepository.saveSelectedCard(selectedCards, roomId));
     }
 
-
     public Mono<Void> selectCard(RequestEvent<LeadSelectionReq> event) {
-        return leadingPlayerRepository.getCardByIndex(event.getRoomId(), event.getData().getCardIndex())
-                .flatMap(selectedCard -> {
-                    ChooseLeadPlayer chooseLeadPlayer = new ChooseLeadPlayer();
-                    int playerNum = event.getPlayerNum();
-                    if (playerNum == 1) {
-                        chooseLeadPlayer.setPlayer1Month(selectedCard.getMonth());
-                    } else {
-                        chooseLeadPlayer.setPlayer2Month(selectedCard.getMonth());
-                    }
-                    return leadingPlayerRepository.savePlayerSelectedCard(event.getRoomId(), chooseLeadPlayer);
-                });
+        return leadingPlayerRepository.getPlayerSelectedCard(event.getRoomId())
+                .flatMap(selectedCards ->
+                        leadingPlayerRepository.getCardByIndex(event.getRoomId(), event.getData().getCardIndex())
+                                .flatMap(curUserselectedCard -> {
+                                    int playerNum = event.getPlayerNum();
+                                    if (playerNum == 1 && selectedCards.getPlayer1Month() == 0) {
+                                        if(selectedCards.getPlayer2Month() == curUserselectedCard.getMonth()){
+                                            throw new IllegalArgumentException("이미 선택된 카드입니다.");
+                                        }
+                                        selectedCards.setPlayer1Month(curUserselectedCard.getMonth());
+                                    } else if (playerNum == 2 && selectedCards.getPlayer2Month() == 0) {
+                                        selectedCards.setPlayer2Month(curUserselectedCard.getMonth());
+                                        if(selectedCards.getPlayer1Month() == curUserselectedCard.getMonth()){
+                                            throw new IllegalArgumentException("이미 선택된 카드입니다.");
+                                        }
+                                    }
+
+                                    return leadingPlayerRepository.savePlayerSelectedCard(event.getRoomId(), selectedCards);
+                                })
+                );
     }
 }
