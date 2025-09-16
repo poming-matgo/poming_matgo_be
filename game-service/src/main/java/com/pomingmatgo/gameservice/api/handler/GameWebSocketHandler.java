@@ -11,6 +11,7 @@ import com.pomingmatgo.gameservice.global.WebSocketResDto;
 import com.pomingmatgo.gameservice.global.exception.BusinessException;
 import com.pomingmatgo.gameservice.global.exception.ErrorCode;
 import com.pomingmatgo.gameservice.global.exception.WebSocketBusinessException;
+import com.pomingmatgo.gameservice.global.exception.WebSocketErrorCode;
 import com.pomingmatgo.gameservice.global.exception.dto.WebSocketErrorResDto;
 import com.pomingmatgo.gameservice.global.session.SessionManager;
 import lombok.RequiredArgsConstructor;
@@ -108,7 +109,7 @@ public class GameWebSocketHandler implements WebSocketHandler {
                     } else if (userId == gs.getPlayer2Id()) {
                         return Mono.just(2);
                     } else {
-                        return Mono.error(new BusinessException(ErrorCode.NOT_IN_ROOM));
+                        return Mono.error(new WebSocketBusinessException(WebSocketErrorCode.NOT_IN_ROOM));
                     }
                 });
     }
