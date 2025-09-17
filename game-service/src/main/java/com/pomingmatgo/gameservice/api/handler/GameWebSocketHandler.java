@@ -3,13 +3,12 @@ package com.pomingmatgo.gameservice.api.handler;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.pomingmatgo.gameservice.api.handler.event.RequestEvent;
 import com.pomingmatgo.gameservice.api.request.WebSocket.LeadSelectionReq;
+import com.pomingmatgo.gameservice.api.response.websocket.LeadSelectionRes;
 import com.pomingmatgo.gameservice.domain.GameState;
 import com.pomingmatgo.gameservice.domain.service.matgo.RoomService;
 import com.pomingmatgo.gameservice.domain.service.matgo.PreGameService;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.pomingmatgo.gameservice.global.WebSocketResDto;
-import com.pomingmatgo.gameservice.global.exception.BusinessException;
-import com.pomingmatgo.gameservice.global.exception.ErrorCode;
 import com.pomingmatgo.gameservice.global.exception.WebSocketBusinessException;
 import com.pomingmatgo.gameservice.global.exception.WebSocketErrorCode;
 import com.pomingmatgo.gameservice.global.exception.dto.WebSocketErrorResDto;
@@ -171,6 +170,7 @@ public class GameWebSocketHandler implements WebSocketHandler {
 
     private Mono<Void> handlePreGameEvent(RequestEvent<?> event, GameState gameState, int playerNum) {
         String eventType = event.getEventType().getSubType();
+        long roomId = gameState.getRoomId();
         if("LEADER_SELECTION".equals(eventType)) {
             if (event.getData() instanceof LeadSelectionReq) {
                 return preGameService.selectCard((RequestEvent<LeadSelectionReq>) event)
@@ -184,7 +184,8 @@ public class GameWebSocketHandler implements WebSocketHandler {
                                         )
                                 )
                         )
-                        .then(Mono.empty());
+                        .then(preGameService.isAllPlayerCardSelected(roomId))
+                        .flatMap(allSelected -> Boolean.TRUE.equals(allSelected) ? handleAllSelectedEvent(allUser, roomId) : Mono.empty());
             }
 
         }
@@ -212,5 +213,18 @@ public class GameWebSocketHandler implements WebSocketHandler {
                 "게임이 시작됐습니다."
         );
         return sendMessageToUsers(allUsers, startDto);
+    }
+
+    public Mono<Void> handleAllSelectedEvent(Collection<WebSocketSession> allUsers, long roomId) {
+        return preGameService.getLeadSelectionRes(roomId)
+                .flatMap(leadSelectionRes -> {
+                    WebSocketResDto<LeadSelectionRes> setLeadDto = new WebSocketResDto<>(
+                            0,
+                            "LEADER_SELECTION",
+                            "선을 정했습니다.",
+                            leadSelectionRes
+                    );
+                    return sendMessageToUsers(allUsers, setLeadDto);
+                });
     }
 }

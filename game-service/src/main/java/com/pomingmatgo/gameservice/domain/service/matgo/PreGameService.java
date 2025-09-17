@@ -2,7 +2,9 @@ package com.pomingmatgo.gameservice.domain.service.matgo;
 
 import com.pomingmatgo.gameservice.api.handler.event.RequestEvent;
 import com.pomingmatgo.gameservice.api.request.WebSocket.LeadSelectionReq;
+import com.pomingmatgo.gameservice.api.response.websocket.LeadSelectionRes;
 import com.pomingmatgo.gameservice.domain.card.Card;
+import com.pomingmatgo.gameservice.domain.leadingplayer.ChooseLeadPlayer;
 import com.pomingmatgo.gameservice.domain.repository.LeadingPlayerRepository;
 import com.pomingmatgo.gameservice.global.exception.WebSocketBusinessException;
 import lombok.RequiredArgsConstructor;
@@ -62,4 +64,31 @@ public class PreGameService {
             throw new WebSocketBusinessException(ALREADY_SELECTED_CARD);
         }
     }
+
+    public Mono<Boolean> isAllPlayerCardSelected(Long roomId) {
+        return leadingPlayerRepository.getPlayerSelectedCard(roomId)
+                .map(selectedCards -> selectedCards.getPlayer1Month() != 0 && selectedCards.getPlayer2Month() != 0);
+    }
+
+    public Mono<LeadSelectionRes> getLeadSelectionRes(Long roomId) {
+        return leadingPlayerRepository.getPlayerSelectedCard(roomId)
+                .zipWith(leadingPlayerRepository.getAllCards(roomId).collectList())
+                .map(tuple -> {
+                    ChooseLeadPlayer chooseLeadPlayer = tuple.getT1();
+                    List<Card> cards = tuple.getT2();
+
+                    int player1Month = chooseLeadPlayer.getPlayer1Month();
+                    int player2Month = chooseLeadPlayer.getPlayer2Month();
+                    int leadPlayer = player1Month < player2Month ? 2 : 1;
+
+                    LeadSelectionRes res = new LeadSelectionRes();
+                    res.setPlayer1Month(player1Month);
+                    res.setPlayer2Month(player2Month);
+                    res.setLeadPlayer(leadPlayer);
+                    res.setFiveCards(cards);
+
+                    return res;
+                });
+    }
+
 }
