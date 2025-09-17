@@ -1,6 +1,6 @@
 package com.pomingmatgo.gameservice.domain.repository;
 
-import com.pomingmatgo.gameservice.domain.leadingPlayer.ChooseLeadPlayer;
+import com.pomingmatgo.gameservice.domain.leadingplayer.ChooseLeadPlayer;
 import com.pomingmatgo.gameservice.domain.card.Card;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Qualifier;

@@ -1,4 +1,4 @@
-package com.pomingmatgo.gameservice.domain.leadingPlayer;
+package com.pomingmatgo.gameservice.domain.leadingplayer;
 
 import lombok.Getter;
 import lombok.Setter;
