@@ -4,12 +4,15 @@ import com.pomingmatgo.gameservice.api.handler.event.RequestEvent;
 import com.pomingmatgo.gameservice.api.request.WebSocket.LeadSelectionReq;
 import com.pomingmatgo.gameservice.domain.card.Card;
 import com.pomingmatgo.gameservice.domain.repository.LeadingPlayerRepository;
+import com.pomingmatgo.gameservice.global.exception.WebSocketBusinessException;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 
 import java.util.*;
+
+import static com.pomingmatgo.gameservice.global.exception.WebSocketErrorCode.ALREADY_SELECTED_CARD;
 
 @Service
 @RequiredArgsConstructor
@@ -56,7 +59,7 @@ public class PreGameService {
 
     private void validateCardSelection(int otherPlayerMonth, int selectedMonth) {
         if (otherPlayerMonth == selectedMonth) {
-            throw new IllegalArgumentException("이미 선택된 카드입니다.");
+            throw new WebSocketBusinessException(ALREADY_SELECTED_CARD);
         }
     }
 }
