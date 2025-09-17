@@ -5,6 +5,7 @@ import com.pomingmatgo.gameservice.api.handler.event.RequestEvent;
 import com.pomingmatgo.gameservice.api.request.WebSocket.LeadSelectionReq;
 import com.pomingmatgo.gameservice.api.response.websocket.LeadSelectionRes;
 import com.pomingmatgo.gameservice.domain.GameState;
+import com.pomingmatgo.gameservice.domain.InstalledCard;
 import com.pomingmatgo.gameservice.domain.service.matgo.RoomService;
 import com.pomingmatgo.gameservice.domain.service.matgo.PreGameService;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -24,6 +25,7 @@ import reactor.core.publisher.Mono;
 import java.io.IOException;
 import java.util.Collection;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 
 import static com.pomingmatgo.gameservice.global.exception.WebSocketErrorCode.SYSTEM_ERROR;
@@ -113,17 +115,19 @@ public class GameWebSocketHandler implements WebSocketHandler {
                 });
     }
 
+    private <T> Mono<Void> sendMessageToSession(WebSocketSession session, WebSocketResDto<T> response) {
+        try {
+            String jsonMessage = objectMapper.writeValueAsString(response);
+            WebSocketMessage webSocketMessage = session.textMessage(jsonMessage);
+            return session.send(Mono.just(webSocketMessage));
+        } catch (Exception e) {
+            return Mono.empty(); //todo: 예외처리로직  추가해야함
+        }
+    }
+
     public <T> Mono<Void> sendMessageToUsers(Collection<WebSocketSession> users, WebSocketResDto<T> response) {
         return Flux.fromIterable(users)
-                .flatMap(session -> {
-                    try {
-                        String jsonMessage = objectMapper.writeValueAsString(response);
-                        WebSocketMessage webSocketMessage = session.textMessage(jsonMessage);
-                        return session.send(Mono.just(webSocketMessage));
-                    } catch (Exception e) {
-                        return Mono.empty(); //todo: 에러처리로직 추가해야함
-                    }
-                })
+                .flatMap(session -> sendMessageToSession(session, response))
                 .then();
     }
 
@@ -179,13 +183,20 @@ public class GameWebSocketHandler implements WebSocketHandler {
                                         allUser,
                                         new WebSocketResDto<>(
                                                 playerNum,
-                                                "LEADER_SELECTION_RESULT",
-                                                "선두 플레이어 선택 결과"
+                                                "LEADER_SELECTION",
+                                                "선두 플레이어 선택"
                                         )
                                 )
                         )
                         .then(preGameService.isAllPlayerCardSelected(roomId))
-                        .flatMap(allSelected -> Boolean.TRUE.equals(allSelected) ? handleAllSelectedEvent(allUser, roomId) : Mono.empty());
+                        .flatMap(allSelected -> {
+                            if (Boolean.TRUE.equals(allSelected)) {
+                                return handleAllSelectedEvent(allUser, roomId)
+                                        .then(Mono.defer(() -> preGameService.distributeCards(roomId)))
+                                        .flatMap(cards -> sendDistributedCardInfo(roomId, cards).then());
+                            }
+                            return Mono.empty();
+                        });
             }
 
         }
@@ -220,11 +231,41 @@ public class GameWebSocketHandler implements WebSocketHandler {
                 .flatMap(leadSelectionRes -> {
                     WebSocketResDto<LeadSelectionRes> setLeadDto = new WebSocketResDto<>(
                             0,
-                            "LEADER_SELECTION",
+                            "LEADER_SELECTION_RESULT",
                             "선을 정했습니다.",
                             leadSelectionRes
                     );
                     return sendMessageToUsers(allUsers, setLeadDto);
                 });
+    }
+
+    private Mono<Void> sendDistributedCardInfo(long roomId, InstalledCard installedCard) {
+        WebSocketResDto<List<String>> ret1 = new WebSocketResDto<>(
+                1,
+                "DISTRIBUTE_CARD",
+                "카드를 배분합니다.",
+                installedCard.getPlayer1()
+                        .stream()
+                        .map(Enum::name)
+                        .toList()
+        );
+
+        WebSocketResDto<List<String>> ret2 = new WebSocketResDto<>(
+                2,
+                "DISTRIBUTE_CARD",
+                "카드를 배분합니다.",
+                installedCard.getPlayer2()
+                        .stream()
+                        .map(Enum::name)
+                        .toList()
+        );
+
+        WebSocketSession player1Session = sessionManager.getSession(roomId, 1);
+        WebSocketSession player2Session = sessionManager.getSession(roomId, 2);
+
+        return Mono.when(
+                sendMessageToSession(player1Session, ret1),
+                sendMessageToSession(player2Session, ret2)
+        );
     }
 }

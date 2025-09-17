@@ -3,8 +3,10 @@ package com.pomingmatgo.gameservice.domain.service.matgo;
 import com.pomingmatgo.gameservice.api.handler.event.RequestEvent;
 import com.pomingmatgo.gameservice.api.request.WebSocket.LeadSelectionReq;
 import com.pomingmatgo.gameservice.api.response.websocket.LeadSelectionRes;
+import com.pomingmatgo.gameservice.domain.InstalledCard;
 import com.pomingmatgo.gameservice.domain.card.Card;
 import com.pomingmatgo.gameservice.domain.leadingplayer.ChooseLeadPlayer;
+import com.pomingmatgo.gameservice.domain.repository.InstalledCardRepository;
 import com.pomingmatgo.gameservice.domain.repository.LeadingPlayerRepository;
 import com.pomingmatgo.gameservice.global.exception.WebSocketBusinessException;
 import lombok.RequiredArgsConstructor;
@@ -21,6 +23,7 @@ import static com.pomingmatgo.gameservice.global.exception.WebSocketErrorCode.AL
 public class PreGameService {
     private static final Random RANDOM = new Random();
     private final LeadingPlayerRepository leadingPlayerRepository;
+    private final InstalledCardRepository installedCardRepository;
 
     //선 플레이어 정하는 과정
     public Mono<Void> pickFiveCardsAndSave(Long roomId) {
@@ -89,6 +92,21 @@ public class PreGameService {
 
                     return res;
                 });
+    }
+
+    public Mono<InstalledCard> distributeCards(long roomId) {
+        List<Card> deck = new ArrayList<>(List.of(Card.values()));
+        
+        Collections.shuffle(deck);
+
+        LinkedList<Card> playerA = new LinkedList<>(deck.subList(0, 10));
+        LinkedList<Card> playerB = new LinkedList<>(deck.subList(10, 20));
+        ArrayList<Card> boardDeck = new ArrayList<>(deck.subList(20, deck.size()));
+
+        InstalledCard installedCard = new InstalledCard(playerA, playerB, boardDeck);
+
+        return installedCardRepository.save(installedCard, roomId)
+                .thenReturn(installedCard);
     }
 
 }

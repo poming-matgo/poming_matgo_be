@@ -1,6 +1,7 @@
 package com.pomingmatgo.gameservice.global.config;
 
 import com.pomingmatgo.gameservice.domain.GameState;
+import com.pomingmatgo.gameservice.domain.InstalledCard;
 import com.pomingmatgo.gameservice.domain.leadingplayer.ChooseLeadPlayer;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.EnableAutoConfiguration;
@@ -64,6 +65,19 @@ public class RedisConfig {
                 .newSerializationContext(new StringRedisSerializer());
 
         RedisSerializationContext<String, ChooseLeadPlayer> context = builder.value(serializer).hashValue(serializer)
+                .hashKey(serializer).build();
+
+        return new ReactiveRedisTemplate<>(redisConnectionFactory, context);
+    }
+
+    @Bean(name="installedCardTemplate")
+    public ReactiveRedisOperations<String, InstalledCard> installedCardRedisTemplate(ReactiveRedisConnectionFactory redisConnectionFactory) {
+        Jackson2JsonRedisSerializer<InstalledCard> serializer = new Jackson2JsonRedisSerializer<>(InstalledCard.class);
+
+        RedisSerializationContext.RedisSerializationContextBuilder<String, InstalledCard> builder = RedisSerializationContext
+                .newSerializationContext(new StringRedisSerializer());
+
+        RedisSerializationContext<String, InstalledCard> context = builder.value(serializer).hashValue(serializer)
                 .hashKey(serializer).build();
 
         return new ReactiveRedisTemplate<>(redisConnectionFactory, context);
