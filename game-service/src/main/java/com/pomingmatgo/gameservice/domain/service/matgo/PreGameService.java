@@ -5,7 +5,7 @@ import com.pomingmatgo.gameservice.api.request.WebSocket.LeadSelectionReq;
 import com.pomingmatgo.gameservice.api.response.websocket.LeadSelectionRes;
 import com.pomingmatgo.gameservice.domain.InstalledCard;
 import com.pomingmatgo.gameservice.domain.card.Card;
-import com.pomingmatgo.gameservice.domain.leadingplayer.ChooseLeadPlayer;
+import com.pomingmatgo.gameservice.domain.ChooseLeadPlayer;
 import com.pomingmatgo.gameservice.domain.repository.InstalledCardRepository;
 import com.pomingmatgo.gameservice.domain.repository.LeadingPlayerRepository;
 import com.pomingmatgo.gameservice.global.exception.WebSocketBusinessException;

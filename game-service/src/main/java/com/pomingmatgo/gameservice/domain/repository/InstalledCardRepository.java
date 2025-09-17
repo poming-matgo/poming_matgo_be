@@ -1,11 +1,11 @@
 package com.pomingmatgo.gameservice.domain.repository;
 
-import com.pomingmatgo.gameservice.domain.InstalledCard;
 import com.pomingmatgo.gameservice.domain.card.Card;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.data.redis.core.ReactiveRedisOperations;
 import org.springframework.stereotype.Repository;
+import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 
 import java.util.List;
@@ -36,7 +36,16 @@ public class InstalledCardRepository {
     }
 
     public Mono<Boolean> saveRevealedCard(List<Card> cards, long roomId) {
-        return saveCards(cards, roomId, REVEALED_CARD_KEY_PREFIX);
+        return Flux.fromIterable(cards)
+                .collectMultimap(Card::getMonth, Enum::name)
+                .flatMapMany(map -> Flux.fromIterable(map.entrySet()))
+                .flatMap(entry -> {
+                    int month = entry.getKey();
+                    List<String> cardNames = (List<String>)entry.getValue();
+                    String redisKey = String.format("%s%d:%d", REVEALED_CARD_KEY_PREFIX, roomId, month);
+                    return redisOps.opsForValue().set(redisKey, cardNames);
+                })
+                .all(Boolean::booleanValue);
     }
 
     public Mono<Boolean> saveHiddenCard(List<Card> cards, long roomId) {

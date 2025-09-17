@@ -2,8 +2,7 @@ package com.pomingmatgo.gameservice.global.config;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.pomingmatgo.gameservice.domain.GameState;
-import com.pomingmatgo.gameservice.domain.InstalledCard;
-import com.pomingmatgo.gameservice.domain.leadingplayer.ChooseLeadPlayer;
+import com.pomingmatgo.gameservice.domain.ChooseLeadPlayer;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.EnableAutoConfiguration;
 import org.springframework.boot.autoconfigure.data.redis.RedisAutoConfiguration;
