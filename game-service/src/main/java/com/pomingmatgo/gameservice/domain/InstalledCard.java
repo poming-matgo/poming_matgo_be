@@ -14,5 +14,6 @@ import java.util.LinkedList;
 public class InstalledCard {
     private LinkedList<Card> player1;
     private LinkedList<Card> player2;
-    private ArrayList<Card> boardDeck;
+    private ArrayList<Card> revealedCard;
+    private ArrayList<Card> hiddenCard;
 }

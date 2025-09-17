@@ -1,5 +1,6 @@
 package com.pomingmatgo.gameservice.global.config;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.pomingmatgo.gameservice.domain.GameState;
 import com.pomingmatgo.gameservice.domain.InstalledCard;
 import com.pomingmatgo.gameservice.domain.leadingplayer.ChooseLeadPlayer;
@@ -16,6 +17,8 @@ import org.springframework.data.redis.core.ReactiveRedisTemplate;
 import org.springframework.data.redis.serializer.Jackson2JsonRedisSerializer;
 import org.springframework.data.redis.serializer.RedisSerializationContext;
 import org.springframework.data.redis.serializer.StringRedisSerializer;
+
+import java.util.List;
 
 @Configuration
 @EnableAutoConfiguration(exclude={RedisAutoConfiguration.class, RedisReactiveAutoConfiguration.class})
@@ -70,18 +73,19 @@ public class RedisConfig {
         return new ReactiveRedisTemplate<>(redisConnectionFactory, context);
     }
 
-    @Bean(name="installedCardTemplate")
-    public ReactiveRedisOperations<String, InstalledCard> installedCardRedisTemplate(ReactiveRedisConnectionFactory redisConnectionFactory) {
-        Jackson2JsonRedisSerializer<InstalledCard> serializer = new Jackson2JsonRedisSerializer<>(InstalledCard.class);
+    @Bean(name = "installedCardTemplate")
+    public ReactiveRedisOperations<String, List<String>> installedCardRedisTemplate(ReactiveRedisConnectionFactory redisConnectionFactory) {
+        ObjectMapper objectMapper = new ObjectMapper();
+        Jackson2JsonRedisSerializer<List<String>> serializer = new Jackson2JsonRedisSerializer<>(objectMapper.getTypeFactory().constructCollectionType(List.class, String.class));
 
-        RedisSerializationContext.RedisSerializationContextBuilder<String, InstalledCard> builder = RedisSerializationContext
+        RedisSerializationContext.RedisSerializationContextBuilder<String, List<String>> builder = RedisSerializationContext
                 .newSerializationContext(new StringRedisSerializer());
 
-        RedisSerializationContext<String, InstalledCard> context = builder.value(serializer).hashValue(serializer)
-                .hashKey(serializer).build();
+        RedisSerializationContext<String, List<String>> context = builder.value(serializer)
+                .hashValue(serializer)
+                .hashKey(serializer)
+                .build();
 
         return new ReactiveRedisTemplate<>(redisConnectionFactory, context);
     }
-
-
 }
