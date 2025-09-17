@@ -95,23 +95,26 @@ public class PreGameService {
     }
 
     public Mono<InstalledCard> distributeCards(long roomId) {
-        List<Card> deck = new ArrayList<>(List.of(Card.values()));
-        Collections.shuffle(deck);
+        return Flux.fromArray(Card.values())
+                .collectList()
+                .map(ArrayList::new)
+                .doOnNext(Collections::shuffle)
+                .flatMap(deck -> {
+                    List<Card> player1 = new ArrayList<>(deck.subList(0, 10));
+                    List<Card> player2 = new ArrayList<>(deck.subList(10, 20));
+                    List<Card> revealedCard = new ArrayList<>(deck.subList(20, 28));
+                    List<Card> hiddenCard = new ArrayList<>(deck.subList(28, deck.size()));
 
-        LinkedList<Card> player1 = new LinkedList<>(deck.subList(0, 10));
-        LinkedList<Card> player2 = new LinkedList<>(deck.subList(10, 20));
-        ArrayList<Card> revealedCard = new ArrayList<>(deck.subList(20, 28));
-        ArrayList<Card> hiddenCard = new ArrayList<>(deck.subList(28, deck.size()));
+                    InstalledCard installedCard = new InstalledCard(player1, player2, revealedCard, hiddenCard);
 
-        InstalledCard installedCard = new InstalledCard(player1, player2, revealedCard, hiddenCard);
-
-        return Mono.zip(
-                        installedCardRepository.savePlayer1Card(player1, roomId),
-                        installedCardRepository.savePlayer2Card(player2, roomId),
-                        installedCardRepository.saveRevealedCard(revealedCard, roomId),
-                        installedCardRepository.saveHiddenCard(hiddenCard, roomId)
-                )
-                .thenReturn(installedCard);
+                    return Mono.zip(
+                            installedCardRepository.savePlayer1Card(player1, roomId),
+                            installedCardRepository.savePlayer2Card(player2, roomId),
+                            installedCardRepository.saveRevealedCard(revealedCard, roomId),
+                            installedCardRepository.saveHiddenCard(hiddenCard, roomId)
+                    ).thenReturn(installedCard);
+                });
     }
+
 
 }

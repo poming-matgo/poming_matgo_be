@@ -5,15 +5,14 @@ import lombok.AllArgsConstructor;
 import lombok.Getter;
 import org.springframework.data.redis.core.RedisHash;
 
-import java.util.ArrayList;
-import java.util.LinkedList;
+import java.util.List;
 
 @Getter
 @AllArgsConstructor
 @RedisHash(value = "installedCard")
 public class InstalledCard {
-    private LinkedList<Card> player1;
-    private LinkedList<Card> player2;
-    private ArrayList<Card> revealedCard;
-    private ArrayList<Card> hiddenCard;
+    private List<Card> player1;
+    private List<Card> player2;
+    private List<Card> revealedCard;
+    private List<Card> hiddenCard;
 }
