@@ -149,7 +149,7 @@ public class GameWebSocketHandler implements WebSocketHandler {
                             )
                                     .then(roomService.checkAllPlayersReady(Mono.just(updatedGameState)))
                                     .flatMap(allReady -> Boolean.TRUE.equals(allReady)
-                                            ? handleAllReadyEvent(allUser)
+                                            ? handleAllReadyEvent()
                                             .then(Mono.defer(() -> preGameService.pickFiveCardsAndSave(updatedGameState.getRoomId())))
                                             : Mono.empty()
                                     )
@@ -191,7 +191,7 @@ public class GameWebSocketHandler implements WebSocketHandler {
                         .then(preGameService.isAllPlayerCardSelected(roomId))
                         .flatMap(allSelected -> {
                             if (Boolean.TRUE.equals(allSelected)) {
-                                return handleAllSelectedEvent(allUser, roomId)
+                                return handleAllSelectedEvent(roomId)
                                         .then(Mono.defer(() -> preGameService.distributeCards(roomId)))
                                         .flatMap(cards -> sendDistributedCardInfo(roomId, cards).then());
                             }
@@ -216,17 +216,17 @@ public class GameWebSocketHandler implements WebSocketHandler {
         return Mono.empty();
     }
 
-    private Mono<Void> handleAllReadyEvent(Collection<WebSocketSession> allUsers) {
+    private Mono<Void> handleAllReadyEvent() {
         // 게임이 시작되었다는 메시지를 모든 사용자에게 전송
         WebSocketResDto<Void> startDto = new WebSocketResDto<>(
                 0,
                 "START",
                 "게임이 시작됐습니다."
         );
-        return sendMessageToUsers(allUsers, startDto);
+        return sendMessageToUsers(allUser, startDto);
     }
 
-    public Mono<Void> handleAllSelectedEvent(Collection<WebSocketSession> allUsers, long roomId) {
+    public Mono<Void> handleAllSelectedEvent(long roomId) {
         return preGameService.getLeadSelectionRes(roomId)
                 .flatMap(leadSelectionRes -> {
                     WebSocketResDto<LeadSelectionRes> setLeadDto = new WebSocketResDto<>(
@@ -235,7 +235,7 @@ public class GameWebSocketHandler implements WebSocketHandler {
                             "선을 정했습니다.",
                             leadSelectionRes
                     );
-                    return sendMessageToUsers(allUsers, setLeadDto);
+                    return sendMessageToUsers(allUser, setLeadDto);
                 });
     }
 
