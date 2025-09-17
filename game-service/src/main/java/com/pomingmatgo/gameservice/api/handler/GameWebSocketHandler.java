@@ -179,8 +179,8 @@ public class GameWebSocketHandler implements WebSocketHandler {
                                         allUser,
                                         new WebSocketResDto<>(
                                                 playerNum,
-                                                "LEADER_SELECTION",
-                                                "선을 선택했습니다."
+                                                "LEADER_SELECTION_RESULT",
+                                                "선두 플레이어 선택 결과"
                                         )
                                 )
                         )
