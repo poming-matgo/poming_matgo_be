@@ -100,4 +100,39 @@ class ScoreCalculatorTest {
                 .verifyComplete();
     }
 
+    @Test
+    void testCalculateKKUTScore1() {
+        //고도리
+        Flux<Card> testCards = Flux.just(
+                Card.FEB_1, Card.APR_1, Card.AUG_2
+        );
+
+        StepVerifier.create(scoreCalculator.calculateKkutScore(testCards))
+                .expectNext(5)
+                .verifyComplete();
+    }
+
+    @Test
+    void testCalculateKKUTScore2() {
+        //고도리 + 일반 끗 3장
+        Flux<Card> testCards = Flux.just(
+                Card.FEB_1, Card.APR_1, Card.AUG_2, Card.MAY_1, Card.OCT_1, Card.DEC_2
+        );
+
+        StepVerifier.create(scoreCalculator.calculateKkutScore(testCards))
+                .expectNext(7)
+                .verifyComplete();
+    }
+
+    @Test
+    void testCalculateKKUTScore3() {
+        //일반 끗 6장
+        Flux<Card> testCards = Flux.just(
+                Card.APR_1, Card.AUG_2, Card.MAY_1, Card.JUN_1, Card.OCT_1, Card.DEC_2
+        );
+
+        StepVerifier.create(scoreCalculator.calculateKkutScore(testCards))
+                .expectNext(2)
+                .verifyComplete();
+    }
 }
