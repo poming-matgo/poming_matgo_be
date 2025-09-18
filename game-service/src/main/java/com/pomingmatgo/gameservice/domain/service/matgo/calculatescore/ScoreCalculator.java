@@ -6,7 +6,10 @@ import com.pomingmatgo.gameservice.domain.card.SpecialType;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 
+import java.util.Map;
 import java.util.Objects;
+import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 public class ScoreCalculator {
     public Mono<Integer> calculatePiScore(Flux<Card> cardFlux) {
@@ -41,11 +44,28 @@ public class ScoreCalculator {
                     boolean isGodori = cards.stream()
                             .filter(card -> card.getSpecialType() == SpecialType.GODORI)
                             .limit(3)
-                            .count() >=3;
+                            .count() >= 3;
 
                     int godoriScore = isGodori ? 5 : 0;
 
                     return size < 5 ? godoriScore : godoriScore + size - 4;
+                });
+    }
+
+    public Mono<Integer> calculateDdiScore(Flux<Card> cardFlux) {
+        return cardFlux.collectList()
+                .map(cards -> {
+                    long size = cards.size();
+
+                    Map<SpecialType, Long> specialTypeCount = cards.stream()
+                            .filter(card -> card.getSpecialType() != null)
+                            .collect(Collectors.groupingBy(Card::getSpecialType, Collectors.counting()));
+
+                    int additionalScore = (int) Stream.of(SpecialType.HONG_DAN, SpecialType.CHO_DAN, SpecialType.CHUNG_DAN)
+                            .filter(type -> specialTypeCount.getOrDefault(type, 0L) >= 3)
+                            .count() * 3;
+
+                    return size < 5 ? additionalScore : additionalScore + (int) size - 4;
                 });
     }
 }
