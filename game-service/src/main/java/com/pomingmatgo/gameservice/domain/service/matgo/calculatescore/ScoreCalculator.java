@@ -17,4 +17,20 @@ public class ScoreCalculator {
             return piCnt + (Objects.equals(card.getSpecialType(), SpecialType.SSANG_PI) ? 2 : 1);
         }).map(piCnt -> piCnt < 10 ? 0 : piCnt - 9);
     }
+
+    public Mono<Integer> calculateGwangScore(Flux<Card> cardFlux) {
+        return cardFlux.collectList()
+                .map(cards -> {
+                    int size = cards.size();
+                    boolean hasBiGwang = cards.stream()
+                            .anyMatch(card -> Objects.equals(card.getSpecialType(), SpecialType.BI_GWANG));
+
+                    return switch (size) {
+                        case 3 -> hasBiGwang ? 2 : 3;
+                        case 4 -> 4;
+                        case 5 -> 15;
+                        default -> 0;
+                    };
+                });
+    }
 }
