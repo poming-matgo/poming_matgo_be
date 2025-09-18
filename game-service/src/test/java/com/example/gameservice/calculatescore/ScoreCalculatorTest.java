@@ -1,17 +1,13 @@
 package com.example.gameservice.calculatescore;
 
 import com.pomingmatgo.gameservice.domain.card.Card;
-import com.pomingmatgo.gameservice.domain.repository.ScoreCardRepository;
 import com.pomingmatgo.gameservice.domain.service.matgo.calculatescore.ScoreCalculator;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
-import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import reactor.core.publisher.Flux;
 import reactor.test.StepVerifier;
-
-import static org.mockito.BDDMockito.given;
 
 @ExtendWith(MockitoExtension.class)
 class ScoreCalculatorTest {
@@ -44,5 +40,64 @@ class ScoreCalculatorTest {
                 .verifyComplete();
     }
 
+    @Test
+    void testCalculateGwangScore1() {
+        //비삼광
+        Flux<Card> testCards = Flux.just(
+                Card.JAN_1, Card.MAR_1, Card.DEC_1
+        );
+
+        StepVerifier.create(scoreCalculator.calculateGwangScore(testCards))
+                .expectNext(2)
+                .verifyComplete();
+    }
+
+    @Test
+    void testCalculateGwangScore2() {
+        //삼광
+        Flux<Card> testCards = Flux.just(
+                Card.JAN_1, Card.MAR_1, Card.AUG_1
+        );
+
+        StepVerifier.create(scoreCalculator.calculateGwangScore(testCards))
+                .expectNext(3)
+                .verifyComplete();
+    }
+
+    @Test
+    void testCalculateGwangScore3() {
+        //사광 - 비광 포함
+        Flux<Card> testCards = Flux.just(
+                Card.JAN_1, Card.MAR_1, Card.AUG_1, Card.DEC_1
+        );
+
+        StepVerifier.create(scoreCalculator.calculateGwangScore(testCards))
+                .expectNext(4)
+                .verifyComplete();
+    }
+
+    @Test
+    void testCalculateGwangScore4() {
+        //사광 + 비광 불포함
+        Flux<Card> testCards = Flux.just(
+                Card.JAN_1, Card.MAR_1, Card.AUG_1, Card.NOV_1
+        );
+
+        StepVerifier.create(scoreCalculator.calculateGwangScore(testCards))
+                .expectNext(4)
+                .verifyComplete();
+    }
+
+    @Test
+    void testCalculateGwangScore5() {
+        //오광
+        Flux<Card> testCards = Flux.just(
+                Card.JAN_1, Card.MAR_1, Card.AUG_1, Card.NOV_1, Card.DEC_1
+        );
+
+        StepVerifier.create(scoreCalculator.calculateGwangScore(testCards))
+                .expectNext(15)
+                .verifyComplete();
+    }
 
 }
