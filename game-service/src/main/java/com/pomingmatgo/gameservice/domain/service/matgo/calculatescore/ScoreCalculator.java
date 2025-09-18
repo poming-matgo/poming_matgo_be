@@ -33,4 +33,19 @@ public class ScoreCalculator {
                     };
                 });
     }
+
+    public Mono<Integer> calculateKkutScore(Flux<Card> cardFlux) {
+        return cardFlux.collectList()
+                .map(cards -> {
+                    int size = cards.size();
+                    boolean isGodori = cards.stream()
+                            .filter(card -> card.getSpecialType() == SpecialType.GODORI)
+                            .limit(3)
+                            .count() >=3;
+
+                    int godoriScore = isGodori ? 5 : 0;
+
+                    return size < 5 ? godoriScore : godoriScore + size - 4;
+                });
+    }
 }
