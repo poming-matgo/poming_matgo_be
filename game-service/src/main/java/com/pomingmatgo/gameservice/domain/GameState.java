@@ -23,5 +23,4 @@ public class GameState implements Serializable {
     boolean player2Ready;
     int round;
     int currentTurn;
-    List<Integer> cardStack;
 }
