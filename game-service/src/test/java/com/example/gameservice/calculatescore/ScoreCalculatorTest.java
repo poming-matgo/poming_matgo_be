@@ -135,4 +135,41 @@ class ScoreCalculatorTest {
                 .expectNext(2)
                 .verifyComplete();
     }
+
+    @Test
+    void testCalculateDdiScore1() {
+        //홍단*2, 청단*2, 초단*2
+        Flux<Card> testCards = Flux.just(
+                Card.JAN_2, Card.FEB_2, Card.APR_2, Card.MAY_2, Card.JUN_2, Card.SEP_1
+        );
+
+        StepVerifier.create(scoreCalculator.calculateDdiScore(testCards))
+                .expectNext(2)
+                .verifyComplete();
+    }
+
+    @Test
+    void testCalculateDdiScore2() {
+        //홍단*3, 청단*2, 초단*3
+        Flux<Card> testCards = Flux.just(
+                Card.JAN_2, Card.FEB_2, Card.MAR_2, Card.APR_2, Card.MAY_2, Card.JUN_2, Card.JUL_2, Card.SEP_1
+        );
+
+        StepVerifier.create(scoreCalculator.calculateDdiScore(testCards))
+                .expectNext(10)
+                .verifyComplete();
+    }
+
+    @Test
+    void testCalculateDdiScore3() {
+        //홍단*3, 청단*3, 초단*3, 일반 띠
+        Flux<Card> testCards = Flux.just(
+                Card.JAN_2, Card.FEB_2, Card.MAR_2, Card.APR_2, Card.MAY_2, Card.JUN_2, Card.JUL_2, Card.SEP_1, Card.OCT_2, Card.DEC_3
+        );
+
+        StepVerifier.create(scoreCalculator.calculateDdiScore(testCards))
+                .expectNext(15)
+                .verifyComplete();
+    }
+
 }
