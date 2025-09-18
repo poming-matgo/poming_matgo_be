@@ -3,18 +3,15 @@ package com.example.gameservice;
 import com.pomingmatgo.gameservice.domain.card.Card;
 import com.pomingmatgo.gameservice.domain.repository.InstalledCardRepository;
 import com.pomingmatgo.gameservice.domain.service.matgo.GameService;
-import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
-import org.mockito.MockitoAnnotations;
 import org.mockito.junit.jupiter.MockitoExtension;
 import reactor.core.publisher.Flux;
 import reactor.test.StepVerifier;
 
 import static org.mockito.BDDMockito.given;
-import static reactor.core.publisher.Mono.when;
 
 @ExtendWith(MockitoExtension.class)
 class ConfusedPlayerTest {
