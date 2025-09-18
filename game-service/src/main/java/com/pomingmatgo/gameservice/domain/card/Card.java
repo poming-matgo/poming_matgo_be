@@ -39,19 +39,19 @@ public enum Card {
     SEP_1(9, CardType.DDI, SpecialType.CHUNG_DAN),
     SEP_2(9, CardType.PI),
     SEP_3(9, CardType.PI),
-    SEP_4(9, CardType.SSANG_PI),
+    SEP_4(9, CardType.PI, SpecialType.SSANG_PI),
     OCT_1(10, CardType.KKUT),
     OCT_2(10, CardType.DDI, SpecialType.CHUNG_DAN),
     OCT_3(10, CardType.PI),
     OCT_4(10, CardType.PI),
     NOV_1(11, CardType.GWANG),
-    NOV_2(11, CardType.PI),
-    NOV_3(11, CardType.PI),
+    NOV_2(11, CardType.PI, SpecialType.SSANG_PI),
+    NOV_3(11, CardType.PI, SpecialType.SSANG_PI),
     NOV_4(11, CardType.SSANG_PI),
     DEC_1(12, CardType.GWANG, SpecialType.BI_GWANG),
     DEC_2(12, CardType.KKUT),
     DEC_3(12, CardType.DDI),
-    DEC_4(12, CardType.SSANG_PI);
+    DEC_4(12, CardType.PI, SpecialType.SSANG_PI);
 
 
     private final int month;

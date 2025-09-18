@@ -10,7 +10,9 @@ public enum SpecialType {
 
     BI_GWANG(CardType.GWANG),
 
-    GODORI(CardType.KKUT);
+    GODORI(CardType.KKUT),
+
+    SSANG_PI(CardType.PI);
 
     private final CardType validType;
 
