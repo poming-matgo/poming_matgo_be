@@ -18,6 +18,7 @@ public class LeadingPlayerRepository {
     @Qualifier("cardRedisTemplate")
     @Autowired
     private ReactiveRedisOperations<String, String> cardredisOps;
+    //<String, List<String>>을 <String, String>으로 변경
 
     @Qualifier("chooseLeadPlayerTemplate")
     @Autowired

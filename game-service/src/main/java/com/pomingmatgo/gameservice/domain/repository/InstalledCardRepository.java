@@ -12,9 +12,9 @@ import java.util.List;
 
 @Repository
 public class InstalledCardRepository {
-    @Qualifier("installedCardTemplate")
+    @Qualifier("cardRedisTemplate")
     @Autowired
-    private ReactiveRedisOperations<String, List<String>> redisOps;
+    private ReactiveRedisOperations<String, String> redisOps;
     private static final String PLAYER1_CARD_KEY_PREFIX = "player1Card:";
     private static final String PLAYER2_CARD_KEY_PREFIX = "player2Card:";
     private static final String REVEALED_CARD_KEY_PREFIX = "revealedCard:";
@@ -25,7 +25,9 @@ public class InstalledCardRepository {
         List<String> cardNames = cards.stream()
                 .map(Enum::name)
                 .toList();
-        return redisOps.opsForValue().set(redisKey, cardNames);
+        return redisOps.opsForList()
+                .rightPushAll(redisKey, cardNames)
+                .map(count -> count > 0);
     }
 
     public Mono<Boolean> savePlayer1Card(List<Card> cards, long roomId) {
@@ -44,7 +46,9 @@ public class InstalledCardRepository {
                     int month = entry.getKey();
                     List<String> cardNames = (List<String>) entry.getValue();
                     String redisKey = String.format("%s%d:%d", REVEALED_CARD_KEY_PREFIX, roomId, month);
-                    return redisOps.opsForValue().set(redisKey, cardNames);
+                    return redisOps.opsForList()
+                            .rightPushAll(redisKey, cardNames)
+                            .map(count -> count > 0);
                 })
                 .all(Boolean::booleanValue);
     }
@@ -55,9 +59,8 @@ public class InstalledCardRepository {
 
     public Flux<Card> getCards(long roomId, String keyPrefix) {
         String redisKey = keyPrefix + roomId;
-        return redisOps.opsForValue()
-                .get(redisKey)
-                .flatMapMany(Flux::fromIterable)
+        return redisOps.opsForList()
+                .range(redisKey, 0, -1)
                 .map(Card::valueOf);
     }
     public Flux<Card> getPlayer1Cards(Long roomId) {

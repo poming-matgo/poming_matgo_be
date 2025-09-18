@@ -22,4 +22,8 @@ public class GameService {
                 .flatMap(group -> group.count().map(count -> count == 4))
                 .any(Boolean::booleanValue);
     }
+
+    /*public Flux<Card> submitCard(long roomId, int playerNum, Mono<Card> card) {
+
+    }*/
 }
