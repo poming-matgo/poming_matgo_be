@@ -28,21 +28,22 @@ public class GameService {
     public Flux<Card> submitCard(long roomId, Mono<Card> submittedCardMono) {
         return installedCardRepository.getTopCard(roomId)
                 .flatMapMany(turnedCard -> submittedCardMono.flatMapMany(submittedCard ->
-                        processSubmittedCard(roomId, turnedCard, submittedCard)
+                        processSubmittedCard(roomId, submittedCard, turnedCard)
                 ));
     }
-    private Flux<Card> processSubmittedCard(long roomId, Card turnedCard, Card submittedCard) {
+
+    private Flux<Card> processSubmittedCard(long roomId, Card submittedCard, Card turnedCard) {
         int turnedCardMonth = turnedCard.getMonth();
         int submittedCardMonth = submittedCard.getMonth();
 
         if (turnedCardMonth == submittedCardMonth) {
-            return handleSameMonthCards(roomId, turnedCard, submittedCard);
+            return handleSameMonthCards(roomId, submittedCard, turnedCard);
         } else {
-            return handleDifferentMonthCards(roomId, turnedCard, submittedCard);
+            return handleDifferentMonthCards(roomId, submittedCard, turnedCard);
         }
     }
 
-    private Flux<Card> handleSameMonthCards(long roomId, Card turnedCard, Card submittedCard) {
+    private Flux<Card> handleSameMonthCards(long roomId, Card submittedCard, Card turnedCard) {
         int month = turnedCard.getMonth();
         return installedCardRepository.getRevealedCardByMonth(roomId, month)
                 .collectList()
@@ -58,7 +59,7 @@ public class GameService {
                 });
     }
 
-    private Flux<Card> handleDifferentMonthCards(long roomId, Card turnedCard, Card submittedCard) {
+    private Flux<Card> handleDifferentMonthCards(long roomId, Card submittedCard, Card turnedCard) {
         int turnedMonth = turnedCard.getMonth();
         int submittedMonth = submittedCard.getMonth();
         return Flux.merge(
