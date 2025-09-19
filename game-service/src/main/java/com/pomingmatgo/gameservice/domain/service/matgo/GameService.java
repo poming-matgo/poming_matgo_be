@@ -7,6 +7,8 @@ import org.springframework.stereotype.Service;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 
+import java.util.List;
+
 
 @Service
 @RequiredArgsConstructor
@@ -23,7 +25,42 @@ public class GameService {
                 .any(Boolean::booleanValue);
     }
 
-    /*public Flux<Card> submitCard(long roomId, int playerNum, Mono<Card> card) {
+    public Flux<Card> submitCard(long roomId, Mono<Card> submittedCardMono) {
+        return installedCardRepository.getTopCard(roomId)
+                .zipWith(submittedCardMono)
+                .flatMapMany(tuple -> {
+                    Card turnedCard = tuple.getT1();
+                    Card submittedCard = tuple.getT2();
+                    int turnedCardMonth = turnedCard.getMonth();
+                    int submittedCardMonth = submittedCard.getMonth();
 
-    }*/
+                    if (turnedCardMonth == submittedCardMonth) {
+                        return installedCardRepository.getRevealedCardByMonth(roomId, turnedCardMonth)
+                                .collectList()
+                                .flatMapMany(cardStack -> {
+                                    if (cardStack.size() != 1) {
+                                        return installedCardRepository.deleteAllRevealedCardByMonth(roomId, turnedCardMonth)
+                                                .flatMapMany(deleted -> {
+                                                    cardStack.add(turnedCard);
+                                                    cardStack.add(submittedCard);
+                                                    return Flux.fromIterable(cardStack);
+                                                });
+
+                                    } else {
+                                        //뻑
+                                        List<Card> addCard = List.of(turnedCard, submittedCard);
+                                        return installedCardRepository.saveRevealedCard(addCard, roomId)
+                                                .flatMapMany(deleted -> Flux.empty());
+                                    }
+                                });
+                    } else {
+                        return Flux.merge(
+                                installedCardRepository.getRevealedCardByMonth(roomId, turnedCardMonth),
+                                installedCardRepository.getRevealedCardByMonth(roomId, submittedCardMonth),
+                                Flux.just(turnedCard),
+                                Flux.just(submittedCard)
+                        );
+                    }
+                });
+    }
 }

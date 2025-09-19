@@ -30,6 +30,13 @@ public class InstalledCardRepository {
                 .map(count -> count > 0);
     }
 
+
+    public Mono<Boolean> deleteAllRevealedCardByMonth(long roomId, int month) {
+        String redisKey = String.format("%s%d:%d", HIDDEN_CARD_KEY_PREFIX, roomId, month);
+        return redisOps.delete(redisKey)
+                .thenReturn(true);
+    }
+
     public Mono<Boolean> savePlayer1Card(List<Card> cards, long roomId) {
         return saveCards(cards, roomId, PLAYER1_CARD_KEY_PREFIX);
     }
@@ -55,6 +62,20 @@ public class InstalledCardRepository {
 
     public Mono<Boolean> saveHiddenCard(List<Card> cards, long roomId) {
         return saveCards(cards, roomId, HIDDEN_CARD_KEY_PREFIX);
+    }
+
+    public Flux<Card> getRevealedCardByMonth(long roomId, long month) {
+        String redisKey = String.format("%s%d:%d", REVEALED_CARD_KEY_PREFIX, roomId, month);
+        return redisOps.opsForList()
+                .range(redisKey, 0, -1)
+                .map(Card::valueOf);
+    }
+
+    public Mono<Card> getTopCard(long roomId) {
+        String redisKey = HIDDEN_CARD_KEY_PREFIX + roomId;
+        return redisOps.opsForList()
+                .leftPop(redisKey)
+                .map(Card::valueOf);
     }
 
     public Flux<Card> getCards(long roomId, String keyPrefix) {
