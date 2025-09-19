@@ -62,10 +62,36 @@ public class GameService {
     private Flux<Card> handleDifferentMonthCards(long roomId, Card submittedCard, Card turnedCard) {
         int turnedMonth = turnedCard.getMonth();
         int submittedMonth = submittedCard.getMonth();
+        Flux<Card> retCard1 = installedCardRepository.getRevealedCardByMonth(roomId, submittedMonth)
+                .collectList()
+                .flatMapMany(cardStack -> {
+                    if (cardStack.isEmpty()) {
+                        return installedCardRepository.saveRevealedCard(List.of(submittedCard), roomId)
+                                .thenMany(Flux.empty());
+                    }
+                    else if (cardStack.size()==1) {
+                        return installedCardRepository.deleteAllRevealedCardByMonth(roomId, submittedMonth)
+                                .thenMany(Flux.fromIterable(cardStack).concatWith(Flux.just(submittedCard)));
+                    }
+                   return Flux.empty();
+                });
+
+        Flux<Card> retCard2 = installedCardRepository.getRevealedCardByMonth(roomId, turnedMonth)
+                .collectList()
+                .flatMapMany(cardStack -> {
+                    if (cardStack.isEmpty()) {
+                        return installedCardRepository.saveRevealedCard(List.of(turnedCard), roomId)
+                                .thenMany(Flux.empty());
+                    }
+                    else if (cardStack.size()==1) {
+                        return installedCardRepository.deleteAllRevealedCardByMonth(roomId, turnedMonth)
+                                .thenMany(Flux.fromIterable(cardStack).concatWith(Flux.just(turnedCard)));
+                    }
+                    return Flux.empty();
+                });
+
         return Flux.merge(
-                installedCardRepository.getRevealedCardByMonth(roomId, turnedMonth),
-                installedCardRepository.getRevealedCardByMonth(roomId, submittedMonth),
-                Flux.just(turnedCard, submittedCard)
+                retCard1, retCard2
         );
     }
 
