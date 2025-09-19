@@ -27,40 +27,45 @@ public class GameService {
 
     public Flux<Card> submitCard(long roomId, Mono<Card> submittedCardMono) {
         return installedCardRepository.getTopCard(roomId)
-                .zipWith(submittedCardMono)
-                .flatMapMany(tuple -> {
-                    Card turnedCard = tuple.getT1();
-                    Card submittedCard = tuple.getT2();
-                    int turnedCardMonth = turnedCard.getMonth();
-                    int submittedCardMonth = submittedCard.getMonth();
+                .flatMapMany(turnedCard -> submittedCardMono.flatMapMany(submittedCard ->
+                        processSubmittedCard(roomId, turnedCard, submittedCard)
+                ));
+    }
+    private Flux<Card> processSubmittedCard(long roomId, Card turnedCard, Card submittedCard) {
+        int turnedCardMonth = turnedCard.getMonth();
+        int submittedCardMonth = submittedCard.getMonth();
 
-                    if (turnedCardMonth == submittedCardMonth) {
-                        return installedCardRepository.getRevealedCardByMonth(roomId, turnedCardMonth)
-                                .collectList()
-                                .flatMapMany(cardStack -> {
-                                    if (cardStack.size() != 1) {
-                                        return installedCardRepository.deleteAllRevealedCardByMonth(roomId, turnedCardMonth)
-                                                .flatMapMany(deleted -> {
-                                                    cardStack.add(turnedCard);
-                                                    cardStack.add(submittedCard);
-                                                    return Flux.fromIterable(cardStack);
-                                                });
+        if (turnedCardMonth == submittedCardMonth) {
+            return handleSameMonthCards(roomId, turnedCard, submittedCard);
+        } else {
+            return handleDifferentMonthCards(roomId, turnedCard, submittedCard);
+        }
+    }
 
-                                    } else {
-                                        //뻑
-                                        List<Card> addCard = List.of(turnedCard, submittedCard);
-                                        return installedCardRepository.saveRevealedCard(addCard, roomId)
-                                                .flatMapMany(deleted -> Flux.empty());
-                                    }
-                                });
+    private Flux<Card> handleSameMonthCards(long roomId, Card turnedCard, Card submittedCard) {
+        int month = turnedCard.getMonth();
+        return installedCardRepository.getRevealedCardByMonth(roomId, month)
+                .collectList()
+                .flatMapMany(cardStack -> {
+                    if (cardStack.size() != 1) {
+                        return installedCardRepository.deleteAllRevealedCardByMonth(roomId, month)
+                                .thenMany(Flux.fromIterable(List.of(turnedCard, submittedCard)).concatWith(Flux.fromIterable(cardStack)));
                     } else {
-                        return Flux.merge(
-                                installedCardRepository.getRevealedCardByMonth(roomId, turnedCardMonth),
-                                installedCardRepository.getRevealedCardByMonth(roomId, submittedCardMonth),
-                                Flux.just(turnedCard),
-                                Flux.just(submittedCard)
-                        );
+                        //뻑
+                        return installedCardRepository.saveRevealedCard(List.of(turnedCard, submittedCard), roomId)
+                                .thenMany(Flux.empty());
                     }
                 });
     }
+
+    private Flux<Card> handleDifferentMonthCards(long roomId, Card turnedCard, Card submittedCard) {
+        int turnedMonth = turnedCard.getMonth();
+        int submittedMonth = submittedCard.getMonth();
+        return Flux.merge(
+                installedCardRepository.getRevealedCardByMonth(roomId, turnedMonth),
+                installedCardRepository.getRevealedCardByMonth(roomId, submittedMonth),
+                Flux.just(turnedCard, submittedCard)
+        );
+    }
+
 }
