@@ -14,9 +14,9 @@ import reactor.test.StepVerifier;
 
 import java.util.ArrayList;
 
+import static com.pomingmatgo.gameservice.domain.card.Card.JAN_1;
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.BDDMockito.given;
 
 @ExtendWith(MockitoExtension.class)
@@ -30,7 +30,7 @@ class SubmitCardTest {
     long roomId = 1;
     @Test
     void testSubmitCard1() {
-        Mono<Card> submitCard = Mono.just(Card.JAN_1);
+        Mono<Card> submitCard = Mono.just(JAN_1);
         Mono<Card> topCard = Mono.just(Card.JAN_2);
         Flux<Card> revealedJanCard = Flux.just(Card.JAN_3);
 
@@ -49,10 +49,10 @@ class SubmitCardTest {
 
     @Test
     void testSubmitCard2() {
-        Mono<Card> submitCard = Mono.just(Card.JAN_1);
+        Mono<Card> submitCard = Mono.just(JAN_1);
         Mono<Card> topCard = Mono.just(Card.JAN_2);
         Flux<Card> revealedJanCard = Flux.just(Card.JAN_3, Card.JAN_4);
-        Flux<Card> retCard = Flux.just(Card.JAN_1, Card.JAN_2, Card.JAN_3, Card.JAN_4);
+        Flux<Card> retCard = Flux.just(JAN_1, Card.JAN_2, Card.JAN_3, Card.JAN_4);
 
         given(installedCardRepository.getTopCard(roomId))
                 .willReturn(topCard);
@@ -74,11 +74,11 @@ class SubmitCardTest {
 
     @Test
     void testSubmitCard3() {
-        Mono<Card> submitCard = Mono.just(Card.JAN_1);
+        Mono<Card> submitCard = Mono.just(JAN_1);
         Mono<Card> topCard = Mono.just(Card.FEB_1);
-        Flux<Card> revealedJanCard = Flux.just(Card.JAN_2);
-        Flux<Card> revealedFebCard = Flux.just(Card.FEB_2, Card.FEB_3);
-        Flux<Card> retCard = Flux.just(Card.JAN_1, Card.JAN_2, Card.FEB_1, Card.FEB_2, Card.FEB_3);
+        Flux<Card> revealedJanCard = Flux.empty();
+        Flux<Card> revealedFebCard = Flux.just(Card.FEB_2);
+        Flux<Card> retCard = Flux.just(Card.FEB_1, Card.FEB_2);
 
         given(installedCardRepository.getTopCard(roomId))
                 .willReturn(topCard);
@@ -88,6 +88,12 @@ class SubmitCardTest {
 
         given(installedCardRepository.getRevealedCardByMonth(roomId, 2))
                 .willReturn(revealedFebCard);
+
+        given(installedCardRepository.deleteAllRevealedCardByMonth(anyLong(), anyInt()))
+                .willReturn(Mono.just(true));
+
+        given(installedCardRepository.saveRevealedCard(any(), eq(roomId)))
+                .willReturn(Mono.just(true));
 
         StepVerifier.create(gameService.submitCard(roomId, submitCard))
                 .recordWith(ArrayList::new)
