@@ -60,39 +60,26 @@ public class GameService {
     }
 
     private Flux<Card> handleDifferentMonthCards(long roomId, Card submittedCard, Card turnedCard) {
-        int turnedMonth = turnedCard.getMonth();
-        int submittedMonth = submittedCard.getMonth();
-        Flux<Card> retCard1 = installedCardRepository.getRevealedCardByMonth(roomId, submittedMonth)
-                .collectList()
-                .flatMapMany(cardStack -> {
-                    if (cardStack.isEmpty()) {
-                        return installedCardRepository.saveRevealedCard(List.of(submittedCard), roomId)
-                                .thenMany(Flux.empty());
-                    }
-                    else if (cardStack.size()==1) {
-                        return installedCardRepository.deleteAllRevealedCardByMonth(roomId, submittedMonth)
-                                .thenMany(Flux.fromIterable(cardStack).concatWith(Flux.just(submittedCard)));
-                    }
-                   return Flux.empty();
-                });
+        return Flux.merge(
+                processCardByMonth(roomId, submittedCard),
+                processCardByMonth(roomId, turnedCard)
+        );
+    }
 
-        Flux<Card> retCard2 = installedCardRepository.getRevealedCardByMonth(roomId, turnedMonth)
+    private Flux<Card> processCardByMonth(long roomId, Card card) {
+        int month = card.getMonth();
+        return installedCardRepository.getRevealedCardByMonth(roomId, month)
                 .collectList()
                 .flatMapMany(cardStack -> {
                     if (cardStack.isEmpty()) {
-                        return installedCardRepository.saveRevealedCard(List.of(turnedCard), roomId)
+                        return installedCardRepository.saveRevealedCard(List.of(card), roomId)
                                 .thenMany(Flux.empty());
-                    }
-                    else if (cardStack.size()==1) {
-                        return installedCardRepository.deleteAllRevealedCardByMonth(roomId, turnedMonth)
-                                .thenMany(Flux.fromIterable(cardStack).concatWith(Flux.just(turnedCard)));
+                    } else if (cardStack.size() == 1) {
+                        return installedCardRepository.deleteAllRevealedCardByMonth(roomId, month)
+                                .thenMany(Flux.fromIterable(cardStack).concatWith(Flux.just(card)));
                     }
                     return Flux.empty();
                 });
-
-        return Flux.merge(
-                retCard1, retCard2
-        );
     }
 
 }
