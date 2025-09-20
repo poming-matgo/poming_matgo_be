@@ -78,6 +78,7 @@ public class GameWebSocketHandler implements WebSocketHandler {
                 .flatMap(gameState -> determinePlayerNum(userId, gameState)
                         .flatMap(playerNum -> {
                             sessionManager.addPlayer(roomId, playerNum, session);
+                            allUser = sessionManager.getAllUser(gameState.getRoomId());
                             return routeEvent(event, gameState, playerNum);
                         }))
                 .onErrorResume(error -> handleWebSocketError(session, error));
@@ -193,7 +194,8 @@ public class GameWebSocketHandler implements WebSocketHandler {
                             if (Boolean.TRUE.equals(allSelected)) {
                                 return handleAllSelectedEvent(roomId)
                                         .then(Mono.defer(() -> preGameService.distributeCards(roomId)))
-                                        .flatMap(cards -> sendDistributedCardInfo(roomId, cards).then());
+                                        .flatMap(cards -> sendDistributedCardInfo(roomId, cards)
+                                                .then(/*todo: announceTurnToAllPlayers*/));
                             }
                             return Mono.empty();
                         });
@@ -206,7 +208,6 @@ public class GameWebSocketHandler implements WebSocketHandler {
 
     private Mono<Void> routeEvent(RequestEvent<?> event, GameState gameState, int playerNum) {
         String eventType = event.getEventType().getType();
-        allUser = sessionManager.getAllUser(gameState.getRoomId());
         if("ROOM".equals(eventType)) {
             return handleRoomEvent(event, gameState, playerNum);
         }
@@ -268,4 +269,8 @@ public class GameWebSocketHandler implements WebSocketHandler {
                 sendMessageToSession(player2Session, ret2)
         );
     }
+
+    /*private Mono<Void> announceTurnToAllPlayers() {
+
+    }*/
 }
