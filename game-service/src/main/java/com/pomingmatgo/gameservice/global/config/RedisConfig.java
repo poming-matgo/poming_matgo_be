@@ -46,6 +46,7 @@ public class RedisConfig {
         return new ReactiveRedisTemplate<>(redisConnectionFactory, context);
     }
 
+
     @Bean(name="cardRedisTemplate")
     public ReactiveRedisOperations<String, String> cardRedisTemplate(ReactiveRedisConnectionFactory redisConnectionFactory) {
         Jackson2JsonRedisSerializer<String> serializer = new Jackson2JsonRedisSerializer<>(String.class);

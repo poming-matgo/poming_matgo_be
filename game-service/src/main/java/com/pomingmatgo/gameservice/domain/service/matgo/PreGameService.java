@@ -3,9 +3,11 @@ package com.pomingmatgo.gameservice.domain.service.matgo;
 import com.pomingmatgo.gameservice.api.handler.event.RequestEvent;
 import com.pomingmatgo.gameservice.api.request.WebSocket.LeadSelectionReq;
 import com.pomingmatgo.gameservice.api.response.websocket.LeadSelectionRes;
+import com.pomingmatgo.gameservice.domain.GameState;
 import com.pomingmatgo.gameservice.domain.InstalledCard;
 import com.pomingmatgo.gameservice.domain.card.Card;
 import com.pomingmatgo.gameservice.domain.ChooseLeadPlayer;
+import com.pomingmatgo.gameservice.domain.repository.GameStateRepository;
 import com.pomingmatgo.gameservice.domain.repository.InstalledCardRepository;
 import com.pomingmatgo.gameservice.domain.repository.LeadingPlayerRepository;
 import com.pomingmatgo.gameservice.global.exception.WebSocketBusinessException;
@@ -24,6 +26,7 @@ public class PreGameService {
     private static final Random RANDOM = new Random();
     private final LeadingPlayerRepository leadingPlayerRepository;
     private final InstalledCardRepository installedCardRepository;
+    private final GameStateRepository gameStateRepository;
 
     //선 플레이어 정하는 과정
     public Mono<Void> pickFiveCardsAndSave(Long roomId) {
@@ -116,5 +119,10 @@ public class PreGameService {
                 });
     }
 
-
+    public Mono<GameState> setRoundInfo(GameState gameState) {
+        gameState.setRound(1);
+        gameState.setCurrentTurn(1);
+        return gameStateRepository.save(gameState)
+                .thenReturn(gameState);
+    }
 }

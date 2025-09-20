@@ -80,19 +80,21 @@ public class RoomService {
         return gameStateRepository.create(gameState);
     }
 
-    public Mono<GameState> ready(Mono<GameState> gameState, int playerNum, boolean flag) {
-        return gameState
-                .switchIfEmpty(Mono.error(new WebSocketBusinessException(WebSocketErrorCode.NOT_EXISTED_ROOM)))
-                .flatMap(gs -> {
-                    if (playerNum == 1)
-                        gs.setPlayer1Ready(flag);
-                    else
-                        gs.setPlayer2Ready(flag);
+    public Mono<GameState> ready(GameState gameState, int playerNum, boolean flag) {
+        if (gameState == null) {
+            return Mono.error(new WebSocketBusinessException(WebSocketErrorCode.NOT_EXISTED_ROOM));
+        }
 
-                    return gameStateRepository.save(gs)
-                            .thenReturn(gs);
-                });
+        if (playerNum == 1) {
+            gameState.setPlayer1Ready(flag);
+        } else {
+            gameState.setPlayer2Ready(flag);
+        }
+
+        return gameStateRepository.save(gameState)
+                .thenReturn(gameState);
     }
+
 
     public Mono<Boolean> checkAllPlayersReady(Mono<GameState> gameState) {
         return gameState.map(gs ->

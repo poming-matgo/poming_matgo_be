@@ -3,6 +3,7 @@ package com.pomingmatgo.gameservice.api.handler;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.pomingmatgo.gameservice.api.handler.event.RequestEvent;
 import com.pomingmatgo.gameservice.api.request.WebSocket.LeadSelectionReq;
+import com.pomingmatgo.gameservice.api.response.websocket.AnnounceRoundRes;
 import com.pomingmatgo.gameservice.api.response.websocket.LeadSelectionRes;
 import com.pomingmatgo.gameservice.domain.GameState;
 import com.pomingmatgo.gameservice.domain.InstalledCard;
@@ -192,10 +193,15 @@ public class GameWebSocketHandler implements WebSocketHandler {
                         .then(preGameService.isAllPlayerCardSelected(roomId))
                         .flatMap(allSelected -> {
                             if (Boolean.TRUE.equals(allSelected)) {
-                                return handleAllSelectedEvent(roomId)
+                                return preGameService.getLeadSelectionRes(roomId)
+                                        .flatMap(leadSelectionRes -> {
+                                            gameState.setLeadingPlayer(leadSelectionRes.getLeadPlayer());
+                                            return sendAllSelectedEvent(leadSelectionRes);
+                                        })
                                         .then(Mono.defer(() -> preGameService.distributeCards(roomId)))
                                         .flatMap(cards -> sendDistributedCardInfo(roomId, cards)
-                                                .then(/*todo: announceTurnToAllPlayers*/));
+                                                .then(preGameService.setRoundInfo(gameState))
+                                                .flatMap(this::announceTurnToAllPlayers));
                             }
                             return Mono.empty();
                         });
@@ -227,17 +233,14 @@ public class GameWebSocketHandler implements WebSocketHandler {
         return sendMessageToUsers(allUser, startDto);
     }
 
-    public Mono<Void> handleAllSelectedEvent(long roomId) {
-        return preGameService.getLeadSelectionRes(roomId)
-                .flatMap(leadSelectionRes -> {
-                    WebSocketResDto<LeadSelectionRes> setLeadDto = new WebSocketResDto<>(
-                            0,
-                            "LEADER_SELECTION_RESULT",
-                            "선을 정했습니다.",
-                            leadSelectionRes
-                    );
-                    return sendMessageToUsers(allUser, setLeadDto);
-                });
+    public Mono<Void> sendAllSelectedEvent(LeadSelectionRes leadSelectionRes) {
+            WebSocketResDto<LeadSelectionRes> setLeadDto = new WebSocketResDto<>(
+                    0,
+                    "LEADER_SELECTION_RESULT",
+                    "선을 정했습니다.",
+                    leadSelectionRes
+            );
+            return sendMessageToUsers(allUser, setLeadDto);
     }
 
     private Mono<Void> sendDistributedCardInfo(long roomId, InstalledCard installedCard) {
@@ -270,7 +273,19 @@ public class GameWebSocketHandler implements WebSocketHandler {
         );
     }
 
-    /*private Mono<Void> announceTurnToAllPlayers() {
+    private Mono<Void> announceTurnToAllPlayers(GameState gameState) {
 
-    }*/
+        AnnounceRoundRes res = new AnnounceRoundRes(
+                gameState.getRound(),
+                gameState.getCurrentTurn(),
+                gameState.getLeadingPlayer()==gameState.getCurrentTurn() ? 1 : 2
+        );
+        WebSocketResDto<AnnounceRoundRes> ret = new WebSocketResDto<>(
+                0,
+                "ANNOUNCE_TURN_INFORMATION",
+                "턴을 알립니다.",
+                res
+        );
+        return sendMessageToUsers(allUser, ret);
+    }
 }
