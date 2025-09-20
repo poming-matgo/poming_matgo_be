@@ -180,36 +180,30 @@ public class GameWebSocketHandler implements WebSocketHandler {
         if("LEADER_SELECTION".equals(eventType)) {
             if (event.getData() instanceof LeadSelectionReq) {
                 return preGameService.selectCard((RequestEvent<LeadSelectionReq>) event)
-                        .then(
-                                sendMessageToUsers(
-                                        allUser,
-                                        new WebSocketResDto<>(
-                                                playerNum,
-                                                "LEADER_SELECTION",
-                                                "선두 플레이어 선택"
-                                        )
-                                )
-                        )
+                        .then(sendLeaderSelectionMessage(playerNum))
                         .then(preGameService.isAllPlayerCardSelected(roomId))
                         .flatMap(allSelected -> {
                             if (Boolean.TRUE.equals(allSelected)) {
-                                return preGameService.getLeadSelectionRes(roomId)
-                                        .flatMap(leadSelectionRes -> {
-                                            gameState.setLeadingPlayer(leadSelectionRes.getLeadPlayer());
-                                            return sendAllSelectedEvent(leadSelectionRes);
-                                        })
-                                        .then(Mono.defer(() -> preGameService.distributeCards(roomId)))
-                                        .flatMap(cards -> sendDistributedCardInfo(roomId, cards)
-                                                .then(preGameService.setRoundInfo(gameState))
-                                                .flatMap(this::announceTurnToAllPlayers));
+                                return afterleaderSelectionCardAllSelection(gameState);
                             }
                             return Mono.empty();
                         });
             }
-
         }
-
         return Mono.empty();
+    }
+
+    private Mono<Void> afterleaderSelectionCardAllSelection(GameState gameState) {
+        Long roomId = gameState.getRoomId();
+        return preGameService.getLeadSelectionRes(roomId)
+                .flatMap(leadSelectionRes -> {
+                    gameState.setLeadingPlayer(leadSelectionRes.getLeadPlayer());
+                    return sendAllSelectedEvent(leadSelectionRes);
+                })
+                .then(Mono.defer(() -> preGameService.distributeCards(roomId)))
+                .flatMap(cards -> sendDistributedCardInfo(roomId, cards)
+                        .then(preGameService.setRoundInfo(gameState))
+                        .flatMap(this::announceTurnToAllPlayers));
     }
 
     private Mono<Void> routeEvent(RequestEvent<?> event, GameState gameState, int playerNum) {
@@ -231,6 +225,15 @@ public class GameWebSocketHandler implements WebSocketHandler {
                 "게임이 시작됐습니다."
         );
         return sendMessageToUsers(allUser, startDto);
+    }
+
+    private Mono<Void> sendLeaderSelectionMessage(int playerNum) {
+        return sendMessageToUsers(
+                allUser,
+                new WebSocketResDto<>(playerNum,
+                        "LEADER_SELECTION",
+                        "선두 플레이어 선택")
+        );
     }
 
     public Mono<Void> sendAllSelectedEvent(LeadSelectionRes leadSelectionRes) {
