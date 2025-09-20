@@ -1,6 +1,6 @@
 package com.pomingmatgo.gameservice.global.config;
 
-import com.pomingmatgo.gameservice.api.handler.GameWebSocketHandler;
+import com.pomingmatgo.gameservice.api.handler.websocket.GameWebSocketHandler;
 import lombok.RequiredArgsConstructor;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
