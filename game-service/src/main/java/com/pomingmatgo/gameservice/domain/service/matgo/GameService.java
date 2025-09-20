@@ -2,6 +2,7 @@ package com.pomingmatgo.gameservice.domain.service.matgo;
 
 import com.pomingmatgo.gameservice.domain.card.Card;
 import com.pomingmatgo.gameservice.domain.repository.InstalledCardRepository;
+import com.pomingmatgo.gameservice.domain.repository.ScoreCardRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import reactor.core.publisher.Flux;
@@ -14,6 +15,7 @@ import java.util.List;
 @RequiredArgsConstructor
 public class GameService {
     private final InstalledCardRepository installedCardRepository;
+    private final ScoreCardRepository scoreCardRepository;
     public Mono<Boolean> isConfusedPlayer(long roomId, int playerNum) {
         Flux<Card> cardFlux = (playerNum == 1)
                 ? installedCardRepository.getPlayer1Cards(roomId)
@@ -82,4 +84,15 @@ public class GameService {
                 });
     }
 
+    /*public Mono<Card> moveCardPlayerToPlayer(long toPlayerNum, long fromPlayerNum, long roomId) {
+        Flux<Card> cards = scoreCardRepository.getPiCards(roomId, fromPlayerNum).cache();
+
+        return cards.filter(card -> card.getSpecialType() == null)
+                .next()
+                .switchIfEmpty(
+                        cards.filter(card -> card.getSpecialType() == SpecialType.SSANG_PI)
+                                .next()
+                );
+        //todo: toPlayer에 save 추가해야함
+    }*/
 }

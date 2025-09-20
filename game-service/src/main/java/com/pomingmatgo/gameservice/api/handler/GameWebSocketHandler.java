@@ -142,7 +142,7 @@ public class GameWebSocketHandler implements WebSocketHandler {
             ));
         }
         else if ("READY".equals(eventType)) {
-            return roomService.ready(Mono.just(gameState), playerNum, true)
+            return roomService.ready(gameState, playerNum, true)
                     .flatMap(updatedGameState ->
                             sendMessageToUsers(
                                     allUser,
@@ -157,7 +157,7 @@ public class GameWebSocketHandler implements WebSocketHandler {
                     );
         }
         else if ("UNREADY".equals(eventType)) {
-            return roomService.ready(Mono.just(gameState), playerNum, true)
+            return roomService.ready(gameState, playerNum, true)
                     .then(
                             sendMessageToUsers(
                                     allUser,
