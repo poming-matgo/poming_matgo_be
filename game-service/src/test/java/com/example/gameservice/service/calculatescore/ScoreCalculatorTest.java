@@ -9,6 +9,8 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import reactor.core.publisher.Flux;
 import reactor.test.StepVerifier;
 
+import java.util.List;
+
 @ExtendWith(MockitoExtension.class)
 class ScoreCalculatorTest {
 
@@ -19,7 +21,7 @@ class ScoreCalculatorTest {
     long playerNum = 1L;
     @Test
     void testCalculatePiScore1() {
-        Flux<Card> testCards = Flux.just(
+        List<Card> testCards = List.of(
                 Card.JAN_3, Card.JAN_4
         );
 
@@ -30,9 +32,9 @@ class ScoreCalculatorTest {
 
     @Test
     void testCalculatePiScore2() {
-        Flux<Card> testCards = Flux.just(
+        List<Card> testCards = List.of(
                 Card.JAN_3, Card.JAN_4, Card.FEB_3, Card.FEB_4, Card.MAR_3, Card.MAR_4, Card.APR_3, Card.APR_4,
-                Card.NOV_2, Card.NOV_3
+                Card.NOV_4, Card.DEC_4
         ); // 피 8개 쌍피 2개 => 12개
 
         StepVerifier.create(scoreCalculator.calculatePiScore(testCards))
@@ -43,7 +45,7 @@ class ScoreCalculatorTest {
     @Test
     void testCalculateGwangScore1() {
         //비삼광
-        Flux<Card> testCards = Flux.just(
+        List<Card> testCards = List.of(
                 Card.JAN_1, Card.MAR_1, Card.DEC_1
         );
 
@@ -55,7 +57,7 @@ class ScoreCalculatorTest {
     @Test
     void testCalculateGwangScore2() {
         //삼광
-        Flux<Card> testCards = Flux.just(
+        List<Card> testCards = List.of(
                 Card.JAN_1, Card.MAR_1, Card.AUG_1
         );
 
@@ -67,7 +69,7 @@ class ScoreCalculatorTest {
     @Test
     void testCalculateGwangScore3() {
         //사광 - 비광 포함
-        Flux<Card> testCards = Flux.just(
+        List<Card> testCards = List.of(
                 Card.JAN_1, Card.MAR_1, Card.AUG_1, Card.DEC_1
         );
 
@@ -79,7 +81,7 @@ class ScoreCalculatorTest {
     @Test
     void testCalculateGwangScore4() {
         //사광 + 비광 불포함
-        Flux<Card> testCards = Flux.just(
+        List<Card> testCards = List.of(
                 Card.JAN_1, Card.MAR_1, Card.AUG_1, Card.NOV_1
         );
 
@@ -91,7 +93,7 @@ class ScoreCalculatorTest {
     @Test
     void testCalculateGwangScore5() {
         //오광
-        Flux<Card> testCards = Flux.just(
+        List<Card> testCards = List.of(
                 Card.JAN_1, Card.MAR_1, Card.AUG_1, Card.NOV_1, Card.DEC_1
         );
 
@@ -103,7 +105,7 @@ class ScoreCalculatorTest {
     @Test
     void testCalculateKKUTScore1() {
         //고도리
-        Flux<Card> testCards = Flux.just(
+        List<Card> testCards = List.of(
                 Card.FEB_1, Card.APR_1, Card.AUG_2
         );
 
@@ -115,7 +117,7 @@ class ScoreCalculatorTest {
     @Test
     void testCalculateKKUTScore2() {
         //고도리 + 일반 끗 3장
-        Flux<Card> testCards = Flux.just(
+        List<Card> testCards = List.of(
                 Card.FEB_1, Card.APR_1, Card.AUG_2, Card.MAY_1, Card.OCT_1, Card.DEC_2
         );
 
@@ -127,7 +129,7 @@ class ScoreCalculatorTest {
     @Test
     void testCalculateKKUTScore3() {
         //일반 끗 6장
-        Flux<Card> testCards = Flux.just(
+        List<Card> testCards = List.of(
                 Card.APR_1, Card.AUG_2, Card.MAY_1, Card.JUN_1, Card.OCT_1, Card.DEC_2
         );
 
@@ -139,7 +141,7 @@ class ScoreCalculatorTest {
     @Test
     void testCalculateDdiScore1() {
         //홍단*2, 청단*2, 초단*2
-        Flux<Card> testCards = Flux.just(
+        List<Card> testCards = List.of(
                 Card.JAN_2, Card.FEB_2, Card.APR_2, Card.MAY_2, Card.JUN_2, Card.SEP_1
         );
 
@@ -151,7 +153,7 @@ class ScoreCalculatorTest {
     @Test
     void testCalculateDdiScore2() {
         //홍단*3, 청단*2, 초단*3
-        Flux<Card> testCards = Flux.just(
+        List<Card> testCards = List.of(
                 Card.JAN_2, Card.FEB_2, Card.MAR_2, Card.APR_2, Card.MAY_2, Card.JUN_2, Card.JUL_2, Card.SEP_1
         );
 
@@ -163,7 +165,7 @@ class ScoreCalculatorTest {
     @Test
     void testCalculateDdiScore3() {
         //홍단*3, 청단*3, 초단*3, 일반 띠
-        Flux<Card> testCards = Flux.just(
+        List<Card> testCards = List.of(
                 Card.JAN_2, Card.FEB_2, Card.MAR_2, Card.APR_2, Card.MAY_2, Card.JUN_2, Card.JUL_2, Card.SEP_1, Card.OCT_2, Card.DEC_3
         );
 
