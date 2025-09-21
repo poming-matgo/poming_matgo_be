@@ -89,7 +89,7 @@ public class InstalledCardRepository {
     }
 
     public Flux<Card> getPlayer2Cards(Long roomId) {
-        return getCards(roomId, PLAYER1_CARD_KEY_PREFIX);
+        return getCards(roomId, PLAYER2_CARD_KEY_PREFIX);
     }
 }
 
