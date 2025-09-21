@@ -11,8 +11,9 @@ import java.util.Objects;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
-public class ScoreCalculator {
-    public Mono<Integer> calculatePiScore(Flux<Card> cardFlux) {
+public final class ScoreCalculator {
+    private ScoreCalculator() {}
+    public static Mono<Integer> calculatePiScore(Flux<Card> cardFlux) {
         return cardFlux.reduce(0, (piCnt, card) -> {
             if (!CardType.PI.equals(card.getType())) {
                 throw new IllegalArgumentException("피 카드가 아닙니다.");
@@ -21,7 +22,7 @@ public class ScoreCalculator {
         }).map(piCnt -> piCnt < 10 ? 0 : piCnt - 9);
     }
 
-    public Mono<Integer> calculateGwangScore(Flux<Card> cardFlux) {
+    public static Mono<Integer> calculateGwangScore(Flux<Card> cardFlux) {
         return cardFlux.collectList()
                 .map(cards -> {
                     int size = cards.size();
@@ -39,7 +40,7 @@ public class ScoreCalculator {
                 });
     }
 
-    public Mono<Integer> calculateKkutScore(Flux<Card> cardFlux) {
+    public static Mono<Integer> calculateKkutScore(Flux<Card> cardFlux) {
         return cardFlux.collectList()
                 .map(cards -> {
                     int size = cards.size();
@@ -54,7 +55,7 @@ public class ScoreCalculator {
                 });
     }
 
-    public Mono<Integer> calculateDdiScore(Flux<Card> cardFlux) {
+    public static Mono<Integer> calculateDdiScore(Flux<Card> cardFlux) {
         return cardFlux.collectList()
                 .map(cards -> {
                     long size = cards.size();
@@ -69,5 +70,15 @@ public class ScoreCalculator {
 
                     return size < 5 ? additionalScore : additionalScore + (int) size - 4;
                 });
+    }
+
+    public static Mono<Integer> calculateTotalScore(Flux<Card> cardFlux) {
+        Mono<Integer> piScore = calculatePiScore(cardFlux.filter(card -> card.getType() == CardType.PI));
+        Mono<Integer> gwangScore = calculateGwangScore(cardFlux.filter(card -> card.getType() == CardType.GWANG));
+        Mono<Integer> kkutScore = calculateKkutScore(cardFlux.filter(card -> card.getType() == CardType.KKUT));
+        Mono<Integer> ddiScore = calculateDdiScore(cardFlux.filter(card -> card.getType() == CardType.DDI));
+
+        return Mono.zip(piScore, gwangScore, kkutScore, ddiScore)
+                .map(tuple -> tuple.getT1() + tuple.getT2() + tuple.getT3() + tuple.getT4());
     }
 }
