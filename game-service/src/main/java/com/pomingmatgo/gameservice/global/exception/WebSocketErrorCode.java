@@ -13,8 +13,10 @@ public enum WebSocketErrorCode {
     //선두 플레이어 선택
     ALREADY_SELECTED_CARD("이미 선택된 카드입니다."),
 
-    SYSTEM_ERROR("시스템 에러가 발생했습니다. 관리자에게 문의하세요.");
+    SYSTEM_ERROR("시스템 에러가 발생했습니다. 관리자에게 문의하세요."),
 
+    //카드 제출
+    INVALUD_CARD("유효하지 않은 카드입니다.");
 
     private final String message;
 

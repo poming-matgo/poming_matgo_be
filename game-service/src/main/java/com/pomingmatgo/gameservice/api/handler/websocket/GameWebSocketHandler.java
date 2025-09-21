@@ -2,7 +2,8 @@ package com.pomingmatgo.gameservice.api.handler.websocket;
 
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.pomingmatgo.gameservice.api.handler.event.RequestEvent;
-import com.pomingmatgo.gameservice.api.request.WebSocket.LeadSelectionReq;
+import com.pomingmatgo.gameservice.api.request.websocket.LeadSelectionReq;
+import com.pomingmatgo.gameservice.api.request.websocket.NormalSubmitReq;
 import com.pomingmatgo.gameservice.domain.GameState;
 import com.pomingmatgo.gameservice.domain.service.matgo.RoomService;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -32,9 +33,11 @@ public class GameWebSocketHandler implements WebSocketHandler {
     private final SessionManager sessionManager;
     private final WsRoomHandler wsRoomHandler;
     private final WsPreGameHandler wsPreGameHandler;
+    private final WsGameHandler wsGameHandler;
 
     private static final Map<String, Class<?>> typeMappings = new HashMap<>() {{
         put("LEADER_SELECTION", LeadSelectionReq.class);
+        put("NORMAL_SUBMIT", NormalSubmitReq.class);
     }};
 
     @Override
@@ -114,6 +117,8 @@ public class GameWebSocketHandler implements WebSocketHandler {
             return wsRoomHandler.handleRoomEvent(event, gameState, playerNum);
         } else if ("PREGAME".equals(eventType)) {
             return wsPreGameHandler.handlePreGameEvent(event, gameState, playerNum);
+        } else if ("GAME".equals(eventType)) {
+            return wsGameHandler.handleGameEvent(event, gameState, playerNum);
         }
         return Mono.empty();
     }

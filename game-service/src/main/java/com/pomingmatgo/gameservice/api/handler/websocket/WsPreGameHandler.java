@@ -1,7 +1,7 @@
 package com.pomingmatgo.gameservice.api.handler.websocket;
 
 import com.pomingmatgo.gameservice.api.handler.event.RequestEvent;
-import com.pomingmatgo.gameservice.api.request.WebSocket.LeadSelectionReq;
+import com.pomingmatgo.gameservice.api.request.websocket.LeadSelectionReq;
 import com.pomingmatgo.gameservice.api.response.websocket.AnnounceRoundRes;
 import com.pomingmatgo.gameservice.api.response.websocket.LeadSelectionRes;
 import com.pomingmatgo.gameservice.domain.GameState;

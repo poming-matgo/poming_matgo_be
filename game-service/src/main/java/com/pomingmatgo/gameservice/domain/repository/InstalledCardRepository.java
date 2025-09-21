@@ -45,6 +45,20 @@ public class InstalledCardRepository {
         return saveCards(cards, roomId, PLAYER2_CARD_KEY_PREFIX);
     }
 
+    public Mono<Boolean> deletePlayer1Card(long roomId) {
+        return deleteAllPlayerCard(roomId, PLAYER1_CARD_KEY_PREFIX);
+    }
+
+    public Mono<Boolean> deletePlayer2Card(long roomId) {
+        return deleteAllPlayerCard(roomId, PLAYER2_CARD_KEY_PREFIX);
+    }
+
+    private Mono<Boolean> deleteAllPlayerCard(long roomId, String keyPrefix) {
+        String redisKey = keyPrefix + roomId;
+        return redisOps.delete(redisKey)
+                .thenReturn(true);
+    }
+
     public Mono<Boolean> saveRevealedCard(List<Card> cards, long roomId) {
         return Flux.fromIterable(cards)
                 .collectMultimap(Card::getMonth, Enum::name)

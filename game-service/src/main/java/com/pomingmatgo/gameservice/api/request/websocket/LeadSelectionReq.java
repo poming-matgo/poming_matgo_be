@@ -1,4 +1,4 @@
-package com.pomingmatgo.gameservice.api.request.WebSocket;
+package com.pomingmatgo.gameservice.api.request.websocket;
 
 import lombok.Getter;
 import lombok.Setter;

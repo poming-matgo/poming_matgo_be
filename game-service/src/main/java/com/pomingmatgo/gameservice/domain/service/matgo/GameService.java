@@ -1,14 +1,19 @@
 package com.pomingmatgo.gameservice.domain.service.matgo;
 
+import com.pomingmatgo.gameservice.api.handler.event.RequestEvent;
+import com.pomingmatgo.gameservice.api.request.websocket.NormalSubmitReq;
 import com.pomingmatgo.gameservice.domain.card.Card;
 import com.pomingmatgo.gameservice.domain.repository.InstalledCardRepository;
 import com.pomingmatgo.gameservice.domain.repository.ScoreCardRepository;
+import com.pomingmatgo.gameservice.global.exception.WebSocketBusinessException;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 
 import java.util.List;
+
+import static com.pomingmatgo.gameservice.global.exception.WebSocketErrorCode.INVALUD_CARD;
 
 
 @Service
@@ -33,6 +38,31 @@ public class GameService {
                         processSubmittedCard(roomId, submittedCard, turnedCard)
                 ));
     }
+
+    public Flux<Card> submitCardEvent(long roomId, RequestEvent<NormalSubmitReq> event) {
+        int playerNum = event.getPlayerNum();
+        int cardIndex = event.getData().getCardIndex();
+
+        Mono<List<Card>> playerCardsMono = (playerNum == 1)
+                ? installedCardRepository.getPlayer1Cards(roomId).collectList()
+                : installedCardRepository.getPlayer2Cards(roomId).collectList();
+
+        return playerCardsMono.flatMapMany(playerCards -> {
+            if (cardIndex < 0 || cardIndex >= playerCards.size()) {
+                throw new WebSocketBusinessException(INVALUD_CARD);
+            }
+
+            Card submittedCard = playerCards.remove(cardIndex);
+
+            return (playerNum == 1
+                    ? installedCardRepository.deletePlayer1Card(roomId)
+                    .flatMap(ignored -> installedCardRepository.savePlayer1Card(playerCards, roomId))
+                    : installedCardRepository.deletePlayer2Card(roomId)
+                    .flatMap(ignored -> installedCardRepository.savePlayer2Card(playerCards, roomId)))
+            .thenMany(submitCard(roomId, Mono.just(submittedCard)));
+        });
+    }
+
 
     private Flux<Card> processSubmittedCard(long roomId, Card submittedCard, Card turnedCard) {
         int turnedCardMonth = turnedCard.getMonth();
