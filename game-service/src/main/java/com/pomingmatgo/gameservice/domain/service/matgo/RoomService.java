@@ -96,10 +96,8 @@ public class RoomService {
     }
 
 
-    public Mono<Boolean> checkAllPlayersReady(Mono<GameState> gameState) {
-        return gameState.map(gs ->
-                gs.isPlayer1Ready() && gs.isPlayer2Ready()
-        );
+    public boolean checkAllPlayersReady(GameState gs) {
+        return gs.isPlayer1Ready() && gs.isPlayer2Ready();
     }
 
 }

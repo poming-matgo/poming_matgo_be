@@ -30,16 +30,18 @@ public class WsRoomHandler {
             return roomService.ready(gameState, playerNum, true)
                     .flatMap(updatedGameState ->
                             messageSender.sendMessageToAllUser(
-                                    roomId,
-                                    new WebSocketResDto<>(playerNum, "READY", "Ready 했습니다.")
-                            )
-                                    .then(roomService.checkAllPlayersReady(Mono.just(updatedGameState)))
-                                    .flatMap(allReady -> Boolean.TRUE.equals(allReady)
-                                            ? handleAllReadyEvent(roomId)
-                                            .then(Mono.defer(() -> preGameService.pickFiveCardsAndSave(updatedGameState.getRoomId())))
-                                            : Mono.empty()
+                                            roomId,
+                                            new WebSocketResDto<>(playerNum, "READY", "Ready 했습니다.")
                                     )
+                                    .then(Mono.defer(() -> {
+                                        boolean allReady = roomService.checkAllPlayersReady(updatedGameState);
+                                        return allReady
+                                                ? handleAllReadyEvent(roomId)
+                                                .then(Mono.defer(() -> preGameService.pickFiveCardsAndSave(updatedGameState.getRoomId())))
+                                                : Mono.empty();
+                                    }))
                     );
+
         }
         else if ("UNREADY".equals(eventType)) {
             return roomService.ready(gameState, playerNum, true)
