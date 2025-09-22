@@ -32,10 +32,6 @@ public class GameService {
                 .any(Boolean::booleanValue);
     }
 
-    public Flux<Card> submitCard(long roomId, Card submittedCard, Card turnedCard) {
-        return processSubmittedCard(roomId, submittedCard, turnedCard);
-    }
-
     public Mono<Card> getTopCard(long roomId) {
         return installedCardRepository.getTopCard(roomId);
     }
@@ -65,7 +61,7 @@ public class GameService {
     }
 
 
-    private Flux<Card> processSubmittedCard(long roomId, Card submittedCard, Card turnedCard) {
+    public Flux<Card> submitCard(long roomId, Card submittedCard, Card turnedCard) {
         int turnedCardMonth = turnedCard.getMonth();
         int submittedCardMonth = submittedCard.getMonth();
 
