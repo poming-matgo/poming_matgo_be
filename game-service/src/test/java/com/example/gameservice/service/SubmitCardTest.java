@@ -30,12 +30,9 @@ class SubmitCardTest {
     long roomId = 1;
     @Test
     void testSubmitCard1() {
-        Mono<Card> submitCard = Mono.just(JAN_1);
-        Mono<Card> topCard = Mono.just(Card.JAN_2);
+        Card submitCard = Card.JAN_1;
+        Card topCard = Card.JAN_2;
         Flux<Card> revealedJanCard = Flux.just(Card.JAN_3);
-
-        given(installedCardRepository.getTopCard(roomId))
-                .willReturn(topCard);
 
         given(installedCardRepository.getRevealedCardByMonth(roomId, 1))
                 .willReturn(revealedJanCard);
@@ -43,19 +40,17 @@ class SubmitCardTest {
         given(installedCardRepository.saveRevealedCard(any(), eq(roomId)))
                 .willReturn(Mono.just(true));
 
-        StepVerifier.create(gameService.submitCard(roomId, submitCard))
+        StepVerifier.create(gameService.submitCard(roomId, submitCard, topCard))
                 .verifyComplete();
     }
 
     @Test
     void testSubmitCard2() {
-        Mono<Card> submitCard = Mono.just(JAN_1);
-        Mono<Card> topCard = Mono.just(Card.JAN_2);
+        Card submitCard = Card.JAN_1;
+        Card topCard = Card.JAN_2;
         Flux<Card> revealedJanCard = Flux.just(Card.JAN_3, Card.JAN_4);
         Flux<Card> retCard = Flux.just(JAN_1, Card.JAN_2, Card.JAN_3, Card.JAN_4);
 
-        given(installedCardRepository.getTopCard(roomId))
-                .willReturn(topCard);
 
         given(installedCardRepository.getRevealedCardByMonth(roomId, 1))
                 .willReturn(revealedJanCard);
@@ -63,8 +58,8 @@ class SubmitCardTest {
         given(installedCardRepository.deleteAllRevealedCardByMonth(roomId, 1))
                 .willReturn(Mono.just(true));
 
-        StepVerifier.create(gameService.submitCard(roomId, submitCard))
-                .recordWith(ArrayList::new) // 결과를 리스트로 기록
+        StepVerifier.create(gameService.submitCard(roomId, submitCard, topCard))
+                .recordWith(ArrayList::new)
                 .thenConsumeWhile(card -> true) // 모든 요소 소비
                 .consumeRecordedWith(cards ->
                         assertThat(cards).containsExactlyInAnyOrderElementsOf(retCard.collectList().block())
@@ -74,14 +69,11 @@ class SubmitCardTest {
 
     @Test
     void testSubmitCard3() {
-        Mono<Card> submitCard = Mono.just(JAN_1);
-        Mono<Card> topCard = Mono.just(Card.FEB_1);
+        Card submitCard = Card.JAN_1;
+        Card topCard = Card.FEB_1;
         Flux<Card> revealedJanCard = Flux.empty();
         Flux<Card> revealedFebCard = Flux.just(Card.FEB_2);
         Flux<Card> retCard = Flux.just(Card.FEB_1, Card.FEB_2);
-
-        given(installedCardRepository.getTopCard(roomId))
-                .willReturn(topCard);
 
         given(installedCardRepository.getRevealedCardByMonth(roomId, 1))
                 .willReturn(revealedJanCard);
@@ -95,7 +87,7 @@ class SubmitCardTest {
         given(installedCardRepository.saveRevealedCard(any(), eq(roomId)))
                 .willReturn(Mono.just(true));
 
-        StepVerifier.create(gameService.submitCard(roomId, submitCard))
+        StepVerifier.create(gameService.submitCard(roomId, submitCard, topCard))
                 .recordWith(ArrayList::new)
                 .thenConsumeWhile(card -> true)
                 .consumeRecordedWith(cards ->
