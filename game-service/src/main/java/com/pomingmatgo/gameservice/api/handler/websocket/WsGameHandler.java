@@ -26,14 +26,14 @@ public class WsGameHandler {
         if("NORMAL_SUBMIT".equals(eventType)) {
             if (event.getData() instanceof NormalSubmitReq) {
                 return gameService.submitCardEvent(roomId, (RequestEvent<NormalSubmitReq>) event)
-                        .flatMapMany(submittedCard ->
-                                sendSubmitCardInfo(roomId, playerNum, submittedCard)
-                                        .then(gameService.getTopCard(roomId))
-                                        .flatMapMany(topCard ->
-                                                sendTopCardInfo(roomId, playerNum, topCard)
-                                                        .thenMany(gameService.submitCard(roomId, submittedCard, topCard))
-                                        )
-                        )
+                        .flatMapMany(submittedCard -> {
+                            Mono<Card> topCardMono = sendSubmitCardInfo(roomId, playerNum, submittedCard)
+                                    .then(gameService.getTopCard(roomId));
+                            return topCardMono.flatMapMany(topCard ->
+                                    sendTopCardInfo(roomId, playerNum, topCard)
+                                            .thenMany(gameService.submitCard(roomId, submittedCard, topCard))
+                            );
+                        })
                         .collectList()
                         .flatMap(cards -> sendAcquiredCardMessage(roomId, playerNum, cards));
             }
