@@ -32,14 +32,15 @@ public class GameService {
                 .any(Boolean::booleanValue);
     }
 
-    public Flux<Card> submitCard(long roomId, Mono<Card> submittedCardMono) {
-        return installedCardRepository.getTopCard(roomId)
-                .flatMapMany(turnedCard -> submittedCardMono.flatMapMany(submittedCard ->
-                        processSubmittedCard(roomId, submittedCard, turnedCard)
-                ));
+    public Flux<Card> submitCard(long roomId, Card submittedCard, Card turnedCard) {
+        return processSubmittedCard(roomId, submittedCard, turnedCard);
     }
 
-    public Flux<Card> submitCardEvent(long roomId, RequestEvent<NormalSubmitReq> event) {
+    public Mono<Card> getTopCard(long roomId) {
+        return installedCardRepository.getTopCard(roomId);
+    }
+
+    public Mono<Card> submitCardEvent(long roomId, RequestEvent<NormalSubmitReq> event) {
         int playerNum = event.getPlayerNum();
         int cardIndex = event.getData().getCardIndex();
 
@@ -47,7 +48,7 @@ public class GameService {
                 ? installedCardRepository.getPlayer1Cards(roomId).collectList()
                 : installedCardRepository.getPlayer2Cards(roomId).collectList();
 
-        return playerCardsMono.flatMapMany(playerCards -> {
+        return playerCardsMono.flatMap(playerCards -> {
             if (cardIndex < 0 || cardIndex >= playerCards.size()) {
                 throw new WebSocketBusinessException(INVALUD_CARD);
             }
@@ -59,7 +60,7 @@ public class GameService {
                     .flatMap(ignored -> installedCardRepository.savePlayer1Card(playerCards, roomId))
                     : installedCardRepository.deletePlayer2Card(roomId)
                     .flatMap(ignored -> installedCardRepository.savePlayer2Card(playerCards, roomId)))
-            .thenMany(submitCard(roomId, Mono.just(submittedCard)));
+                    .thenReturn(submittedCard);
         });
     }
 

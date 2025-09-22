@@ -25,12 +25,40 @@ public class WsGameHandler {
         long roomId = gameState.getRoomId();
         if("NORMAL_SUBMIT".equals(eventType)) {
             if (event.getData() instanceof NormalSubmitReq) {
-                return gameService.submitCardEvent(roomId, (RequestEvent<NormalSubmitReq>)event)
+                return gameService.submitCardEvent(roomId, (RequestEvent<NormalSubmitReq>) event)
+                        .flatMapMany(submittedCard ->
+                                sendSubmitCardInfo(roomId, playerNum, submittedCard)
+                                        .then(gameService.getTopCard(roomId))
+                                        .flatMapMany(topCard ->
+                                                sendTopCardInfo(roomId, playerNum, topCard)
+                                                        .thenMany(gameService.submitCard(roomId, submittedCard, topCard))
+                                        )
+                        )
                         .collectList()
-                        .flatMap(card -> sendAcquiredCardMessage(roomId, playerNum, card));
+                        .flatMap(cards -> sendAcquiredCardMessage(roomId, playerNum, cards));
             }
         }
         return Mono.empty();
+    }
+
+    private Mono<Void> sendSubmitCardInfo(long roomId, int playerNum, Card card) {
+        return messageSender.sendMessageToAllUser(
+                roomId,
+                new WebSocketResDto<>(playerNum,
+                        "SUBMIT_CARD",
+                        "카드 제출",
+                        card)
+        );
+    }
+    
+    private Mono<Void> sendTopCardInfo(long roomId, int playerNum, Card card) {
+        return messageSender.sendMessageToAllUser(
+                roomId,
+                new WebSocketResDto<>(playerNum,
+                        "SUBMIT_CARD",
+                        "상단 카드 정보",
+                        card)
+        );
     }
 
     private Mono<Void> sendAcquiredCardMessage(long roomId, int playerNum, List<Card> card) {
