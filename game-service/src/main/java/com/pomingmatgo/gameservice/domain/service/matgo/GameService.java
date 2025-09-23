@@ -80,6 +80,7 @@ public class GameService {
                     if (cardStack.size() != 1) {
                         return installedCardRepository.deleteAllRevealedCardByMonth(roomId, month)
                                 .thenMany(Flux.fromIterable(List.of(turnedCard, submittedCard)).concatWith(Flux.fromIterable(cardStack)));
+                        //todo: 다른 사람 카드 가져오는 로직 추가
                     } else {
                         //뻑
                         return installedCardRepository.saveRevealedCard(List.of(turnedCard, submittedCard), roomId)
@@ -100,14 +101,22 @@ public class GameService {
         return installedCardRepository.getRevealedCardByMonth(roomId, month)
                 .collectList()
                 .flatMapMany(cardStack -> {
-                    if (cardStack.isEmpty()) {
-                        return installedCardRepository.saveRevealedCard(List.of(card), roomId)
-                                .thenMany(Flux.empty());
-                    } else if (cardStack.size() == 1) {
-                        return installedCardRepository.deleteAllRevealedCardByMonth(roomId, month)
-                                .thenMany(Flux.fromIterable(cardStack).concatWith(Flux.just(card)));
+                    int size = cardStack.size();
+                    switch (size) {
+                        case 0:
+                            return installedCardRepository.saveRevealedCard(List.of(card), roomId)
+                                    .thenMany(Flux.empty());
+                        case 1:
+                            return installedCardRepository.deleteAllRevealedCardByMonth(roomId, month)
+                                    .thenMany(Flux.fromIterable(cardStack).concatWith(Flux.just(card)));
+                        case 2:
+
+                        case 3:
+                            // TODO: size 2, 3인 경우 처리
+                            return Flux.empty();
+                        default:
+                            return Flux.empty();
                     }
-                    return Flux.empty();
                 });
     }
 
