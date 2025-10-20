@@ -14,8 +14,10 @@ public class SessionManager {
     private final ConcurrentHashMap<Long, RoomSessionData> sessions = new ConcurrentHashMap<>();
     //(roomId, RoomSessionData)
 
-    public void addRoom(long roomId) {
-        sessions.putIfAbsent(roomId, new RoomSessionData());
+    public Mono<Void> addRoom(long roomId) {
+        return Mono.fromRunnable(() ->
+                sessions.putIfAbsent(roomId, new RoomSessionData())
+        );
     }
 
     public void deleteRoom(long roomId) {

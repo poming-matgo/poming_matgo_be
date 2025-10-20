@@ -76,8 +76,9 @@ public class RoomService {
     public Mono<Long> createRoom(Long roomId) {
         GameState gameState = new GameState();
         gameState.setRoomId(roomId);
-        sessionManager.addRoom(roomId);
-        return gameStateRepository.create(gameState);
+
+        return sessionManager.addRoom(roomId)
+                .then(gameStateRepository.create(gameState));
     }
 
     public Mono<GameState> ready(GameState gameState, int playerNum, boolean flag) {
