@@ -78,7 +78,19 @@ public class RoomService {
         gameState.setRoomId(roomId);
 
         return sessionManager.addRoom(roomId)
-                .then(gameStateRepository.create(gameState));
+                .then(gameStateRepository.create(gameState))
+                .thenReturn(roomId)
+                .onErrorResume(ex -> {
+                    if (ex instanceof WebSocketBusinessException) {
+                        BusinessException businessEx = (BusinessException) ex;
+                        if (businessEx.getErrorCode() == ErrorCode.ALREADY_EXISTED_ROOM) {
+                            return Mono.error(ex);
+                        }
+                    }
+
+                    return sessionManager.removeRoom(roomId)
+                            .then(Mono.error(ex));
+                });
     }
 
     public Mono<GameState> ready(GameState gameState, int playerNum, boolean flag) {

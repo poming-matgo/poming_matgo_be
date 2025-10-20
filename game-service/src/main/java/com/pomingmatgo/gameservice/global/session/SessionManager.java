@@ -45,8 +45,8 @@ public class SessionManager {
             return sessions.get(roomId).getPlayer2Session();
     }
 
-    public void removeRoom(Long roomId) {
-        sessions.remove(roomId);
+    public Mono<Void> removeRoom(Long roomId) {
+        return Mono.fromRunnable(() -> sessions.remove(roomId));
     }
 
     public Collection<WebSocketSession> getAllUser(long roomId) {
