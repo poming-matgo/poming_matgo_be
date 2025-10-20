@@ -25,18 +25,15 @@ public class GameStateRepository {
 
     public Mono<Long> create(GameState gameState) {
         String redisKey = GAME_STATE_KEY_PREFIX + gameState.getRoomId();
-        return checkKeyExists(redisKey)
-                .flatMap(exists -> {
-                    if (Boolean.TRUE.equals(exists)) {
+
+        return redisOps.opsForValue()
+                .setIfAbsent(redisKey, gameState)
+                .flatMap(wasSet -> {
+                    if (Boolean.TRUE.equals(wasSet)) {
+                        return Mono.just(gameState.getRoomId());
+                    } else {
                         return Mono.error(new BusinessException(ErrorCode.ALREADY_EXISTED_ROOM));
                     }
-                    return saveState(gameState, redisKey);
-                })
-                .flatMap(saved -> {
-                    if (Boolean.TRUE.equals(saved)) {
-                        return Mono.just(gameState.getRoomId());
-                    }
-                    return Mono.error(new BusinessException(ErrorCode.SYSTEM_ERROR));
                 });
     }
 
