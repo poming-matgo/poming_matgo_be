@@ -50,15 +50,12 @@ public class GameStateRepository {
 
     public Mono<Long> save(GameState gameState) {
         String redisKey = GAME_STATE_KEY_PREFIX + gameState.getRoomId();
-        return saveState(gameState, redisKey)
-                .flatMap(saved -> {
-                    if (Boolean.TRUE.equals(saved)) {
-                        return Mono.just(gameState.getRoomId());
-                    }
-                    return Mono.error(new BusinessException(ErrorCode.SYSTEM_ERROR));
-                });
-    }
 
+        return saveState(gameState, redisKey)
+                .filter(isSaved -> isSaved) // true 값만 통과시킴
+                .map(isSaved -> gameState.getRoomId()) // roomId로 변환
+                .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.SYSTEM_ERROR)));
+    }
     private Mono<Boolean> checkKeyExists(String redisKey) {
         return redisOps.hasKey(redisKey);
     }
