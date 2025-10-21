@@ -29,16 +29,16 @@ public class RoomHandler {
     }
 
     public Mono<ServerResponse> joinRoom(ServerRequest request) {
-
         return request.bodyToMono(JoinRoomRequest.class)
-                .flatMap(req -> roomService.joinRoom(req.getUserId(), req.getRoomId())
-                        .thenReturn(req))
-                .flatMap(req -> ServerResponse.ok().bodyValue(
-                        new ApiResponseDto<>(
-                                HttpStatus.OK.value(),
-                                String.format("%d번 게임방에 %d번 플레이어가 조인했습니다.", req.getRoomId(), req.getUserId())
-                        )
-                ));
+                .flatMap(req ->
+                        roomService.joinRoom(req.getUserId(), req.getRoomId())
+                                .then(ServerResponse.ok().bodyValue(
+                                        new ApiResponseDto<>(
+                                                HttpStatus.OK.value(),
+                                                String.format("%d번 게임방에 %d번 플레이어가 조인했습니다.", req.getRoomId(), req.getUserId())
+                                        )
+                                ))
+                );
     }
 
     public Mono<ServerResponse> leaveRoom(ServerRequest request) {
