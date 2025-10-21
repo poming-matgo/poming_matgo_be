@@ -29,18 +29,20 @@ public class RoomService {
     }
 
     public Mono<Void> leaveRoom(long userId, long roomId) {
+
         return gameStateRepository.findById(roomId)
                 .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.NOT_EXISTED_ROOM)))
                 .flatMap(gameState -> {
+                    GameState.GameStateBuilder builder = gameState.toBuilder();
                     if(gameState.getPlayer1Id() == userId) {
-                        gameState.setPlayer1Id(null);
-                        gameState.setPlayer1Ready(false);
+                        builder.player1Id(null);
+                        builder.player1Ready(false);
                     }
                     else if(gameState.getPlayer2Id() == userId) {
-                        gameState.setPlayer2Id(null);
-                        gameState.setPlayer2Ready(false);
+                        builder.player2Id(null);
+                        builder.player2Ready(false);
                     }
-                    return saveWithUserId(gameState, userId)
+                    return saveWithUserId(builder.build(), userId)
                             .then();
                 });
     }
@@ -63,26 +65,17 @@ public class RoomService {
     }
 
     private Mono<Void> saveWithUserId(GameState gameState, long userId) {
-        /*
-        GameState.Builder builder = gameState.toBuilder();
+        GameState.GameStateBuilder builder = gameState.toBuilder();
         if (gameState.getPlayer1Id() == null) {
             builder.player1Id(userId);
         } else if (gameState.getPlayer2Id() == null) {
             builder.player2Id(userId);
         }
-        return gameStateRepository.save(builder.build());
-         */
-        if (gameState.getPlayer1Id() == null) {
-            gameState.setPlayer1Id(userId);
-        } else if (gameState.getPlayer2Id() == null) {
-            gameState.setPlayer2Id(userId);
-        }
-        return gameStateRepository.save(gameState).then();
+        return gameStateRepository.save(builder.build()).then();
     }
 
     public Mono<Long> createRoom(Long roomId) {
-        GameState gameState = new GameState();
-        gameState.setRoomId(roomId);
+        GameState gameState = new GameState(roomId);
 
         return sessionManager.addRoom(roomId)
                 .then(gameStateRepository.create(gameState))
@@ -105,13 +98,15 @@ public class RoomService {
             return Mono.error(new WebSocketBusinessException(WebSocketErrorCode.NOT_EXISTED_ROOM));
         }
 
+        GameState.GameStateBuilder builder = gameState.toBuilder();
+
         if (playerNum == 1) {
-            gameState.setPlayer1Ready(flag);
+            builder.player1Ready(flag);
         } else {
-            gameState.setPlayer2Ready(flag);
+            builder.player2Ready(flag);
         }
 
-        return gameStateRepository.save(gameState)
+        return gameStateRepository.save(builder.build())
                 .thenReturn(gameState);
     }
 

@@ -1,15 +1,13 @@
 package com.pomingmatgo.gameservice.domain;
 
-import lombok.Getter;
-import lombok.NoArgsConstructor;
-import lombok.Setter;
+import lombok.*;
 import org.springframework.data.annotation.Id;
 
 import java.io.Serializable;
 
 @Getter
-@Setter
-@NoArgsConstructor
+@AllArgsConstructor
+@Builder(toBuilder = true)
 public class GameState implements Serializable {
     private static final long serialVersionUID = 1L;
     @Id
@@ -21,4 +19,8 @@ public class GameState implements Serializable {
     int leadingPlayer;
     int round;
     int currentTurn;
+
+    public GameState(Long roomId) {
+        this.roomId = roomId;
+    }
 }
