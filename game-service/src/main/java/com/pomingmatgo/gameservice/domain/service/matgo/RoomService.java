@@ -20,14 +20,12 @@ public class RoomService {
     public Mono<Void> joinRoom(long userId, long roomId) {
         return gameStateRepository.findById(roomId)
                 .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.NOT_EXISTED_ROOM)))
-                .flatMap(gameState -> {
-                    if (isRoomFull(gameState))
-                        return Mono.error(new BusinessException(ErrorCode.FULL_ROOM));
-                    if (isUserInRoom(gameState, userId))
-                        return Mono.error(new BusinessException(ErrorCode.ALREADY_IN_ROOM));
-                    return saveWithUserId(gameState, userId)
-                            .then();
-                });
+                .filter(gameState -> !isRoomFull(gameState))
+                .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.FULL_ROOM)))
+                .filter(gameState -> !isUserInRoom(gameState, userId))
+                .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.ALREADY_IN_ROOM)))
+                .flatMap(gameState -> saveWithUserId(gameState, userId))
+                .then();
     }
 
     public Mono<Void> leaveRoom(long userId, long roomId) {
@@ -65,6 +63,15 @@ public class RoomService {
     }
 
     private Mono<Void> saveWithUserId(GameState gameState, long userId) {
+        /*
+        GameState.Builder builder = gameState.toBuilder();
+        if (gameState.getPlayer1Id() == null) {
+            builder.player1Id(userId);
+        } else if (gameState.getPlayer2Id() == null) {
+            builder.player2Id(userId);
+        }
+        return gameStateRepository.save(builder.build());
+         */
         if (gameState.getPlayer1Id() == null) {
             gameState.setPlayer1Id(userId);
         } else if (gameState.getPlayer2Id() == null) {
