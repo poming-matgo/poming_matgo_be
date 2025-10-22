@@ -29,7 +29,6 @@ public class RoomService {
     }
 
     public Mono<Void> leaveRoom(long userId, long roomId) {
-
         return gameStateRepository.findById(roomId)
                 .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.NOT_EXISTED_ROOM)))
                 .filter(gameState -> isUserInRoom(gameState, userId))
@@ -40,7 +39,8 @@ public class RoomService {
                     } else {
                         builder.player2Id(null).player2Ready(false);
                     }
-                    return gameStateRepository.save(builder.build());
+                    GameState newState = builder.build();
+                    return gameStateRepository.save(newState);
                 })
                 .then();
     }
@@ -74,7 +74,8 @@ public class RoomService {
         } else if (gameState.getPlayer2Id() == null) {
             builder.player2Id(userId);
         }
-        return gameStateRepository.save(builder.build()).then();
+        GameState newState = builder.build();
+        return gameStateRepository.save(newState).then();
     }
 
     public Mono<Long> createRoom(Long roomId) {
