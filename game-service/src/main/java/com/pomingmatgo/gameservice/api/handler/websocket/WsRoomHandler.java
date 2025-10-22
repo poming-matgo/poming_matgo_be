@@ -16,7 +16,7 @@ public class WsRoomHandler {
     private final MessageSender messageSender;
     private final RoomService roomService;
     private final PreGameService preGameService;
-    public enum RoomEventType {
+    private enum RoomEventType {
         CONNECT, READY, UNREADY
     }
 
