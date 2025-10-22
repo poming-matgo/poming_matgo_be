@@ -24,11 +24,14 @@ public class SessionManager {
         sessions.remove(roomId);
     }
 
-    public void addPlayer(long roomId, int playerNum, WebSocketSession session) {
-        if(playerNum==1)
-            sessions.get(roomId).setPlayer1Session(session);
-        else
-            sessions.get(roomId).setPlayer2Session(session);
+    public Mono<Void> addPlayer(long roomId, int playerNum, WebSocketSession session) {
+        return Mono.fromRunnable(() -> {
+            if(playerNum == 1) {
+                sessions.get(roomId).setPlayer1Session(session);
+            } else {
+                sessions.get(roomId).setPlayer2Session(session);
+            }
+        });
     }
 
     public void deletePlayer(long roomId, int playerNum) {

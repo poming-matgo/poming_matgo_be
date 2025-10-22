@@ -65,10 +65,10 @@ public class GameWebSocketHandler implements WebSocketHandler {
 
         return roomService.getGameState(roomId)
                 .flatMap(gameState -> determinePlayerNum(userId, gameState)
-                        .flatMap(playerNum -> {
-                            sessionManager.addPlayer(roomId, playerNum, session);
-                            return routeEvent(event, gameState, playerNum);
-                        }))
+                        .flatMap(playerNum ->
+                                sessionManager.addPlayer(roomId, playerNum, session)
+                                        .then(routeEvent(event, gameState, playerNum))
+                        ))
                 .onErrorResume(error -> handleWebSocketError(session, error));
     }
 
