@@ -73,21 +73,13 @@ public class GameWebSocketHandler implements WebSocketHandler {
     }
 
     private Mono<Void> handleWebSocketError(WebSocketSession session, Throwable error) {
-        WebSocketErrorResDto dto;
+        WebSocketErrorResDto dto = (error instanceof WebSocketBusinessException businessException)
+                ? new WebSocketErrorResDto(businessException.getWebsocketErrorCode())
+                : new WebSocketErrorResDto(SYSTEM_ERROR);
 
-        if (error instanceof WebSocketBusinessException businessException) {
-            dto = new WebSocketErrorResDto(businessException.getWebsocketErrorCode());
-        } else {
-            dto = new WebSocketErrorResDto(SYSTEM_ERROR);
-        }
-
-        try {
-            String jsonMessage = objectMapper.writeValueAsString(dto);
-            WebSocketMessage webSocketMessage = session.textMessage(jsonMessage);
-            return session.send(Mono.just(webSocketMessage));
-        } catch (IOException e) {
-            return Mono.error(e);
-        }
+        return Mono.fromCallable(() -> objectMapper.writeValueAsString(dto))
+                .map(session::textMessage)
+                .flatMap(message -> session.send(Mono.just(message)));
     }
 
 
