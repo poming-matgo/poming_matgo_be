@@ -32,19 +32,22 @@ public class RoomService {
 
         return gameStateRepository.findById(roomId)
                 .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.NOT_EXISTED_ROOM)))
+                .filter(gameState -> isUserInRoom(gameState, userId))
                 .flatMap(gameState -> {
                     GameState.GameStateBuilder builder = gameState.toBuilder();
                     if(gameState.getPlayer1Id() == userId) {
-                        builder.player1Id(null);
-                        builder.player1Ready(false);
+                        builder.player1Id(null).player1Ready(false);
+                    } else {
+                        builder.player2Id(null).player2Ready(false);
                     }
-                    else if(gameState.getPlayer2Id() == userId) {
-                        builder.player2Id(null);
-                        builder.player2Ready(false);
-                    }
-                    return saveWithUserId(builder.build(), userId)
-                            .then();
-                });
+                    return gameStateRepository.save(builder.build());
+                })
+                .then();
+    }
+
+    private boolean isUserInRoom(GameState gameState, long userId) {
+        return (gameState.getPlayer1Id() != null && gameState.getPlayer1Id() == userId) ||
+                (gameState.getPlayer2Id() != null && gameState.getPlayer2Id() == userId);
     }
 
     public Mono<Void> deleteRoom(long roomId) {
