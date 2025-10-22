@@ -23,31 +23,41 @@ public class WsPreGameHandler {
     private final PreGameService preGameService;
     private final MessageSender messageSender;
     private final SessionManager sessionManager;
+
+    private enum PreGameEventType {
+        LEADER_SELECTION
+    }
+
     public Mono<Void> handlePreGameEvent(RequestEvent<?> event, GameState gameState, int playerNum) {
-        String eventType = event.getEventType().getSubType();
-        long roomId = gameState.getRoomId();
-        if("LEADER_SELECTION".equals(eventType)) {
-            if (event.getData() instanceof LeadSelectionReq) {
-                return preGameService.selectCard((RequestEvent<LeadSelectionReq>) event)
-                        .then(sendLeaderSelectionMessage(roomId, playerNum))
-                        .then(preGameService.isAllPlayerCardSelected(roomId))
-                        .flatMap(allSelected -> {
-                            if (Boolean.TRUE.equals(allSelected)) {
-                                return afterleaderSelectionCardAllSelection(gameState);
-                            }
-                            return Mono.empty();
-                        });
-            }
+        WsPreGameHandler.PreGameEventType eventType;
+        try {
+            eventType = WsPreGameHandler.PreGameEventType.valueOf(event.getEventType().getSubType());
+        } catch (IllegalArgumentException e) {
+            return Mono.error(new IllegalArgumentException("Unsupported event type: " + event.getEventType().getSubType()));
         }
-        return Mono.empty();
+
+        return switch (eventType) {
+            case LEADER_SELECTION -> handleLeaderSelectionEvent(event, gameState, playerNum);
+        };
+    }
+
+    private Mono<Void> handleLeaderSelectionEvent(RequestEvent<?> event, GameState gameState, int playerNum) {
+        long roomId = gameState.getRoomId();
+        return preGameService.selectCard((RequestEvent<LeadSelectionReq>) event)
+                .then(sendLeaderSelectionMessage(roomId, playerNum))
+                .then(preGameService.isAllPlayerCardSelected(roomId))
+                .flatMap(allSelected -> {
+                    if (Boolean.TRUE.equals(allSelected)) {
+                        return afterleaderSelectionCardAllSelection(gameState);
+                    }
+                    return Mono.empty();
+                });
     }
 
     private Mono<Void> sendLeaderSelectionMessage(long roomId, int playerNum) {
         return messageSender.sendMessageToAllUser(
                 roomId,
-                new WebSocketResDto<>(playerNum,
-                        "LEADER_SELECTION",
-                        "선두 플레이어 선택")
+                WebSocketResDto.of(playerNum, "LEADER_SELECTION", "선두 플레이어 선택")
         );
     }
 
@@ -66,35 +76,28 @@ public class WsPreGameHandler {
     }
 
     private Mono<Void> sendAllSelectedEvent(long roomId, LeadSelectionRes leadSelectionRes) {
-        WebSocketResDto<LeadSelectionRes> setLeadDto = new WebSocketResDto<>(
-                0,
-                "LEADER_SELECTION_RESULT",
-                "선을 정했습니다.",
-                leadSelectionRes
-        );
-        return messageSender.sendMessageToAllUser(roomId, setLeadDto);
+        return messageSender.sendMessageToAllUser(roomId,
+                WebSocketResDto.of(0, "LEADER_SELECTION_RESULT", "선을 정했습니다.", leadSelectionRes));
     }
 
     private Mono<Void> sendDistributedCardInfo(long roomId, InstalledCard installedCard) {
-        WebSocketResDto<List<String>> ret1 = new WebSocketResDto<>(
+        WebSocketResDto<List<String>> ret1 =  WebSocketResDto.of(
                 1,
                 "DISTRIBUTE_CARD",
                 "카드를 배분합니다.",
                 installedCard.getPlayer1()
                         .stream()
                         .map(Enum::name)
-                        .toList()
-        );
+                        .toList());
 
-        WebSocketResDto<List<String>> ret2 = new WebSocketResDto<>(
+        WebSocketResDto<List<String>> ret2 =  WebSocketResDto.of(
                 2,
                 "DISTRIBUTE_CARD",
                 "카드를 배분합니다.",
                 installedCard.getPlayer2()
                         .stream()
                         .map(Enum::name)
-                        .toList()
-        );
+                        .toList());
 
         WebSocketSession player1Session = sessionManager.getSession(roomId, 1);
         WebSocketSession player2Session = sessionManager.getSession(roomId, 2);
@@ -111,13 +114,8 @@ public class WsPreGameHandler {
                 gameState.getCurrentTurn(),
                 gameState.getLeadingPlayer()==gameState.getCurrentTurn() ? 1 : 2
         );
-        WebSocketResDto<AnnounceRoundRes> ret = new WebSocketResDto<>(
-                0,
-                "ANNOUNCE_TURN_INFORMATION",
-                "턴을 알립니다.",
-                res
-        );
-        return messageSender.sendMessageToAllUser(gameState.getRoomId(), ret);
+        return messageSender.sendMessageToAllUser(gameState.getRoomId(),
+                WebSocketResDto.of(0, "ANNOUNCE_TURN_INFORMATION", "턴을 알립니다.", res));
     }
 
 }
