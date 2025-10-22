@@ -9,6 +9,7 @@ import java.io.Serializable;
 
 @Getter
 @AllArgsConstructor
+@NoArgsConstructor
 @Builder(toBuilder = true)
 public class GameState implements Serializable {
     private static final long serialVersionUID = 1L;
