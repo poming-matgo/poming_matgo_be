@@ -20,54 +20,57 @@ public class WsGameHandler {
     private final GameService gameService;
     private final MessageSender messageSender;
     private final SessionManager sessionManager;
-    public Mono<Void> handleGameEvent(RequestEvent<?> event, GameState gameState, int playerNum) {
-        String eventType = event.getEventType().getSubType();
-        long roomId = gameState.getRoomId();
-        if("NORMAL_SUBMIT".equals(eventType)) {
-            if (event.getData() instanceof NormalSubmitReq) {
-                return gameService.submitCardEvent(roomId, (RequestEvent<NormalSubmitReq>) event)
-                        .flatMapMany(submittedCard -> {
-                            Mono<Card> topCardMono = sendSubmitCardInfo(roomId, playerNum, submittedCard)
-                                    .then(gameService.getTopCard(roomId));
-                            return topCardMono.flatMapMany(topCard ->
-                                    sendTopCardInfo(roomId, playerNum, topCard)
-                                            .thenMany(gameService.submitCard(roomId, submittedCard, topCard))
-                            );
-                        })
-                        .collectList()
-                        .flatMap(cards -> sendAcquiredCardMessage(roomId, playerNum, cards));
-            }
-        }
-        return Mono.empty();
+
+    private enum GameEventType {
+        NORMAL_SUBMIT
     }
+
+    public Mono<Void> handleGameEvent(RequestEvent<?> event, GameState gameState, int playerNum) {
+        WsGameHandler.GameEventType eventType;
+        try {
+            eventType = WsGameHandler.GameEventType.valueOf(event.getEventType().getSubType());
+        } catch (IllegalArgumentException e) {
+            return Mono.error(new IllegalArgumentException("Unsupported event type: " + event.getEventType().getSubType()));
+        }
+
+        return switch (eventType) {
+            case NORMAL_SUBMIT -> handleNormalSubmitEvent(event, gameState.getRoomId(), playerNum);
+        };
+    }
+
+    private Mono<Void> handleNormalSubmitEvent(RequestEvent<?> event, long roomId, int playerNum) {
+        return gameService.submitCardEvent(roomId, (RequestEvent<NormalSubmitReq>) event)
+                .flatMapMany(submittedCard -> {
+                    Mono<Card> topCardMono = sendSubmitCardInfo(roomId, playerNum, submittedCard)
+                            .then(gameService.getTopCard(roomId));
+                    return topCardMono.flatMapMany(topCard ->
+                            sendTopCardInfo(roomId, playerNum, topCard)
+                                    .thenMany(gameService.submitCard(roomId, submittedCard, topCard))
+                    );
+                })
+                .collectList()
+                .flatMap(cards -> sendAcquiredCardMessage(roomId, playerNum, cards));
+    }
+
 
     private Mono<Void> sendSubmitCardInfo(long roomId, int playerNum, Card card) {
         return messageSender.sendMessageToAllUser(
                 roomId,
-                new WebSocketResDto<>(playerNum,
-                        "SUBMIT_CARD",
-                        "카드 제출",
-                        card)
+                WebSocketResDto.of(playerNum, "SUBMIT_CARD", "카드 제출", card)
         );
     }
     
     private Mono<Void> sendTopCardInfo(long roomId, int playerNum, Card card) {
         return messageSender.sendMessageToAllUser(
                 roomId,
-                new WebSocketResDto<>(playerNum,
-                        "SUBMIT_CARD",
-                        "상단 카드 정보",
-                        card)
+                WebSocketResDto.of(playerNum, "SUBMIT_CARD", "상단 카드 정보", card)
         );
     }
 
     private Mono<Void> sendAcquiredCardMessage(long roomId, int playerNum, List<Card> card) {
         return messageSender.sendMessageToAllUser(
                 roomId,
-                new WebSocketResDto<>(playerNum,
-                        "ACQUIRED_CARD",
-                        "카드 획득",
-                        card)
+                WebSocketResDto.of(playerNum, "ACQUIRED_CARD", "카드 획득", card)
         );
     }
 }
