@@ -55,7 +55,8 @@ public class WsPreGameHandler {
         Long roomId = gameState.getRoomId();
         return preGameService.getLeadSelectionRes(roomId)
                 .flatMap(leadSelectionRes -> {
-                    gameState.setLeadingPlayer(leadSelectionRes.getLeadPlayer());
+                    GameState.GameStateBuilder builder = gameState.toBuilder();
+                    builder.leadingPlayer(leadSelectionRes.getLeadPlayer());
                     return sendAllSelectedEvent(roomId, leadSelectionRes);
                 })
                 .then(Mono.defer(() -> preGameService.distributeCards(roomId)))

@@ -120,9 +120,10 @@ public class PreGameService {
     }
 
     public Mono<GameState> setRoundInfo(GameState gameState) {
-        gameState.setRound(1);
-        gameState.setCurrentTurn(1);
-        return gameStateRepository.save(gameState)
-                .thenReturn(gameState);
+        GameState.GameStateBuilder builder = gameState.toBuilder();
+        GameState newState = builder.round(1).currentTurn(1).build();
+
+        return gameStateRepository.save(newState)
+                .thenReturn(newState);
     }
 }
