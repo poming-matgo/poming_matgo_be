@@ -21,4 +21,8 @@ public class WebSocketResDto<T> {
         this.message = message;
         this.data = data;
     }
+
+    public static <T> WebSocketResDto<T> of(int playerId, String status, String message) {
+        return new WebSocketResDto<>(playerId, status, message, null);
+    }
 }
