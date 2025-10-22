@@ -109,8 +109,9 @@ public class RoomService {
             builder.player2Ready(flag);
         }
 
-        return gameStateRepository.save(builder.build())
-                .thenReturn(gameState);
+        GameState newState = builder.build();
+        return gameStateRepository.save(newState)
+                .thenReturn(newState);
     }
 
 
