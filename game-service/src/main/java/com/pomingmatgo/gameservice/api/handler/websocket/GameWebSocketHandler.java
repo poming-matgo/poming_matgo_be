@@ -40,6 +40,7 @@ public class GameWebSocketHandler implements WebSocketHandler {
         put("NORMAL_SUBMIT", NormalSubmitReq.class);
     }};
 
+
     @Override
     public Mono<Void> handle(WebSocketSession session) {
         return session.receive()
@@ -52,16 +53,8 @@ public class GameWebSocketHandler implements WebSocketHandler {
                         new TypeReference<RequestEvent<Object>>() {}))
                 .flatMap(event -> {
                     Class<?> targetType = typeMappings.getOrDefault(event.getEventType().getSubType(), Object.class);
-
-                    Object data = objectMapper.convertValue(event.getData(), targetType);
-
-                    RequestEvent<Object> typedEvent = new RequestEvent<>();
-                    typedEvent.setEventType(event.getEventType());
-                    typedEvent.setPlayerNum(event.getPlayerNum());
-                    typedEvent.setRoomId(event.getRoomId());
-                    typedEvent.setData(data);
-
-                    return processEvent(typedEvent, session);
+                    Object typedData = objectMapper.convertValue(event.getData(), targetType);
+                    return processEvent(event.withData(typedData, (Class<Object>) targetType), session);
                 })
                 .then();
     }
