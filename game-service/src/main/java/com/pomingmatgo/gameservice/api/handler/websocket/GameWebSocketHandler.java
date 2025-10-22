@@ -97,13 +97,11 @@ public class GameWebSocketHandler implements WebSocketHandler {
 
     private Mono<Void> routeEvent(RequestEvent<?> event, GameState gameState, int playerNum) {
         String eventType = event.getEventType().getType();
-        if ("ROOM".equals(eventType)) {
-            return wsRoomHandler.handleRoomEvent(event, gameState, playerNum);
-        } else if ("PREGAME".equals(eventType)) {
-            return wsPreGameHandler.handlePreGameEvent(event, gameState, playerNum);
-        } else if ("GAME".equals(eventType)) {
-            return wsGameHandler.handleGameEvent(event, gameState, playerNum);
-        }
-        return Mono.empty();
+        return switch (eventType) {
+            case "ROOM" -> wsRoomHandler.handleRoomEvent(event, gameState, playerNum);
+            case "PREGAME" -> wsPreGameHandler.handlePreGameEvent(event, gameState, playerNum);
+            case "GAME" -> wsGameHandler.handleGameEvent(event, gameState, playerNum);
+            default -> Mono.empty();
+        };
     }
 }
