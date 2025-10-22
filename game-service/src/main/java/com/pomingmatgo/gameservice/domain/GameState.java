@@ -36,4 +36,14 @@ public class GameState implements Serializable {
         }
         throw new WebSocketBusinessException(WebSocketErrorCode.NOT_IN_ROOM);
     }
+
+    public GameState withPlayerReady(Player player, boolean isReady) {
+        GameStateBuilder builder = this.toBuilder();
+        if (player == Player.PLAYER_1) {
+            builder.player1Ready(isReady);
+        } else {
+            builder.player2Ready(isReady);
+        }
+        return builder.build();
+    }
 }

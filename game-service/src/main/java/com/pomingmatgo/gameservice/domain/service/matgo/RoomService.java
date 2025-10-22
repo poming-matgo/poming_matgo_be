@@ -1,6 +1,7 @@
 package com.pomingmatgo.gameservice.domain.service.matgo;
 
 import com.pomingmatgo.gameservice.domain.GameState;
+import com.pomingmatgo.gameservice.domain.Player;
 import com.pomingmatgo.gameservice.domain.repository.GameStateRepository;
 import com.pomingmatgo.gameservice.global.exception.BusinessException;
 import com.pomingmatgo.gameservice.global.exception.ErrorCode;
@@ -97,20 +98,12 @@ public class RoomService {
                 });
     }
 
-    public Mono<GameState> ready(GameState gameState, int playerNum, boolean flag) {
+    public Mono<GameState> ready(GameState gameState, Player player, boolean isReady) {
         if (gameState == null) {
             return Mono.error(new WebSocketBusinessException(WebSocketErrorCode.NOT_EXISTED_ROOM));
         }
 
-        GameState.GameStateBuilder builder = gameState.toBuilder();
-
-        if (playerNum == 1) {
-            builder.player1Ready(flag);
-        } else {
-            builder.player2Ready(flag);
-        }
-
-        GameState newState = builder.build();
+        GameState newState = gameState.withPlayerReady(player, isReady);
         return gameStateRepository.save(newState)
                 .thenReturn(newState);
     }
