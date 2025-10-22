@@ -12,7 +12,7 @@ public class RequestEvent<T> {
     private long roomId;
     private T data;
 
-    public <U> RequestEvent<U> withData(U newData, Class<U> dataType) {
+    public <U> RequestEvent<U> withData(U newData) {
         RequestEvent<U> newEvent = new RequestEvent<>();
         newEvent.setEventType(this.eventType);
         newEvent.setPlayerNum(this.playerNum);

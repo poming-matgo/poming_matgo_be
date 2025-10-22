@@ -54,7 +54,7 @@ public class GameWebSocketHandler implements WebSocketHandler {
                 .flatMap(event -> {
                     Class<?> targetType = typeMappings.getOrDefault(event.getEventType().getSubType(), Object.class);
                     Object typedData = objectMapper.convertValue(event.getData(), targetType);
-                    return processEvent(event.withData(typedData, (Class<Object>) targetType), session);
+                    return processEvent(event.withData(typedData), session);
                 })
                 .then();
     }
