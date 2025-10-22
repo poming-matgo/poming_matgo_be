@@ -1,5 +1,7 @@
 package com.pomingmatgo.gameservice.domain;
 
+import com.pomingmatgo.gameservice.global.exception.WebSocketBusinessException;
+import com.pomingmatgo.gameservice.global.exception.WebSocketErrorCode;
 import lombok.*;
 import org.springframework.data.annotation.Id;
 
@@ -22,5 +24,15 @@ public class GameState implements Serializable {
 
     public GameState(Long roomId) {
         this.roomId = roomId;
+    }
+
+    public int getPlayerNumber(long userId) {
+        if (userId == this.player1Id) {
+            return 1;
+        }
+        if (userId == this.player2Id) {
+            return 2;
+        }
+        throw new WebSocketBusinessException(WebSocketErrorCode.NOT_IN_ROOM);
     }
 }
