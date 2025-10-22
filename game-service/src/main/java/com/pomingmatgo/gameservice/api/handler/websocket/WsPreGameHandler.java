@@ -6,6 +6,7 @@ import com.pomingmatgo.gameservice.api.response.websocket.AnnounceRoundRes;
 import com.pomingmatgo.gameservice.api.response.websocket.LeadSelectionRes;
 import com.pomingmatgo.gameservice.domain.GameState;
 import com.pomingmatgo.gameservice.domain.InstalledCard;
+import com.pomingmatgo.gameservice.domain.Player;
 import com.pomingmatgo.gameservice.domain.service.matgo.PreGameService;
 import com.pomingmatgo.gameservice.global.MessageSender;
 import com.pomingmatgo.gameservice.global.WebSocketResDto;
@@ -16,6 +17,8 @@ import org.springframework.web.reactive.socket.WebSocketSession;
 import reactor.core.publisher.Mono;
 
 import java.util.List;
+
+import static com.pomingmatgo.gameservice.domain.Player.*;
 
 @Component
 @RequiredArgsConstructor
@@ -28,7 +31,7 @@ public class WsPreGameHandler {
         LEADER_SELECTION
     }
 
-    public Mono<Void> handlePreGameEvent(RequestEvent<?> event, GameState gameState, int playerNum) {
+    public Mono<Void> handlePreGameEvent(RequestEvent<?> event, GameState gameState, Player player) {
         WsPreGameHandler.PreGameEventType eventType;
         try {
             eventType = WsPreGameHandler.PreGameEventType.valueOf(event.getEventType().getSubType());
@@ -37,14 +40,14 @@ public class WsPreGameHandler {
         }
 
         return switch (eventType) {
-            case LEADER_SELECTION -> handleLeaderSelectionEvent(event, gameState, playerNum);
+            case LEADER_SELECTION -> handleLeaderSelectionEvent(event, gameState, player);
         };
     }
 
-    private Mono<Void> handleLeaderSelectionEvent(RequestEvent<?> event, GameState gameState, int playerNum) {
+    private Mono<Void> handleLeaderSelectionEvent(RequestEvent<?> event, GameState gameState, Player player) {
         long roomId = gameState.getRoomId();
         return preGameService.selectCard((RequestEvent<LeadSelectionReq>) event)
-                .then(sendLeaderSelectionMessage(roomId, playerNum))
+                .then(sendLeaderSelectionMessage(roomId, player))
                 .then(preGameService.isAllPlayerCardSelected(roomId))
                 .flatMap(allSelected -> {
                     if (Boolean.TRUE.equals(allSelected)) {
@@ -54,10 +57,10 @@ public class WsPreGameHandler {
                 });
     }
 
-    private Mono<Void> sendLeaderSelectionMessage(long roomId, int playerNum) {
+    private Mono<Void> sendLeaderSelectionMessage(long roomId, Player player) {
         return messageSender.sendMessageToAllUser(
                 roomId,
-                WebSocketResDto.of(playerNum, "LEADER_SELECTION", "선두 플레이어 선택")
+                WebSocketResDto.of(player, "LEADER_SELECTION", "선두 플레이어 선택")
         );
     }
 
@@ -77,12 +80,12 @@ public class WsPreGameHandler {
 
     private Mono<Void> sendAllSelectedEvent(long roomId, LeadSelectionRes leadSelectionRes) {
         return messageSender.sendMessageToAllUser(roomId,
-                WebSocketResDto.of(0, "LEADER_SELECTION_RESULT", "선을 정했습니다.", leadSelectionRes));
+                WebSocketResDto.of(PLAYER_NOTHING, "LEADER_SELECTION_RESULT", "선을 정했습니다.", leadSelectionRes));
     }
 
     private Mono<Void> sendDistributedCardInfo(long roomId, InstalledCard installedCard) {
         WebSocketResDto<List<String>> ret1 =  WebSocketResDto.of(
-                1,
+                PLAYER_1,
                 "DISTRIBUTE_CARD",
                 "카드를 배분합니다.",
                 installedCard.getPlayer1()
@@ -91,7 +94,7 @@ public class WsPreGameHandler {
                         .toList());
 
         WebSocketResDto<List<String>> ret2 =  WebSocketResDto.of(
-                2,
+                PLAYER_2,
                 "DISTRIBUTE_CARD",
                 "카드를 배분합니다.",
                 installedCard.getPlayer2()
@@ -115,7 +118,7 @@ public class WsPreGameHandler {
                 gameState.getLeadingPlayer()==gameState.getCurrentTurn() ? 1 : 2
         );
         return messageSender.sendMessageToAllUser(gameState.getRoomId(),
-                WebSocketResDto.of(0, "ANNOUNCE_TURN_INFORMATION", "턴을 알립니다.", res));
+                WebSocketResDto.of(PLAYER_NOTHING, "ANNOUNCE_TURN_INFORMATION", "턴을 알립니다.", res));
     }
 
 }

@@ -2,6 +2,7 @@ package com.pomingmatgo.gameservice.api.handler.websocket;
 
 import com.pomingmatgo.gameservice.api.handler.event.RequestEvent;
 import com.pomingmatgo.gameservice.domain.GameState;
+import com.pomingmatgo.gameservice.domain.Player;
 import com.pomingmatgo.gameservice.domain.service.matgo.PreGameService;
 import com.pomingmatgo.gameservice.domain.service.matgo.RoomService;
 import com.pomingmatgo.gameservice.global.MessageSender;
@@ -9,6 +10,8 @@ import com.pomingmatgo.gameservice.global.WebSocketResDto;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
 import reactor.core.publisher.Mono;
+
+import static com.pomingmatgo.gameservice.domain.Player.PLAYER_NOTHING;
 
 @Component
 @RequiredArgsConstructor
@@ -20,7 +23,7 @@ public class WsRoomHandler {
         CONNECT, READY, UNREADY
     }
 
-    public Mono<Void> handleRoomEvent(RequestEvent<?> event, GameState gameState, int playerNum) {
+    public Mono<Void> handleRoomEvent(RequestEvent<?> event, GameState gameState, Player player) {
         RoomEventType eventType;
         try {
             eventType = RoomEventType.valueOf(event.getEventType().getSubType());
@@ -29,33 +32,33 @@ public class WsRoomHandler {
         }
 
         return switch (eventType) {
-            case CONNECT -> handleConnectEvent(gameState.getRoomId(), playerNum);
-            case READY -> handleReadyEvent(gameState, playerNum);
-            case UNREADY -> handleUnreadyEvent(gameState, playerNum);
+            case CONNECT -> handleConnectEvent(gameState.getRoomId(), player);
+            case READY -> handleReadyEvent(gameState, player);
+            case UNREADY -> handleUnreadyEvent(gameState, player);
         };
     }
 
-    private Mono<Void> handleConnectEvent(long roomId, int playerNum) {
-        return messageSender.sendMessageToAllUser(roomId, WebSocketResDto.of(playerNum, "CONNECT", "접속했습니다."));
+    private Mono<Void> handleConnectEvent(long roomId, Player player) {
+        return messageSender.sendMessageToAllUser(roomId, WebSocketResDto.of(player, "CONNECT", "접속했습니다."));
     }
-    private Mono<Void> handleReadyEvent(GameState gameState, int playerNum) {
-        return roomService.ready(gameState, playerNum, true)
+    private Mono<Void> handleReadyEvent(GameState gameState, Player player) {
+        return roomService.ready(gameState, player, true)
                 .flatMap(updatedGameState ->
                         messageSender.sendMessageToAllUser(
                                         gameState.getRoomId(),
-                                        WebSocketResDto.of(playerNum, "READY", "Ready 했습니다.")
+                                        WebSocketResDto.of(player, "READY", "Ready 했습니다.")
                                 )
                                 // 모든 유저 준비 완료 시 후속 처리
                                 .then(checkAndProceedIfAllReady(updatedGameState))
                 );
     }
 
-    private Mono<Void> handleUnreadyEvent(GameState gameState, int playerNum) {
-        return roomService.ready(gameState, playerNum, false)
+    private Mono<Void> handleUnreadyEvent(GameState gameState, Player player) {
+        return roomService.ready(gameState, player, false)
                 .then(
                         messageSender.sendMessageToAllUser(
                                 gameState.getRoomId(),
-                                WebSocketResDto.of(playerNum, "UNREADY", "Ready 취소 했습니다.")
+                                WebSocketResDto.of(player, "UNREADY", "Ready 취소 했습니다.")
                         )
                 );
     }
@@ -72,7 +75,7 @@ public class WsRoomHandler {
 
     private Mono<Void> handleAllReadyEvent(long roomId) {
         WebSocketResDto<Void> startDto = new WebSocketResDto<>(
-                0,
+                PLAYER_NOTHING,
                 "START",
                 "게임이 시작됐습니다."
         );

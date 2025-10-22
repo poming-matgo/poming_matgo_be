@@ -3,6 +3,7 @@ package com.pomingmatgo.gameservice.api.handler.websocket;
 import com.pomingmatgo.gameservice.api.handler.event.RequestEvent;
 import com.pomingmatgo.gameservice.api.request.websocket.NormalSubmitReq;
 import com.pomingmatgo.gameservice.domain.GameState;
+import com.pomingmatgo.gameservice.domain.Player;
 import com.pomingmatgo.gameservice.domain.card.Card;
 import com.pomingmatgo.gameservice.domain.service.matgo.GameService;
 import com.pomingmatgo.gameservice.global.MessageSender;
@@ -25,7 +26,7 @@ public class WsGameHandler {
         NORMAL_SUBMIT
     }
 
-    public Mono<Void> handleGameEvent(RequestEvent<?> event, GameState gameState, int playerNum) {
+    public Mono<Void> handleGameEvent(RequestEvent<?> event, GameState gameState, Player player) {
         WsGameHandler.GameEventType eventType;
         try {
             eventType = WsGameHandler.GameEventType.valueOf(event.getEventType().getSubType());
@@ -34,43 +35,43 @@ public class WsGameHandler {
         }
 
         return switch (eventType) {
-            case NORMAL_SUBMIT -> handleNormalSubmitEvent(event, gameState.getRoomId(), playerNum);
+            case NORMAL_SUBMIT -> handleNormalSubmitEvent(event, gameState.getRoomId(), player);
         };
     }
 
-    private Mono<Void> handleNormalSubmitEvent(RequestEvent<?> event, long roomId, int playerNum) {
+    private Mono<Void> handleNormalSubmitEvent(RequestEvent<?> event, long roomId, Player player) {
         return gameService.submitCardEvent(roomId, (RequestEvent<NormalSubmitReq>) event)
                 .flatMapMany(submittedCard -> {
-                    Mono<Card> topCardMono = sendSubmitCardInfo(roomId, playerNum, submittedCard)
+                    Mono<Card> topCardMono = sendSubmitCardInfo(roomId, player, submittedCard)
                             .then(gameService.getTopCard(roomId));
                     return topCardMono.flatMapMany(topCard ->
-                            sendTopCardInfo(roomId, playerNum, topCard)
+                            sendTopCardInfo(roomId, player, topCard)
                                     .thenMany(gameService.submitCard(roomId, submittedCard, topCard))
                     );
                 })
                 .collectList()
-                .flatMap(cards -> sendAcquiredCardMessage(roomId, playerNum, cards));
+                .flatMap(cards -> sendAcquiredCardMessage(roomId, player, cards));
     }
 
 
-    private Mono<Void> sendSubmitCardInfo(long roomId, int playerNum, Card card) {
+    private Mono<Void> sendSubmitCardInfo(long roomId, Player player, Card card) {
         return messageSender.sendMessageToAllUser(
                 roomId,
-                WebSocketResDto.of(playerNum, "SUBMIT_CARD", "카드 제출", card)
+                WebSocketResDto.of(player, "SUBMIT_CARD", "카드 제출", card)
         );
     }
     
-    private Mono<Void> sendTopCardInfo(long roomId, int playerNum, Card card) {
+    private Mono<Void> sendTopCardInfo(long roomId, Player player, Card card) {
         return messageSender.sendMessageToAllUser(
                 roomId,
-                WebSocketResDto.of(playerNum, "SUBMIT_CARD", "상단 카드 정보", card)
+                WebSocketResDto.of(player, "SUBMIT_CARD", "상단 카드 정보", card)
         );
     }
 
-    private Mono<Void> sendAcquiredCardMessage(long roomId, int playerNum, List<Card> card) {
+    private Mono<Void> sendAcquiredCardMessage(long roomId, Player player, List<Card> card) {
         return messageSender.sendMessageToAllUser(
                 roomId,
-                WebSocketResDto.of(playerNum, "ACQUIRED_CARD", "카드 획득", card)
+                WebSocketResDto.of(player, "ACQUIRED_CARD", "카드 획득", card)
         );
     }
 }

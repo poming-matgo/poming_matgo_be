@@ -1,9 +1,9 @@
 package com.pomingmatgo.gameservice.global.session;
 
+import com.pomingmatgo.gameservice.domain.Player;
 import org.springframework.stereotype.Component;
 import org.springframework.web.reactive.socket.WebSocketSession;
 import reactor.core.publisher.Mono;
-import reactor.core.publisher.Sinks;
 
 import java.util.ArrayList;
 import java.util.Collection;
@@ -24,11 +24,11 @@ public class SessionManager {
         sessions.remove(roomId);
     }
 
-    public Mono<Void> addPlayer(long roomId, int playerNum, WebSocketSession session) {
+    public Mono<Void> addPlayer(long roomId, Player player, WebSocketSession session) {
         return Mono.fromRunnable(() -> {
-            if(playerNum == 1) {
+            if (player == Player.PLAYER_1) {
                 sessions.get(roomId).setPlayer1Session(session);
-            } else {
+            } else if (player == Player.PLAYER_2) {
                 sessions.get(roomId).setPlayer2Session(session);
             }
         });

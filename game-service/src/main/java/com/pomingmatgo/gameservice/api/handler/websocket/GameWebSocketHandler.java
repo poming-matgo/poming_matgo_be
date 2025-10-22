@@ -5,10 +5,10 @@ import com.pomingmatgo.gameservice.api.handler.event.RequestEvent;
 import com.pomingmatgo.gameservice.api.request.websocket.LeadSelectionReq;
 import com.pomingmatgo.gameservice.api.request.websocket.NormalSubmitReq;
 import com.pomingmatgo.gameservice.domain.GameState;
+import com.pomingmatgo.gameservice.domain.Player;
 import com.pomingmatgo.gameservice.domain.service.matgo.RoomService;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.pomingmatgo.gameservice.global.exception.WebSocketBusinessException;
-import com.pomingmatgo.gameservice.global.exception.WebSocketErrorCode;
 import com.pomingmatgo.gameservice.global.exception.dto.WebSocketErrorResDto;
 import com.pomingmatgo.gameservice.global.session.SessionManager;
 import lombok.RequiredArgsConstructor;
@@ -65,9 +65,9 @@ public class GameWebSocketHandler implements WebSocketHandler {
 
         return roomService.getGameState(roomId)
                 .flatMap(gameState -> determinePlayerNum(userId, gameState)
-                        .flatMap(playerNum ->
-                                sessionManager.addPlayer(roomId, playerNum, session)
-                                        .then(routeEvent(event, gameState, playerNum))
+                        .flatMap(player ->
+                                sessionManager.addPlayer(roomId, player, session)
+                                        .then(routeEvent(event, gameState, player))
                         ))
                 .onErrorResume(error -> handleWebSocketError(session, error));
     }
@@ -83,16 +83,17 @@ public class GameWebSocketHandler implements WebSocketHandler {
     }
 
 
-    private Mono<Integer> determinePlayerNum(long userId, GameState gameState) {
-        return Mono.fromCallable(() -> gameState.getPlayerNumber(userId));
+    private Mono<Player> determinePlayerNum(long userId, GameState gameState) {
+        return Mono.fromCallable(() -> gameState.getPlayerNumber(userId))
+                .map(Player::fromNumber);
     }
 
-    private Mono<Void> routeEvent(RequestEvent<?> event, GameState gameState, int playerNum) {
+    private Mono<Void> routeEvent(RequestEvent<?> event, GameState gameState, Player player) {
         String eventType = event.getEventType().getType();
         return switch (eventType) {
-            case "ROOM" -> wsRoomHandler.handleRoomEvent(event, gameState, playerNum);
-            case "PREGAME" -> wsPreGameHandler.handlePreGameEvent(event, gameState, playerNum);
-            case "GAME" -> wsGameHandler.handleGameEvent(event, gameState, playerNum);
+            case "ROOM" -> wsRoomHandler.handleRoomEvent(event, gameState, player);
+            case "PREGAME" -> wsPreGameHandler.handlePreGameEvent(event, gameState, player);
+            case "GAME" -> wsGameHandler.handleGameEvent(event, gameState, player);
             default -> Mono.empty();
         };
     }
