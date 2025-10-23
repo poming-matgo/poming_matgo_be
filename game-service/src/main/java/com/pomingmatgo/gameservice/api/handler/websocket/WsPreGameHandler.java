@@ -47,7 +47,7 @@ public class WsPreGameHandler {
     private Mono<Void> handleLeaderSelectionEvent(RequestEvent<?> event, GameState gameState, Player player) {
         long roomId = gameState.getRoomId();
 
-        return preGameService.selectCard((RequestEvent<LeadSelectionReq>)event)
+        return preGameService.selectCard((RequestEvent<LeadSelectionReq>)event, gameState, player)
                 .then(sendLeaderSelectionMessage(roomId, player))
                 .then(preGameService.isAllPlayerCardSelected(roomId))
                 .filter(allSelected -> allSelected)

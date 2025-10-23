@@ -5,6 +5,7 @@ import com.pomingmatgo.gameservice.api.request.websocket.LeadSelectionReq;
 import com.pomingmatgo.gameservice.api.response.websocket.LeadSelectionRes;
 import com.pomingmatgo.gameservice.domain.GameState;
 import com.pomingmatgo.gameservice.domain.InstalledCard;
+import com.pomingmatgo.gameservice.domain.Player;
 import com.pomingmatgo.gameservice.domain.card.Card;
 import com.pomingmatgo.gameservice.domain.ChooseLeadPlayer;
 import com.pomingmatgo.gameservice.domain.repository.GameStateRepository;
@@ -25,12 +26,12 @@ import static com.pomingmatgo.gameservice.global.exception.WebSocketErrorCode.AL
 @Service
 @RequiredArgsConstructor
 public class PreGameService {
-    private static final Random RANDOM = new Random();
     private final LeadingPlayerRepository leadingPlayerRepository;
     private final InstalledCardRepository installedCardRepository;
     private final GameStateRepository gameStateRepository;
 
     private static final int CARDS_TO_PICK = 5;
+    public static final int NO_SELECTION = 0;
 
     //선 플레이어 정하는 과정
     //todo: cardService로 분리 및 cardsByMonth를 상수로
@@ -50,25 +51,40 @@ public class PreGameService {
                 .flatMap(selectedCards -> leadingPlayerRepository.saveSelectedCard(selectedCards, roomId));
     }
 
-    public Mono<Void> selectCard(RequestEvent<LeadSelectionReq> event) {
-        /*return leadingPlayerRepository.getPlayerSelectedCard(event.getRoomId())
-                .flatMap(selectedCards -> leadingPlayerRepository.getCardByIndex(event.getRoomId(), event.getData().getCardIndex())
-                        .flatMap(curUserSelectedCard -> {
-                            int playerNum = event.getUserId();
-                            int selectedMonth = curUserSelectedCard.getMonth();
+    public Mono<Void> selectCard(RequestEvent<LeadSelectionReq> event, GameState gameState, Player player) {
+        Long roomId = gameState.getRoomId();
+        Mono<ChooseLeadPlayer> selectedCardsMono = leadingPlayerRepository.getPlayerSelectedCard(roomId);
+        Mono<Card> curUserSelectedCardMono = leadingPlayerRepository.getCardByIndex(roomId, event.getData().getCardIndex());
 
-                            if (playerNum == 1 && selectedCards.getPlayer1Month() == 0) {
-                                validateCardSelection(selectedCards.getPlayer2Month(), selectedMonth);
-                                selectedCards.setPlayer1Month(selectedMonth);
-                            } else if (playerNum == 2 && selectedCards.getPlayer2Month() == 0) {
-                                validateCardSelection(selectedCards.getPlayer1Month(), selectedMonth);
-                                selectedCards.setPlayer2Month(selectedMonth);
-                            }
+        return Mono.zip(selectedCardsMono, curUserSelectedCardMono)
+                .flatMap(tuple -> {
+                    ChooseLeadPlayer chooseCards = tuple.getT1();
+                    Card curUserSelectedCard = tuple.getT2();
 
-                            return leadingPlayerRepository.savePlayerSelectedCard(event.getRoomId(), selectedCards);
-                        })
-                );*/
-        return Mono.empty();
+                    ChooseLeadPlayer updatedChooseCards = updateSelectedCardForPlayer(chooseCards, player, curUserSelectedCard.getMonth());
+
+                    return leadingPlayerRepository.savePlayerSelectedCard(roomId, updatedChooseCards);
+                });
+    }
+
+    private ChooseLeadPlayer updateSelectedCardForPlayer(ChooseLeadPlayer selectedCards, Player player, int selectedMonth) {
+        ChooseLeadPlayer.ChooseLeadPlayerBuilder builder = selectedCards.toBuilder();
+
+        switch (player) {
+            case PLAYER_1:
+                if (selectedCards.getPlayer1Month() == NO_SELECTION) {
+                    validateCardSelection(selectedCards.getPlayer2Month(), selectedMonth);
+                    builder.player1Month(selectedMonth);
+                }
+                break;
+            case PLAYER_2:
+                if (selectedCards.getPlayer2Month() == NO_SELECTION) {
+                    validateCardSelection(selectedCards.getPlayer1Month(), selectedMonth);
+                    builder.player2Month(selectedMonth);
+                }
+                break;
+        }
+        return builder.build();
     }
 
     private void validateCardSelection(int otherPlayerMonth, int selectedMonth) {
