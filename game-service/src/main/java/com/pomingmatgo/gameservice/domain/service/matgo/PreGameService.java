@@ -60,38 +60,11 @@ public class PreGameService {
                 .flatMap(tuple -> {
                     ChooseLeadPlayer chooseCards = tuple.getT1();
                     Card curUserSelectedCard = tuple.getT2();
-
-                    ChooseLeadPlayer updatedChooseCards = updateSelectedCardForPlayer(chooseCards, player, curUserSelectedCard.getMonth());
-
+                    ChooseLeadPlayer updatedChooseCards = chooseCards.selectMonthForPlayer(player, curUserSelectedCard.getMonth());
                     return leadingPlayerRepository.savePlayerSelectedCard(roomId, updatedChooseCards);
                 });
     }
 
-    private ChooseLeadPlayer updateSelectedCardForPlayer(ChooseLeadPlayer selectedCards, Player player, int selectedMonth) {
-        ChooseLeadPlayer.ChooseLeadPlayerBuilder builder = selectedCards.toBuilder();
-
-        switch (player) {
-            case PLAYER_1:
-                if (selectedCards.getPlayer1Month() == NO_SELECTION) {
-                    validateCardSelection(selectedCards.getPlayer2Month(), selectedMonth);
-                    builder.player1Month(selectedMonth);
-                }
-                break;
-            case PLAYER_2:
-                if (selectedCards.getPlayer2Month() == NO_SELECTION) {
-                    validateCardSelection(selectedCards.getPlayer1Month(), selectedMonth);
-                    builder.player2Month(selectedMonth);
-                }
-                break;
-        }
-        return builder.build();
-    }
-
-    private void validateCardSelection(int otherPlayerMonth, int selectedMonth) {
-        if (otherPlayerMonth == selectedMonth) {
-            throw new WebSocketBusinessException(ALREADY_SELECTED_CARD);
-        }
-    }
 
     public Mono<Boolean> isAllPlayerCardSelected(Long roomId) {
         return leadingPlayerRepository.getPlayerSelectedCard(roomId)
