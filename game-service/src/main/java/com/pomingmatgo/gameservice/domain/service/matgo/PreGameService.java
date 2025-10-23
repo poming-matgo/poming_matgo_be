@@ -120,7 +120,7 @@ public class PreGameService {
                 installedCardRepository.savePlayer2Card(installedCard.getPlayer2(), roomId),
                 installedCardRepository.saveRevealedCard(installedCard.getRevealedCard(), roomId),
                 installedCardRepository.saveHiddenCard(installedCard.getHiddenCard(), roomId)
-        ).thenReturn(installedCard);
+        ).thenReturn(installedCard).retry(3);
     }
 
     public Mono<GameState> setRoundInfo(GameState gameState) {
