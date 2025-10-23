@@ -31,7 +31,11 @@ public class PreGameService {
     private final GameStateRepository gameStateRepository;
 
     private static final int CARDS_TO_PICK = 5;
-    public static final int NO_SELECTION = 0;
+    private static final int PLAYER_CARD_COUNT = 10;
+    private static final int REVEALED_CARD_COUNT = 8;
+    private static final int PLAYER_1_END_INDEX = PLAYER_CARD_COUNT;
+    private static final int PLAYER_2_END_INDEX = PLAYER_1_END_INDEX + PLAYER_CARD_COUNT;
+    private static final int REVEALED_CARD_END_INDEX = PLAYER_2_END_INDEX + REVEALED_CARD_COUNT;
 
     //선 플레이어 정하는 과정
     //todo: cardService로 분리 및 cardsByMonth를 상수로
@@ -97,21 +101,26 @@ public class PreGameService {
                 .collectList()
                 .map(ArrayList::new)
                 .doOnNext(Collections::shuffle)
-                .flatMap(deck -> {
-                    List<Card> player1 = new ArrayList<>(deck.subList(0, 10));
-                    List<Card> player2 = new ArrayList<>(deck.subList(10, 20));
-                    List<Card> revealedCard = new ArrayList<>(deck.subList(20, 28));
-                    List<Card> hiddenCard = new ArrayList<>(deck.subList(28, deck.size()));
+                .map(this::dealCardsFromDeck)
+                .flatMap(installedCard -> persistAllCards(installedCard, roomId));
+    }
 
-                    InstalledCard installedCard = new InstalledCard(player1, player2, revealedCard, hiddenCard);
+    private InstalledCard dealCardsFromDeck(List<Card> shuffledDeck) {
+        List<Card> player1 = new ArrayList<>(shuffledDeck.subList(0, PLAYER_1_END_INDEX));
+        List<Card> player2 = new ArrayList<>(shuffledDeck.subList(PLAYER_1_END_INDEX, PLAYER_2_END_INDEX));
+        List<Card> revealedCard = new ArrayList<>(shuffledDeck.subList(PLAYER_2_END_INDEX, REVEALED_CARD_END_INDEX));
+        List<Card> hiddenCard = new ArrayList<>(shuffledDeck.subList(REVEALED_CARD_END_INDEX, shuffledDeck.size()));
 
-                    return Mono.zip(
-                            installedCardRepository.savePlayer1Card(player1, roomId),
-                            installedCardRepository.savePlayer2Card(player2, roomId),
-                            installedCardRepository.saveRevealedCard(revealedCard, roomId),
-                            installedCardRepository.saveHiddenCard(hiddenCard, roomId)
-                    ).thenReturn(installedCard);
-                });
+        return new InstalledCard(player1, player2, revealedCard, hiddenCard);
+    }
+
+    private Mono<InstalledCard> persistAllCards(InstalledCard installedCard, long roomId) {
+        return Mono.zip(
+                installedCardRepository.savePlayer1Card(installedCard.getPlayer1(), roomId),
+                installedCardRepository.savePlayer2Card(installedCard.getPlayer2(), roomId),
+                installedCardRepository.saveRevealedCard(installedCard.getRevealedCard(), roomId),
+                installedCardRepository.saveHiddenCard(installedCard.getHiddenCard(), roomId)
+        ).thenReturn(installedCard);
     }
 
     public Mono<GameState> setRoundInfo(GameState gameState) {
