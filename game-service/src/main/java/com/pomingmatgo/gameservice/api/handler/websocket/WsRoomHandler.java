@@ -60,13 +60,11 @@ public class WsRoomHandler {
     }
 
     private Mono<Void> checkAndProceedIfAllReady(GameState updatedGameState) {
-        return Mono.defer(() -> {
-            if (roomService.checkAllPlayersReady(updatedGameState)) {
-                return handleAllReadyEvent(updatedGameState.getRoomId())
-                        .then(preGameService.pickFiveCardsAndSave(updatedGameState.getRoomId()));
-            }
-            return Mono.empty();
-        });
+        return Mono.just(updatedGameState)
+                .filter(roomService::checkAllPlayersReady)
+                .flatMap(state -> handleAllReadyEvent(state.getRoomId())
+                        .then(preGameService.pickFiveCardsAndSave(state.getRoomId()))
+                );
     }
 
     private Mono<Void> handleAllReadyEvent(long roomId) {
