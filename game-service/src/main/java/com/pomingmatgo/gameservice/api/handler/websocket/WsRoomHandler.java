@@ -20,7 +20,7 @@ public class WsRoomHandler {
     private final RoomService roomService;
     private final PreGameService preGameService;
     private enum RoomEventType {
-        CONNECT, READY, UNREADY
+        READY, UNREADY
     }
 
     public Mono<Void> handleRoomEvent(RequestEvent<?> event, GameState gameState, Player player) {
@@ -32,15 +32,11 @@ public class WsRoomHandler {
         }
 
         return switch (eventType) {
-            case CONNECT -> handleConnectEvent(gameState.getRoomId(), player);
             case READY -> handleReadyEvent(gameState, player);
             case UNREADY -> handleUnreadyEvent(gameState, player);
         };
     }
 
-    private Mono<Void> handleConnectEvent(long roomId, Player player) {
-        return messageSender.sendMessageToAllUser(roomId, WebSocketResDto.of(player, "CONNECT", "접속했습니다."));
-    }
     private Mono<Void> handleReadyEvent(GameState gameState, Player player) {
         return roomService.ready(gameState, player, true)
                 .flatMap(updatedGameState ->
