@@ -17,6 +17,8 @@ import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 
 import java.util.*;
+import java.util.concurrent.ThreadLocalRandom;
+import java.util.stream.Collectors;
 
 import static com.pomingmatgo.gameservice.global.exception.WebSocketErrorCode.ALREADY_SELECTED_CARD;
 
@@ -28,18 +30,21 @@ public class PreGameService {
     private final InstalledCardRepository installedCardRepository;
     private final GameStateRepository gameStateRepository;
 
+    private static final int CARDS_TO_PICK = 5;
+
     //선 플레이어 정하는 과정
+    //todo: cardService로 분리 및 cardsByMonth를 상수로
     public Mono<Void> pickFiveCardsAndSave(Long roomId) {
-        return Flux.fromArray(Card.values())
-                .collectMultimap(Card::getMonth)
-                .flatMapMany(cardsByMonth -> {
-                    List<Integer> months = new ArrayList<>(cardsByMonth.keySet());
-                    Collections.shuffle(months, RANDOM);
-                    return Flux.fromIterable(months.subList(0, 5))
-                            .map(month -> {
-                                List<Card> cards = new ArrayList<>(cardsByMonth.get(month));
-                                return cards.get(RANDOM.nextInt(cards.size()));
-                            });
+        Map<Integer, List<Card>> cardsByMonth = Arrays.stream(Card.values())
+                .collect(Collectors.groupingBy(Card::getMonth));
+        List<Integer> shuffledMonths = new ArrayList<>(cardsByMonth.keySet());
+        Collections.shuffle(shuffledMonths);
+
+        return Flux.fromIterable(shuffledMonths.subList(0, CARDS_TO_PICK))
+                .map(month -> {
+                    List<Card> cardsInMonth = cardsByMonth.get(month);
+                    int randomIndex = ThreadLocalRandom.current().nextInt(cardsInMonth.size());
+                    return cardsInMonth.get(randomIndex);
                 })
                 .collectList()
                 .flatMap(selectedCards -> leadingPlayerRepository.saveSelectedCard(selectedCards, roomId));
