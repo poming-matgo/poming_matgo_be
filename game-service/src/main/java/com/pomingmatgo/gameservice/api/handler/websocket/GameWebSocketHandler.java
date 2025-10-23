@@ -2,12 +2,15 @@ package com.pomingmatgo.gameservice.api.handler.websocket;
 
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.pomingmatgo.gameservice.api.handler.event.RequestEvent;
+import com.pomingmatgo.gameservice.api.request.websocket.JoinRoomReq;
 import com.pomingmatgo.gameservice.api.request.websocket.LeadSelectionReq;
 import com.pomingmatgo.gameservice.api.request.websocket.NormalSubmitReq;
 import com.pomingmatgo.gameservice.domain.GameState;
 import com.pomingmatgo.gameservice.domain.Player;
 import com.pomingmatgo.gameservice.domain.service.matgo.RoomService;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.pomingmatgo.gameservice.global.MessageSender;
+import com.pomingmatgo.gameservice.global.WebSocketResDto;
 import com.pomingmatgo.gameservice.global.exception.WebSocketBusinessException;
 import com.pomingmatgo.gameservice.global.exception.dto.WebSocketErrorResDto;
 import com.pomingmatgo.gameservice.global.session.SessionManager;
@@ -21,6 +24,7 @@ import reactor.core.publisher.Mono;
 import java.util.HashMap;
 import java.util.Map;
 
+import static com.pomingmatgo.gameservice.global.exception.WebSocketErrorCode.NOT_IN_ROOM;
 import static com.pomingmatgo.gameservice.global.exception.WebSocketErrorCode.SYSTEM_ERROR;
 
 
@@ -33,10 +37,12 @@ public class GameWebSocketHandler implements WebSocketHandler {
     private final WsRoomHandler wsRoomHandler;
     private final WsPreGameHandler wsPreGameHandler;
     private final WsGameHandler wsGameHandler;
+    private final MessageSender messageSender;
 
     private static final Map<String, Class<?>> typeMappings = new HashMap<>() {{
         put("LEADER_SELECTION", LeadSelectionReq.class);
         put("NORMAL_SUBMIT", NormalSubmitReq.class);
+        put("CONNECT", JoinRoomReq.class);
     }};
 
 
@@ -54,20 +60,35 @@ public class GameWebSocketHandler implements WebSocketHandler {
                     Class<?> targetType = typeMappings.getOrDefault(event.getEventType().getSubType(), Object.class);
                     Object typedData = objectMapper.convertValue(event.getData(), targetType);
                     return processEvent(event.withData(typedData), session);
-                })
-                .then();
+                });
     }
 
     private Mono<Void> processEvent(RequestEvent<?> event, WebSocketSession session) {
-        long userId = event.getPlayerNum();
-        long roomId = event.getRoomId();
+        if ("CONNECT".equals(event.getEventType().getSubType())) {
+            return handleJoinRoom(event, session);
+        }
+
+        return sessionManager.getPlayerContext(session)
+                .flatMap(context -> roomService.getGameState(context.roomId())
+                        .flatMap(gameState -> routeEvent(event, gameState, Player.fromNumber(context.playerNum())))
+                .switchIfEmpty(handleWebSocketError(session, new WebSocketBusinessException(NOT_IN_ROOM)))
+                .onErrorResume(error -> handleWebSocketError(session, error)));
+    }
+
+    private Mono<Void> handleJoinRoom(RequestEvent<?> event, WebSocketSession session) {
+        JoinRoomReq payload = (JoinRoomReq) event.getData();
+        long userId = payload.getUserId();
+        long roomId = payload.getRoomId();
 
         return roomService.getGameState(roomId)
-                .flatMap(gameState -> determinePlayerNum(userId, gameState)
-                        .flatMap(player ->
-                                sessionManager.addPlayer(roomId, player, session)
-                                        .then(routeEvent(event, gameState, player))
-                        ))
+                .flatMap(gameState -> determinePlayerNum(userId, gameState))
+                .flatMap(player ->
+                        sessionManager.addPlayer(roomId, player, userId, session)
+                                .thenReturn(player)
+                )
+                .flatMap(player ->
+                        messageSender.sendMessageToAllUser(roomId, WebSocketResDto.of(player, "CONNECT", "접속했습니다."))
+                )
                 .onErrorResume(error -> handleWebSocketError(session, error));
     }
 

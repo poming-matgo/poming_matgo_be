@@ -46,10 +46,10 @@ public class PreGameService {
     }
 
     public Mono<Void> selectCard(RequestEvent<LeadSelectionReq> event) {
-        return leadingPlayerRepository.getPlayerSelectedCard(event.getRoomId())
+        /*return leadingPlayerRepository.getPlayerSelectedCard(event.getRoomId())
                 .flatMap(selectedCards -> leadingPlayerRepository.getCardByIndex(event.getRoomId(), event.getData().getCardIndex())
                         .flatMap(curUserSelectedCard -> {
-                            int playerNum = event.getPlayerNum();
+                            int playerNum = event.getUserId();
                             int selectedMonth = curUserSelectedCard.getMonth();
 
                             if (playerNum == 1 && selectedCards.getPlayer1Month() == 0) {
@@ -62,7 +62,8 @@ public class PreGameService {
 
                             return leadingPlayerRepository.savePlayerSelectedCard(event.getRoomId(), selectedCards);
                         })
-                );
+                );*/
+        return Mono.empty();
     }
 
     private void validateCardSelection(int otherPlayerMonth, int selectedMonth) {

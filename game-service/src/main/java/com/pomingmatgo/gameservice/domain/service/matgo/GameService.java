@@ -37,7 +37,8 @@ public class GameService {
     }
 
     public Mono<Card> submitCardEvent(long roomId, RequestEvent<NormalSubmitReq> event) {
-        int playerNum = event.getPlayerNum();
+        //int playerNum = event.getUserId();
+        int playerNum = 1; //todo: 수정해야함
         int cardIndex = event.getData().getCardIndex();
 
         Mono<List<Card>> playerCardsMono = (playerNum == 1)
