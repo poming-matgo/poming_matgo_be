@@ -70,8 +70,8 @@ public class GameWebSocketHandler implements WebSocketHandler {
 
         return sessionManager.getPlayerContext(session)
                 .flatMap(context -> roomService.getGameState(context.roomId())
+                        .switchIfEmpty(Mono.error(new WebSocketBusinessException(NOT_IN_ROOM)))
                         .flatMap(gameState -> routeEvent(event, gameState, Player.fromNumber(context.playerNum())))
-                .switchIfEmpty(handleWebSocketError(session, new WebSocketBusinessException(NOT_IN_ROOM)))
                 .onErrorResume(error -> handleWebSocketError(session, error)));
     }
 
