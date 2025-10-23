@@ -46,15 +46,12 @@ public class WsPreGameHandler {
 
     private Mono<Void> handleLeaderSelectionEvent(RequestEvent<?> event, GameState gameState, Player player) {
         long roomId = gameState.getRoomId();
-        return preGameService.selectCard((RequestEvent<LeadSelectionReq>) event)
+
+        return preGameService.selectCard((RequestEvent<LeadSelectionReq>)event)
                 .then(sendLeaderSelectionMessage(roomId, player))
                 .then(preGameService.isAllPlayerCardSelected(roomId))
-                .flatMap(allSelected -> {
-                    if (Boolean.TRUE.equals(allSelected)) {
-                        return afterleaderSelectionCardAllSelection(gameState);
-                    }
-                    return Mono.empty();
-                });
+                .filter(allSelected -> allSelected)
+                .flatMap(allSelected -> afterleaderSelectionCardAllSelection(gameState));
     }
 
     private Mono<Void> sendLeaderSelectionMessage(long roomId, Player player) {
@@ -65,17 +62,34 @@ public class WsPreGameHandler {
     }
 
     private Mono<Void> afterleaderSelectionCardAllSelection(GameState gameState) {
+        return finalizeLeaderSelection(gameState)
+                .flatMap(this::distributeCardsAndNotify)
+                .flatMap(this::startFirstTurn);
+    }
+
+    private Mono<GameState> finalizeLeaderSelection(GameState gameState) {
         Long roomId = gameState.getRoomId();
         return preGameService.getLeadSelectionRes(roomId)
                 .flatMap(leadSelectionRes -> {
-                    GameState.GameStateBuilder builder = gameState.toBuilder();
-                    builder.leadingPlayer(leadSelectionRes.getLeadPlayer());
-                    return sendAllSelectedEvent(roomId, leadSelectionRes);
-                })
-                .then(Mono.defer(() -> preGameService.distributeCards(roomId)))
-                .flatMap(cards -> sendDistributedCardInfo(roomId, cards)
-                        .then(preGameService.setRoundInfo(gameState))
-                        .flatMap(this::announceTurnToAllPlayers));
+                    GameState updatedState = gameState.toBuilder()
+                            .leadingPlayer(leadSelectionRes.getLeadPlayer())
+                            .build();
+
+                    return sendAllSelectedEvent(roomId, leadSelectionRes)
+                            .thenReturn(updatedState);
+                });
+    }
+
+    private Mono<GameState> distributeCardsAndNotify(GameState gameState) {
+        Long roomId = gameState.getRoomId();
+        return Mono.defer(() -> preGameService.distributeCards(roomId))
+                .flatMap(cards -> sendDistributedCardInfo(roomId, cards))
+                .thenReturn(gameState);
+    }
+
+    private Mono<Void> startFirstTurn(GameState gameState) {
+        return preGameService.setRoundInfo(gameState)
+                .flatMap(this::announceTurnToAllPlayers);
     }
 
     private Mono<Void> sendAllSelectedEvent(long roomId, LeadSelectionRes leadSelectionRes) {
@@ -115,7 +129,7 @@ public class WsPreGameHandler {
         AnnounceRoundRes res = new AnnounceRoundRes(
                 gameState.getRound(),
                 gameState.getCurrentTurn(),
-                gameState.getLeadingPlayer()==gameState.getCurrentTurn() ? 1 : 2
+                gameState.getLeadingPlayer()==gameState.getCurrentTurn() ? PLAYER_1 : PLAYER_2
         );
         return messageSender.sendMessageToAllUser(gameState.getRoomId(),
                 WebSocketResDto.of(PLAYER_NOTHING, "ANNOUNCE_TURN_INFORMATION", "턴을 알립니다.", res));

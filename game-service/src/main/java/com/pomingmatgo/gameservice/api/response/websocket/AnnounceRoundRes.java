@@ -1,5 +1,6 @@
 package com.pomingmatgo.gameservice.api.response.websocket;
 
+import com.pomingmatgo.gameservice.domain.Player;
 import lombok.AllArgsConstructor;
 import lombok.Getter;
 import lombok.Setter;
@@ -10,5 +11,5 @@ import lombok.Setter;
 public class AnnounceRoundRes {
     private int round;
     private int turn;
-    private int player;
+    private Player player;
 }
