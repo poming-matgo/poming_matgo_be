@@ -69,4 +69,8 @@ public enum Card {
         this.type = type;
         this.specialType = null;
     }
+
+    public boolean hasSameMonthAs(Card other) {
+        return this.getMonth() == other.getMonth();
+    }
 }

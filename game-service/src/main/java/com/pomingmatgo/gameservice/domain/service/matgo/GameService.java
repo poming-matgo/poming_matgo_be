@@ -54,10 +54,7 @@ public class GameService {
 
 
     public Flux<Card> submitCard(long roomId, Card submittedCard, Card turnedCard) {
-        int turnedCardMonth = turnedCard.getMonth();
-        int submittedCardMonth = submittedCard.getMonth();
-
-        if (turnedCardMonth == submittedCardMonth) {
+        if (turnedCard.hasSameMonthAs(submittedCard)) {
             return handleSameMonthCards(roomId, submittedCard, turnedCard);
         } else {
             return handleDifferentMonthCards(roomId, submittedCard, turnedCard);
