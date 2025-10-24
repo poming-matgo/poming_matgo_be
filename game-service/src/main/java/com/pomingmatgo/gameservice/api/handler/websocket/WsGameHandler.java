@@ -40,7 +40,7 @@ public class WsGameHandler {
     }
 
     private Mono<Void> handleNormalSubmitEvent(RequestEvent<?> event, long roomId, Player player) {
-        return gameService.submitCardEvent(roomId, (RequestEvent<NormalSubmitReq>) event)
+        return gameService.submitCardEvent(roomId, player, (RequestEvent<NormalSubmitReq>) event)
                 .flatMapMany(submittedCard -> {
                     Mono<Card> topCardMono = sendSubmitCardInfo(roomId, player, submittedCard)
                             .then(gameService.getTopCard(roomId));

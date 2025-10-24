@@ -2,6 +2,7 @@ package com.pomingmatgo.gameservice.domain.service.matgo;
 
 import com.pomingmatgo.gameservice.api.handler.event.RequestEvent;
 import com.pomingmatgo.gameservice.api.request.websocket.NormalSubmitReq;
+import com.pomingmatgo.gameservice.domain.Player;
 import com.pomingmatgo.gameservice.domain.card.Card;
 import com.pomingmatgo.gameservice.domain.repository.InstalledCardRepository;
 import com.pomingmatgo.gameservice.domain.repository.ScoreCardRepository;
@@ -11,6 +12,7 @@ import org.springframework.stereotype.Service;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 
+import java.util.ArrayList;
 import java.util.List;
 
 import static com.pomingmatgo.gameservice.global.exception.WebSocketErrorCode.INVALUD_CARD;
@@ -36,29 +38,20 @@ public class GameService {
         return installedCardRepository.getTopCard(roomId);
     }
 
-    public Mono<Card> submitCardEvent(long roomId, RequestEvent<NormalSubmitReq> event) {
-        //int playerNum = event.getUserId();
-        int playerNum = 1; //todo: 수정해야함
+    public Mono<Card> submitCardEvent(long roomId, Player player, RequestEvent<NormalSubmitReq> event) {
         int cardIndex = event.getData().getCardIndex();
 
-        Mono<List<Card>> playerCardsMono = (playerNum == 1)
-                ? installedCardRepository.getPlayer1Cards(roomId).collectList()
-                : installedCardRepository.getPlayer2Cards(roomId).collectList();
-
-        return playerCardsMono.flatMap(playerCards -> {
-            if (cardIndex < 0 || cardIndex >= playerCards.size()) {
-                throw new WebSocketBusinessException(INVALUD_CARD);
-            }
-
-            Card submittedCard = playerCards.remove(cardIndex);
-
-            return (playerNum == 1
-                    ? installedCardRepository.deletePlayer1Card(roomId)
-                    .flatMap(ignored -> installedCardRepository.savePlayer1Card(playerCards, roomId))
-                    : installedCardRepository.deletePlayer2Card(roomId)
-                    .flatMap(ignored -> installedCardRepository.savePlayer2Card(playerCards, roomId)))
-                    .thenReturn(submittedCard);
-        });
+        return installedCardRepository.getPlayerCards(roomId, player)
+                .collectList()
+                .flatMap(playerCards -> {
+                    if (cardIndex < 0 || cardIndex >= playerCards.size()) {
+                        return Mono.error(new WebSocketBusinessException(INVALUD_CARD));
+                    }
+                    List<Card> mutablePlayerCards = new ArrayList<>(playerCards);
+                    Card submittedCard = mutablePlayerCards.remove(cardIndex);
+                    return installedCardRepository.updatePlayerCards(roomId, player, mutablePlayerCards)
+                            .thenReturn(submittedCard);
+                });
     }
 
 
