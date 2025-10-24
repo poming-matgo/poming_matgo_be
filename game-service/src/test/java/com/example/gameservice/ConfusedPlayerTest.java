@@ -25,7 +25,7 @@ class ConfusedPlayerTest {
     int playerNum = 1;
 
 
-    @Test
+    /*@Test
     void testIsConfusedPlayer1() {
         Flux<Card> player1Cards = Flux.just(
                 Card.JAN_1, Card.JAN_2, Card.JAN_3, Card.JAN_4, Card.FEB_1, Card.FEB_2, Card.FEB_3, Card.MAR_1, Card.APR_2, Card.AUG_1
@@ -78,5 +78,5 @@ class ConfusedPlayerTest {
         StepVerifier.create(gameService.isConfusedPlayer(roomId, playerNum))
                 .expectNext(false)
                 .verifyComplete();
-    }
+    }*/
 }

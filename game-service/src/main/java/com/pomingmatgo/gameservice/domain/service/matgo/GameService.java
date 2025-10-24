@@ -23,10 +23,8 @@ import static com.pomingmatgo.gameservice.global.exception.WebSocketErrorCode.IN
 public class GameService {
     private final InstalledCardRepository installedCardRepository;
     private final ScoreCardRepository scoreCardRepository;
-    public Mono<Boolean> isConfusedPlayer(long roomId, int playerNum) {
-        Flux<Card> cardFlux = (playerNum == 1)
-                ? installedCardRepository.getPlayer1Cards(roomId)
-                : installedCardRepository.getPlayer2Cards(roomId);
+    public Mono<Boolean> isConfusedPlayer(long roomId, Player player) {
+        Flux<Card> cardFlux = installedCardRepository.getPlayerCards(roomId, player);
 
         return cardFlux
                 .groupBy(Card::getMonth)
