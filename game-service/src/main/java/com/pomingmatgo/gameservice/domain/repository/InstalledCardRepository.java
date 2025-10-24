@@ -1,6 +1,8 @@
 package com.pomingmatgo.gameservice.domain.repository;
 
+import com.pomingmatgo.gameservice.domain.Player;
 import com.pomingmatgo.gameservice.domain.card.Card;
+import com.pomingmatgo.gameservice.global.exception.WebSocketBusinessException;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.data.redis.core.ReactiveRedisOperations;
@@ -9,6 +11,8 @@ import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 
 import java.util.List;
+
+import static com.pomingmatgo.gameservice.global.exception.WebSocketErrorCode.SYSTEM_ERROR;
 
 @Repository
 public class InstalledCardRepository {
@@ -37,20 +41,14 @@ public class InstalledCardRepository {
                 .thenReturn(true);
     }
 
-    public Mono<Boolean> savePlayer1Card(List<Card> cards, long roomId) {
-        return saveCards(cards, roomId, PLAYER1_CARD_KEY_PREFIX);
+    public Mono<Boolean> savePlayerCards(List<Card> cards, long roomId, Player player) {
+        String keyPrefix = getKeyPrefixForPlayer(player);
+        return saveCards(cards, roomId, keyPrefix);
     }
 
-    public Mono<Boolean> savePlayer2Card(List<Card> cards, long roomId) {
-        return saveCards(cards, roomId, PLAYER2_CARD_KEY_PREFIX);
-    }
-
-    public Mono<Boolean> deletePlayer1Card(long roomId) {
-        return deleteAllPlayerCard(roomId, PLAYER1_CARD_KEY_PREFIX);
-    }
-
-    public Mono<Boolean> deletePlayer2Card(long roomId) {
-        return deleteAllPlayerCard(roomId, PLAYER2_CARD_KEY_PREFIX);
+    public Mono<Boolean> deletePlayerCards(long roomId, Player player) {
+        String keyPrefix = getKeyPrefixForPlayer(player);
+        return deleteAllPlayerCard(roomId, keyPrefix);
     }
 
     private Mono<Boolean> deleteAllPlayerCard(long roomId, String keyPrefix) {
@@ -98,12 +96,20 @@ public class InstalledCardRepository {
                 .range(redisKey, 0, -1)
                 .map(Card::valueOf);
     }
-    public Flux<Card> getPlayer1Cards(Long roomId) {
-        return getCards(roomId, PLAYER1_CARD_KEY_PREFIX);
+    public Flux<Card> getPlayerCards(Long roomId, Player player) {
+        String keyPrefix = getKeyPrefixForPlayer(player);
+        return getCards(roomId, keyPrefix);
     }
 
-    public Flux<Card> getPlayer2Cards(Long roomId) {
-        return getCards(roomId, PLAYER2_CARD_KEY_PREFIX);
+    private String getKeyPrefixForPlayer(Player player) {
+        switch (player) {
+            case PLAYER_1:
+                return PLAYER1_CARD_KEY_PREFIX;
+            case PLAYER_2:
+                return PLAYER2_CARD_KEY_PREFIX;
+            default:
+                throw new WebSocketBusinessException(SYSTEM_ERROR);
+        }
     }
 }
 
