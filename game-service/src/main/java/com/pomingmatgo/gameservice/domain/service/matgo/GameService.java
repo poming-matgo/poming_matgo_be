@@ -2,13 +2,21 @@ package com.pomingmatgo.gameservice.domain.service.matgo;
 
 import com.pomingmatgo.gameservice.api.handler.event.RequestEvent;
 import com.pomingmatgo.gameservice.api.request.websocket.NormalSubmitReq;
+import com.pomingmatgo.gameservice.domain.ChoiceInfo;
+import com.pomingmatgo.gameservice.domain.GamePhase;
+import com.pomingmatgo.gameservice.domain.GameState;
 import com.pomingmatgo.gameservice.domain.Player;
 import com.pomingmatgo.gameservice.domain.card.Card;
+import com.pomingmatgo.gameservice.domain.repository.GameStateRepository;
 import com.pomingmatgo.gameservice.domain.repository.InstalledCardRepository;
 import com.pomingmatgo.gameservice.domain.repository.ScoreCardRepository;
+import com.pomingmatgo.gameservice.global.MessageSender;
+import com.pomingmatgo.gameservice.global.WebSocketResDto;
 import com.pomingmatgo.gameservice.global.exception.WebSocketBusinessException;
+import com.pomingmatgo.gameservice.global.session.SessionManager;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
+import org.springframework.web.reactive.socket.WebSocketSession;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 
@@ -24,6 +32,9 @@ import static com.pomingmatgo.gameservice.global.exception.WebSocketErrorCode.IN
 public class GameService {
     private final InstalledCardRepository installedCardRepository;
     private final ScoreCardRepository scoreCardRepository;
+    private final GameStateRepository gameStateRepository;
+    private final MessageSender messageSender;
+    private final SessionManager sessionManager;
     public Mono<Boolean> isConfusedPlayer(long roomId, Player player) {
         Flux<Card> cardFlux = installedCardRepository.getPlayerCards(roomId, player);
 
@@ -39,7 +50,6 @@ public class GameService {
 
     public Mono<Card> submitCardEvent(long roomId, Player player, RequestEvent<NormalSubmitReq> event) {
         int cardIndex = event.getData().getCardIndex();
-
         return installedCardRepository.getPlayerCards(roomId, player)
                 .collectList()
                 .flatMap(playerCards -> {
@@ -54,16 +64,17 @@ public class GameService {
     }
 
 
-    public Mono<List<Card>> submitCard(long roomId, Card submittedCard, Card turnedCard) {
+    public Mono<ProcessCardResult> submitCard(GameState gameState, Card submittedCard, Card turnedCard, Player player) {
         if (turnedCard.hasSameMonthAs(submittedCard)) {
-            return handleSameMonthCards(roomId, submittedCard, turnedCard);
+            return handleSameMonthCards(gameState, submittedCard, turnedCard);
         } else {
-            return handleDifferentMonthCards(roomId, submittedCard, turnedCard);
+            return handleDifferentMonthCards(gameState, submittedCard, turnedCard, player);
         }
     }
 
-    private Mono<List<Card>> handleSameMonthCards(long roomId, Card submittedCard, Card turnedCard) {
+    private Mono<ProcessCardResult> handleSameMonthCards(GameState gameState, Card submittedCard, Card turnedCard) {
         int month = turnedCard.getMonth();
+        long roomId = gameState.getRoomId();
         return installedCardRepository.getRevealedCardByMonth(roomId, month)
                 .collectList()
                 .flatMap(cardStack -> {
@@ -74,30 +85,40 @@ public class GameService {
                         acquiredCards.addAll(cardStack);
 
                         return installedCardRepository.deleteAllRevealedCardByMonth(roomId, month)
-                                .then(Mono.just(acquiredCards));
+                                .then(Mono.just(ProcessCardResult.immediate(acquiredCards)));
                         //todo: 다른 사람 카드 가져오는 로직 추가
                     } else {
                         //뻑
                         return installedCardRepository.saveRevealedCard(List.of(turnedCard, submittedCard), roomId)
-                                .then(Mono.just(Collections.emptyList()));
+                                .then(Mono.just(ProcessCardResult.immediate(Collections.emptyList())));
                     }
                 });
     }
 
-    private Mono<List<Card>> handleDifferentMonthCards(long roomId, Card submittedCard, Card turnedCard) {
-        Mono<List<Card>> submittedResult = processCardByMonth(roomId, submittedCard);
-        Mono<List<Card>> turnedResult = processCardByMonth(roomId, turnedCard);
+    private Mono<ProcessCardResult> handleDifferentMonthCards(GameState gameState, Card submittedCard, Card turnedCard, Player player) {
+        return processCardByMonth(gameState, submittedCard, player)
+                .flatMap(submittedResult -> {
+                    if (submittedResult.isChoiceRequired()) {
+                        return Mono.just(submittedResult);
+                    }
 
-        return Mono.zip(submittedResult, turnedResult)
-                .map(tuple -> {
-                    List<Card> combinedList = new ArrayList<>(tuple.getT1());
-                    combinedList.addAll(tuple.getT2());
-                    return combinedList;
+                    return processCardByMonth(gameState, turnedCard, player)
+                            .map(turnedResult -> {
+                                if (turnedResult.isChoiceRequired()) {
+                                    return turnedResult;
+                                }
+
+                                List<Card> combinedList = new ArrayList<>(submittedResult.getAcquiredCards());
+                                combinedList.addAll(turnedResult.getAcquiredCards());
+
+                                return ProcessCardResult.immediate(combinedList);
+                            });
                 });
     }
 
-    private Mono<List<Card>> processCardByMonth(long roomId, Card card) {
+    private Mono<ProcessCardResult> processCardByMonth(GameState gameState, Card card, Player player) {
         int month = card.getMonth();
+        long roomId = gameState.getRoomId();
         return installedCardRepository.getRevealedCardByMonth(roomId, month)
                 .collectList()
                 .flatMap(cardStack -> {
@@ -105,18 +126,37 @@ public class GameService {
                     switch (size) {
                         case 0:
                             return installedCardRepository.saveRevealedCard(List.of(card), roomId)
-                                    .then(Mono.just(Collections.emptyList()));
+                                    .then(Mono.just(ProcessCardResult.immediate(Collections.emptyList())));
                         case 1:
                             List<Card> acquiredCards = new ArrayList<>(cardStack);
                             acquiredCards.add(card);
                             return installedCardRepository.deleteAllRevealedCardByMonth(roomId, month)
-                                    .then(Mono.just(acquiredCards));
+                                    .then(Mono.just(ProcessCardResult.immediate(acquiredCards)));
                         case 2:
+                            ChoiceInfo choiceInfo = ChoiceInfo.builder()
+                                    .playerNumToChoose(gameState.getCurrentTurn())
+                                    .submittedCard(card)
+                                    .selectableCards(cardStack)
+                                    .build();
+
+                            GameState newGameState = gameState.toBuilder()
+                                    .phase(GamePhase.AWAITING_FLOOR_CARD_CHOICE)
+                                    .choiceInfo(choiceInfo)
+                                    .build();
+
+                            WebSocketSession session = sessionManager.getSession(roomId, player.getNumber());
+
+                            return gameStateRepository.save(newGameState)
+                                    .then(messageSender.sendMessageToSession(
+                                            session,
+                                            WebSocketResDto.of(player, "CHOOSE_FLOOR_CARD", "바닥 카드 선택", cardStack)))
+                                    .thenReturn(ProcessCardResult.choicePending());
+
                         case 3:
                             // TODO: size 2, 3인 경우 처리
-                            return Mono.just(Collections.emptyList());
+                            return Mono.just(ProcessCardResult.immediate(Collections.emptyList()));
                         default:
-                            return Mono.just(Collections.emptyList());
+                            return Mono.just(ProcessCardResult.immediate(Collections.emptyList()));
                     }
                 });
     }

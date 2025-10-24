@@ -35,11 +35,12 @@ public class WsGameHandler {
         }
 
         return switch (eventType) {
-            case NORMAL_SUBMIT -> handleNormalSubmitEvent(event, gameState.getRoomId(), player);
+            case NORMAL_SUBMIT -> handleNormalSubmitEvent(event, gameState, player);
         };
     }
 
-    private Mono<Void> handleNormalSubmitEvent(RequestEvent<?> event, long roomId, Player player) {
+    private Mono<Void> handleNormalSubmitEvent(RequestEvent<?> event, GameState gameState, Player player) {
+        long roomId = gameState.getRoomId();
         return gameService.submitCardEvent(roomId, player, (RequestEvent<NormalSubmitReq>) event)
                 .flatMap(submittedCard -> {
                     Mono<Card> topCardMono = sendSubmitCardInfo(roomId, player, submittedCard)
@@ -47,10 +48,14 @@ public class WsGameHandler {
 
                     return topCardMono.flatMap(topCard ->
                             sendTopCardInfo(roomId, player, topCard)
-                                    .then(gameService.submitCard(roomId, submittedCard, topCard))
+                                    .then(gameService.submitCard(gameState, submittedCard, topCard, player))
                     );
                 })
-                .flatMap(cards -> sendAcquiredCardMessage(roomId, player, cards));
+                .flatMap(processCardResult -> {
+                    if(processCardResult.isChoiceRequired())
+                        return Mono.empty();
+                    return sendAcquiredCardMessage(roomId, player, processCardResult.getAcquiredCards());
+                });
     }
 
     private Mono<Void> sendSubmitCardInfo(long roomId, Player player, Card card) {
