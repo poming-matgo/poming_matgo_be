@@ -13,6 +13,7 @@ import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 
 import static com.pomingmatgo.gameservice.global.exception.WebSocketErrorCode.INVALUD_CARD;
@@ -53,7 +54,7 @@ public class GameService {
     }
 
 
-    public Flux<Card> submitCard(long roomId, Card submittedCard, Card turnedCard) {
+    public Mono<List<Card>> submitCard(long roomId, Card submittedCard, Card turnedCard) {
         if (turnedCard.hasSameMonthAs(submittedCard)) {
             return handleSameMonthCards(roomId, submittedCard, turnedCard);
         } else {
@@ -61,54 +62,64 @@ public class GameService {
         }
     }
 
-    private Flux<Card> handleSameMonthCards(long roomId, Card submittedCard, Card turnedCard) {
+    private Mono<List<Card>> handleSameMonthCards(long roomId, Card submittedCard, Card turnedCard) {
         int month = turnedCard.getMonth();
         return installedCardRepository.getRevealedCardByMonth(roomId, month)
                 .collectList()
-                .flatMapMany(cardStack -> {
+                .flatMap(cardStack -> {
                     if (cardStack.size() != 1) {
+                        List<Card> acquiredCards = new ArrayList<>();
+                        acquiredCards.add(turnedCard);
+                        acquiredCards.add(submittedCard);
+                        acquiredCards.addAll(cardStack);
+
                         return installedCardRepository.deleteAllRevealedCardByMonth(roomId, month)
-                                .thenMany(Flux.fromIterable(List.of(turnedCard, submittedCard)).concatWith(Flux.fromIterable(cardStack)));
+                                .then(Mono.just(acquiredCards));
                         //todo: 다른 사람 카드 가져오는 로직 추가
                     } else {
                         //뻑
                         return installedCardRepository.saveRevealedCard(List.of(turnedCard, submittedCard), roomId)
-                                .thenMany(Flux.empty());
+                                .then(Mono.just(Collections.emptyList()));
                     }
                 });
     }
 
-    private Flux<Card> handleDifferentMonthCards(long roomId, Card submittedCard, Card turnedCard) {
-        return Flux.merge(
-                processCardByMonth(roomId, submittedCard),
-                processCardByMonth(roomId, turnedCard)
-        );
+    private Mono<List<Card>> handleDifferentMonthCards(long roomId, Card submittedCard, Card turnedCard) {
+        Mono<List<Card>> submittedResult = processCardByMonth(roomId, submittedCard);
+        Mono<List<Card>> turnedResult = processCardByMonth(roomId, turnedCard);
+
+        return Mono.zip(submittedResult, turnedResult)
+                .map(tuple -> {
+                    List<Card> combinedList = new ArrayList<>(tuple.getT1());
+                    combinedList.addAll(tuple.getT2());
+                    return combinedList;
+                });
     }
 
-    private Flux<Card> processCardByMonth(long roomId, Card card) {
+    private Mono<List<Card>> processCardByMonth(long roomId, Card card) {
         int month = card.getMonth();
         return installedCardRepository.getRevealedCardByMonth(roomId, month)
                 .collectList()
-                .flatMapMany(cardStack -> {
+                .flatMap(cardStack -> {
                     int size = cardStack.size();
                     switch (size) {
                         case 0:
                             return installedCardRepository.saveRevealedCard(List.of(card), roomId)
-                                    .thenMany(Flux.empty());
+                                    .then(Mono.just(Collections.emptyList()));
                         case 1:
+                            List<Card> acquiredCards = new ArrayList<>(cardStack);
+                            acquiredCards.add(card);
                             return installedCardRepository.deleteAllRevealedCardByMonth(roomId, month)
-                                    .thenMany(Flux.fromIterable(cardStack).concatWith(Flux.just(card)));
+                                    .then(Mono.just(acquiredCards));
                         case 2:
-
                         case 3:
                             // TODO: size 2, 3인 경우 처리
-                            return Flux.empty();
+                            return Mono.just(Collections.emptyList());
                         default:
-                            return Flux.empty();
+                            return Mono.just(Collections.emptyList());
                     }
                 });
     }
-
     /*public Mono<Card> moveCardPlayerToPlayer(long toPlayerNum, long fromPlayerNum, long roomId) {
         Flux<Card> cards = scoreCardRepository.getPiCards(roomId, fromPlayerNum).cache();
 

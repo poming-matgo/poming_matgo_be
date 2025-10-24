@@ -41,18 +41,17 @@ public class WsGameHandler {
 
     private Mono<Void> handleNormalSubmitEvent(RequestEvent<?> event, long roomId, Player player) {
         return gameService.submitCardEvent(roomId, player, (RequestEvent<NormalSubmitReq>) event)
-                .flatMapMany(submittedCard -> {
+                .flatMap(submittedCard -> {
                     Mono<Card> topCardMono = sendSubmitCardInfo(roomId, player, submittedCard)
                             .then(gameService.getTopCard(roomId));
-                    return topCardMono.flatMapMany(topCard ->
+
+                    return topCardMono.flatMap(topCard ->
                             sendTopCardInfo(roomId, player, topCard)
-                                    .thenMany(gameService.submitCard(roomId, submittedCard, topCard))
+                                    .then(gameService.submitCard(roomId, submittedCard, topCard))
                     );
                 })
-                .collectList()
                 .flatMap(cards -> sendAcquiredCardMessage(roomId, player, cards));
     }
-
 
     private Mono<Void> sendSubmitCardInfo(long roomId, Player player, Card card) {
         return messageSender.sendMessageToAllUser(
