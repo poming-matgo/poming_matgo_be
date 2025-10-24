@@ -20,9 +20,9 @@ public class ProcessCardResult {
                 .build();
     }
 
-    public static ProcessCardResult choicePending() {
+    public static ProcessCardResult choicePending(List<Card> cards) {
         return ProcessCardResult.builder()
-                .acquiredCards(Collections.emptyList())
+                .acquiredCards(cards)
                 .choiceRequired(true)
                 .build();
     }

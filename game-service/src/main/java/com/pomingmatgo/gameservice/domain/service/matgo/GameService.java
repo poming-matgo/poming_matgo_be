@@ -64,11 +64,11 @@ public class GameService {
     }
 
 
-    public Mono<ProcessCardResult> submitCard(GameState gameState, Card submittedCard, Card turnedCard, Player player) {
+    public Mono<ProcessCardResult> submitCard(GameState gameState, Card submittedCard, Card turnedCard) {
         if (turnedCard.hasSameMonthAs(submittedCard)) {
             return handleSameMonthCards(gameState, submittedCard, turnedCard);
         } else {
-            return handleDifferentMonthCards(gameState, submittedCard, turnedCard, player);
+            return handleDifferentMonthCards(gameState, submittedCard, turnedCard);
         }
     }
 
@@ -95,14 +95,14 @@ public class GameService {
                 });
     }
 
-    private Mono<ProcessCardResult> handleDifferentMonthCards(GameState gameState, Card submittedCard, Card turnedCard, Player player) {
-        return processCardByMonth(gameState, submittedCard, player)
+    private Mono<ProcessCardResult> handleDifferentMonthCards(GameState gameState, Card submittedCard, Card turnedCard) {
+        return processCardByMonth(gameState, submittedCard)
                 .flatMap(submittedResult -> {
                     if (submittedResult.isChoiceRequired()) {
                         return Mono.just(submittedResult);
                     }
 
-                    return processCardByMonth(gameState, turnedCard, player)
+                    return processCardByMonth(gameState, turnedCard)
                             .map(turnedResult -> {
                                 if (turnedResult.isChoiceRequired()) {
                                     return turnedResult;
@@ -116,7 +116,7 @@ public class GameService {
                 });
     }
 
-    private Mono<ProcessCardResult> processCardByMonth(GameState gameState, Card card, Player player) {
+    private Mono<ProcessCardResult> processCardByMonth(GameState gameState, Card card) {
         int month = card.getMonth();
         long roomId = gameState.getRoomId();
         return installedCardRepository.getRevealedCardByMonth(roomId, month)
@@ -144,13 +144,8 @@ public class GameService {
                                     .choiceInfo(choiceInfo)
                                     .build();
 
-                            WebSocketSession session = sessionManager.getSession(roomId, player.getNumber());
-
                             return gameStateRepository.save(newGameState)
-                                    .then(messageSender.sendMessageToSession(
-                                            session,
-                                            WebSocketResDto.of(player, "CHOOSE_FLOOR_CARD", "바닥 카드 선택", cardStack)))
-                                    .thenReturn(ProcessCardResult.choicePending());
+                                    .thenReturn(ProcessCardResult.choicePending(cardStack));
 
                         case 3:
                             // TODO: size 2, 3인 경우 처리

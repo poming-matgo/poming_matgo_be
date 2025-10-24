@@ -11,6 +11,7 @@ import com.pomingmatgo.gameservice.global.WebSocketResDto;
 import com.pomingmatgo.gameservice.global.session.SessionManager;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
+import org.springframework.web.reactive.socket.WebSocketSession;
 import reactor.core.publisher.Mono;
 
 import java.util.List;
@@ -48,12 +49,12 @@ public class WsGameHandler {
 
                     return topCardMono.flatMap(topCard ->
                             sendTopCardInfo(roomId, player, topCard)
-                                    .then(gameService.submitCard(gameState, submittedCard, topCard, player))
+                                    .then(gameService.submitCard(gameState, submittedCard, topCard))
                     );
                 })
                 .flatMap(processCardResult -> {
                     if(processCardResult.isChoiceRequired())
-                        return Mono.empty();
+                        return sendChooseFloorCardMessage(roomId, player, processCardResult.getAcquiredCards());
                     return sendAcquiredCardMessage(roomId, player, processCardResult.getAcquiredCards());
                 });
     }
@@ -77,5 +78,12 @@ public class WsGameHandler {
                 roomId,
                 WebSocketResDto.of(player, "ACQUIRED_CARD", "카드 획득", card)
         );
+    }
+
+    private Mono<Void> sendChooseFloorCardMessage(long roomId, Player player, List<Card> card) {
+        WebSocketSession session = sessionManager.getSession(roomId, player.getNumber());
+        return messageSender.sendMessageToSession(
+                session,
+                WebSocketResDto.of(player, "CHOOSE_FLOOR_CARD", "바닥 카드 선택", card));
     }
 }
