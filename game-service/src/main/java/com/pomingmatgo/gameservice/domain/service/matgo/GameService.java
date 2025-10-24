@@ -31,10 +31,7 @@ import static com.pomingmatgo.gameservice.global.exception.WebSocketErrorCode.IN
 @RequiredArgsConstructor
 public class GameService {
     private final InstalledCardRepository installedCardRepository;
-    private final ScoreCardRepository scoreCardRepository;
     private final GameStateRepository gameStateRepository;
-    private final MessageSender messageSender;
-    private final SessionManager sessionManager;
     public Mono<Boolean> isConfusedPlayer(long roomId, Player player) {
         Flux<Card> cardFlux = installedCardRepository.getPlayerCards(roomId, player);
 
