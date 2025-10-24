@@ -101,6 +101,12 @@ public class InstalledCardRepository {
         return getCards(roomId, keyPrefix);
     }
 
+    public Mono<Void> updatePlayerCards(long roomId, Player player, List<Card> cards) {
+        return deletePlayerCards(roomId, player)
+                .then(savePlayerCards(cards, roomId, player))
+                .then();
+    }
+
     private String getKeyPrefixForPlayer(Player player) {
         switch (player) {
             case PLAYER_1:
