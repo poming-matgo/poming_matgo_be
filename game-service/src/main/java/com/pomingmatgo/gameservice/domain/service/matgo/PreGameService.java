@@ -116,8 +116,8 @@ public class PreGameService {
 
     private Mono<InstalledCard> persistAllCards(InstalledCard installedCard, long roomId) {
         return Mono.zip(
-                installedCardRepository.savePlayer1Card(installedCard.getPlayer1(), roomId),
-                installedCardRepository.savePlayer2Card(installedCard.getPlayer2(), roomId),
+                installedCardRepository.savePlayerCards(installedCard.getPlayer1(), roomId, Player.PLAYER_1),
+                installedCardRepository.savePlayerCards(installedCard.getPlayer2(), roomId, Player.PLAYER_2),
                 installedCardRepository.saveRevealedCard(installedCard.getRevealedCard(), roomId),
                 installedCardRepository.saveHiddenCard(installedCard.getHiddenCard(), roomId)
         ).thenReturn(installedCard).retry(3);
