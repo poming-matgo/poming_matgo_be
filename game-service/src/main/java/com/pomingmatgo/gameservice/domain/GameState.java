@@ -23,6 +23,12 @@ public class GameState implements Serializable {
     int round;
     int currentTurn;
 
+    @Builder.Default
+    private GamePhase phase = GamePhase.IN_PROGRESS;
+    private ChoiceInfo choiceInfo; // phase가 await류일때만 의미 있다.
+
+
+
     public GameState(Long roomId) {
         this.roomId = roomId;
     }
