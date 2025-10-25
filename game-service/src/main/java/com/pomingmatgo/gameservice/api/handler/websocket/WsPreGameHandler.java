@@ -129,7 +129,7 @@ public class WsPreGameHandler {
         AnnounceRoundRes res = new AnnounceRoundRes(
                 gameState.getRound(),
                 gameState.getCurrentTurn(),
-                gameState.getLeadingPlayer()==gameState.getCurrentTurn() ? PLAYER_1 : PLAYER_2
+                gameState.getCurrentPlayer()
         );
         return messageSender.sendMessageToAllUser(gameState.getRoomId(),
                 WebSocketResDto.of(PLAYER_NOTHING, "ANNOUNCE_TURN_INFORMATION", "턴을 알립니다.", res));
