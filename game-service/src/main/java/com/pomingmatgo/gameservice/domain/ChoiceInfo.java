@@ -14,7 +14,7 @@ import java.util.List;
 @NoArgsConstructor
 @AllArgsConstructor
 public class ChoiceInfo implements Serializable {
-    private int playerNumToChoose;
+    private Player playerNumToChoose;
     private Card submittedCard;
     private List<Card> selectableCards;
 }

@@ -123,7 +123,7 @@ public class GameService {
                                     .then(Mono.just(ProcessCardResult.immediate(acquiredCards)));
                         case 2:
                             ChoiceInfo choiceInfo = ChoiceInfo.builder()
-                                    .playerNumToChoose(gameState.getCurrentTurn())
+                                    .playerNumToChoose(gameState.getCurrentPlayer())
                                     .submittedCard(card)
                                     .selectableCards(cardStack)
                                     .build();
@@ -150,7 +150,7 @@ public class GameService {
         ChoiceInfo choiceInfo = gameState.getChoiceInfo();
         if(gameState.getPhase() != GamePhase.AWAITING_FLOOR_CARD_CHOICE)
             return Mono.error(new WebSocketBusinessException(NOT_EXIST_FLOOR_CARD));
-        if(choiceInfo.getPlayerNumToChoose()!=player.getNumber())
+        if(choiceInfo.getPlayerNumToChoose()!=player)
             return Mono.error(new WebSocketBusinessException(NOT_YOUR_TURN));
 
         List<Card> selectableCards = choiceInfo.getSelectableCards();
