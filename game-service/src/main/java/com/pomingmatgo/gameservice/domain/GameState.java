@@ -1,5 +1,6 @@
 package com.pomingmatgo.gameservice.domain;
 
+import com.fasterxml.jackson.annotation.JsonIgnore;
 import com.pomingmatgo.gameservice.global.exception.WebSocketBusinessException;
 import com.pomingmatgo.gameservice.global.exception.WebSocketErrorCode;
 import lombok.*;
@@ -56,6 +57,7 @@ public class GameState implements Serializable {
         return builder.build();
     }
 
+    @JsonIgnore
     public Player getCurrentPlayer() {
         return this.getLeadingPlayer()==this.getCurrentTurn() ? PLAYER_1 : PLAYER_2;
     }
