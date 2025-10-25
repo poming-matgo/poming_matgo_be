@@ -7,6 +7,9 @@ import org.springframework.data.annotation.Id;
 
 import java.io.Serializable;
 
+import static com.pomingmatgo.gameservice.domain.Player.PLAYER_1;
+import static com.pomingmatgo.gameservice.domain.Player.PLAYER_2;
+
 @Getter
 @AllArgsConstructor
 @NoArgsConstructor
@@ -51,5 +54,9 @@ public class GameState implements Serializable {
             builder.player2Ready(isReady);
         }
         return builder.build();
+    }
+
+    public Player getCurrentPlayer() {
+        return this.getLeadingPlayer()==this.getCurrentTurn() ? PLAYER_1 : PLAYER_2;
     }
 }
