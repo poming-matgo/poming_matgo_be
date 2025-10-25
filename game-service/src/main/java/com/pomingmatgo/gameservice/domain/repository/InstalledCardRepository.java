@@ -36,9 +36,16 @@ public class InstalledCardRepository {
 
 
     public Mono<Boolean> deleteAllRevealedCardByMonth(long roomId, int month) {
-        String redisKey = String.format("%s%d:%d", HIDDEN_CARD_KEY_PREFIX, roomId, month);
+        String redisKey = String.format("%s%d:%d", REVEALED_CARD_KEY_PREFIX, roomId, month);
         return redisOps.delete(redisKey)
                 .thenReturn(true);
+    }
+
+    public Mono<Boolean> deleteRevealedCard(long roomId, Card card) {
+        int month = card.getMonth();
+        String redisKey = String.format("%s%d:%d",  REVEALED_CARD_KEY_PREFIX, roomId, month);
+        return redisOps.opsForSet().remove(redisKey, card)
+                .map(removedCount -> removedCount > 0);
     }
 
     public Mono<Boolean> savePlayerCards(List<Card> cards, long roomId, Player player) {

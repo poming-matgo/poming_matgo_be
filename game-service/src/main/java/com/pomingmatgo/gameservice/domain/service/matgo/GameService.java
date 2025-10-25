@@ -2,21 +2,13 @@ package com.pomingmatgo.gameservice.domain.service.matgo;
 
 import com.pomingmatgo.gameservice.api.handler.event.RequestEvent;
 import com.pomingmatgo.gameservice.api.request.websocket.NormalSubmitReq;
-import com.pomingmatgo.gameservice.domain.ChoiceInfo;
-import com.pomingmatgo.gameservice.domain.GamePhase;
-import com.pomingmatgo.gameservice.domain.GameState;
-import com.pomingmatgo.gameservice.domain.Player;
+import com.pomingmatgo.gameservice.domain.*;
 import com.pomingmatgo.gameservice.domain.card.Card;
 import com.pomingmatgo.gameservice.domain.repository.GameStateRepository;
 import com.pomingmatgo.gameservice.domain.repository.InstalledCardRepository;
-import com.pomingmatgo.gameservice.domain.repository.ScoreCardRepository;
-import com.pomingmatgo.gameservice.global.MessageSender;
-import com.pomingmatgo.gameservice.global.WebSocketResDto;
 import com.pomingmatgo.gameservice.global.exception.WebSocketBusinessException;
-import com.pomingmatgo.gameservice.global.session.SessionManager;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
-import org.springframework.web.reactive.socket.WebSocketSession;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 
@@ -24,7 +16,7 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 
-import static com.pomingmatgo.gameservice.global.exception.WebSocketErrorCode.INVALUD_CARD;
+import static com.pomingmatgo.gameservice.global.exception.WebSocketErrorCode.*;
 
 
 @Service
@@ -51,7 +43,7 @@ public class GameService {
                 .collectList()
                 .flatMap(playerCards -> {
                     if (cardIndex < 0 || cardIndex >= playerCards.size()) {
-                        return Mono.error(new WebSocketBusinessException(INVALUD_CARD));
+                        return Mono.error(new WebSocketBusinessException(INVALID_CARD));
                     }
                     List<Card> mutablePlayerCards = new ArrayList<>(playerCards);
                     Card submittedCard = mutablePlayerCards.remove(cardIndex);
@@ -152,6 +144,33 @@ public class GameService {
                     }
                 });
     }
+
+    public Mono<List<Card>> selectFloorCard(GameState gameState, Player player, RequestEvent<NormalSubmitReq> event) {
+        int cardIndex = event.getData().getCardIndex();
+        ChoiceInfo choiceInfo = gameState.getChoiceInfo();
+        if(gameState.getPhase() != GamePhase.AWAITING_FLOOR_CARD_CHOICE)
+            return Mono.error(new WebSocketBusinessException(NOT_EXIST_FLOOR_CARD));
+        if(choiceInfo.getPlayerNumToChoose()!=player.getNumber())
+            return Mono.error(new WebSocketBusinessException(NOT_YOUR_TURN));
+
+        List<Card> selectableCards = choiceInfo.getSelectableCards();
+        if (cardIndex < 0 || cardIndex >= selectableCards.size()) {
+            return Mono.error(new WebSocketBusinessException(INVALID_CARD));
+        }
+
+        Card card = selectableCards.get(cardIndex);
+
+        GameState.GameStateBuilder builder = gameState.toBuilder();
+        builder.phase(GamePhase.IN_PROGRESS)
+                .choiceInfo(null);
+        GameState newGameState = builder.build();
+
+        return installedCardRepository.deleteRevealedCard(gameState.getRoomId(), card)
+                .then(installedCardRepository.deleteRevealedCard(gameState.getRoomId(), choiceInfo.getSubmittedCard()))
+                .then(gameStateRepository.save(newGameState))
+                .thenReturn(List.of(card, choiceInfo.getSubmittedCard()));
+    }
+
     /*public Mono<Card> moveCardPlayerToPlayer(long toPlayerNum, long fromPlayerNum, long roomId) {
         Flux<Card> cards = scoreCardRepository.getPiCards(roomId, fromPlayerNum).cache();
 

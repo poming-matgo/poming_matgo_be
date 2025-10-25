@@ -18,7 +18,9 @@ public enum WebSocketErrorCode {
     SYSTEM_ERROR("시스템 에러가 발생했습니다. 관리자에게 문의하세요."),
 
     //카드 제출
-    INVALUD_CARD("유효하지 않은 카드입니다.");
+    INVALID_CARD("유효하지 않은 카드입니다."),
+    NOT_EXIST_FLOOR_CARD("선택할 수 있는 바닥패가 없습니다."),
+    NOT_YOUR_TURN("턴이 아닙니다.");
 
     private final String message;
 

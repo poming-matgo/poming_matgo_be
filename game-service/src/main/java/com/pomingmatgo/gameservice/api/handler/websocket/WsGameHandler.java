@@ -24,7 +24,8 @@ public class WsGameHandler {
     private final SessionManager sessionManager;
 
     private enum GameEventType {
-        NORMAL_SUBMIT
+        NORMAL_SUBMIT,
+        FLOOR_SELECT
     }
 
     public Mono<Void> handleGameEvent(RequestEvent<?> event, GameState gameState, Player player) {
@@ -37,6 +38,7 @@ public class WsGameHandler {
 
         return switch (eventType) {
             case NORMAL_SUBMIT -> handleNormalSubmitEvent(event, gameState, player);
+            case FLOOR_SELECT->  handleFloorSelectEvent(event, gameState, player);
         };
     }
 
@@ -57,6 +59,11 @@ public class WsGameHandler {
                         return sendChooseFloorCardMessage(roomId, player, processCardResult.getAcquiredCards());
                     return sendAcquiredCardMessage(roomId, player, processCardResult.getAcquiredCards());
                 });
+    }
+
+    private Mono<Void> handleFloorSelectEvent(RequestEvent<?> event, GameState gameState, Player player) {
+        return gameService.selectFloorCard(gameState, player, (RequestEvent<NormalSubmitReq>) event)
+                .flatMap(cards -> sendAcquiredCardMessage(gameState.getRoomId(), player, cards));
     }
 
     private Mono<Void> sendSubmitCardInfo(long roomId, Player player, Card card) {
