@@ -15,6 +15,7 @@ import com.pomingmatgo.gameservice.global.exception.WebSocketBusinessException;
 import com.pomingmatgo.gameservice.global.exception.dto.WebSocketErrorResDto;
 import com.pomingmatgo.gameservice.global.session.SessionManager;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 import org.springframework.web.reactive.socket.WebSocketHandler;
 import org.springframework.web.reactive.socket.WebSocketMessage;
@@ -30,6 +31,7 @@ import static com.pomingmatgo.gameservice.global.exception.WebSocketErrorCode.SY
 
 @Component
 @RequiredArgsConstructor
+@Slf4j
 public class GameWebSocketHandler implements WebSocketHandler {
     private final ObjectMapper objectMapper;
     private final RoomService roomService;
@@ -42,6 +44,7 @@ public class GameWebSocketHandler implements WebSocketHandler {
     private static final Map<String, Class<?>> typeMappings = new HashMap<>() {{
         put("LEADER_SELECTION", LeadSelectionReq.class);
         put("NORMAL_SUBMIT", NormalSubmitReq.class);
+        put("FLOOR_SELECT", NormalSubmitReq.class);
         put("CONNECT", JoinRoomReq.class);
     }};
 
@@ -96,6 +99,17 @@ public class GameWebSocketHandler implements WebSocketHandler {
         WebSocketErrorResDto dto = (error instanceof WebSocketBusinessException businessException)
                 ? new WebSocketErrorResDto(businessException.getWebsocketErrorCode())
                 : new WebSocketErrorResDto(SYSTEM_ERROR);
+
+        if (error instanceof WebSocketBusinessException) {
+            WebSocketBusinessException wbe = (WebSocketBusinessException) error;
+            if(wbe.getWebsocketErrorCode() == SYSTEM_ERROR) {
+                log.error("WebSocket system error occurred in session [{}].", session.getId(), error);
+            }
+        }
+        else {
+            log.error("WebSocket system error occurred in session [{}].", session.getId(), error);
+        }
+
 
         return Mono.fromCallable(() -> objectMapper.writeValueAsString(dto))
                 .map(session::textMessage)
