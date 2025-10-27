@@ -8,6 +8,7 @@ public enum WebSocketErrorCode {
 
     //유저
     INVALID_USER("유효하지 않은 사용자입니다."),
+    ALREADY_JOIN("이미 다른방에 접속해있습니다."),
     //비즈니스 에러
     NOT_EXISTED_ROOM( "존재하지 않는 방입니다."),
     NOT_IN_ROOM("방에 입장하지 않았습니다."),

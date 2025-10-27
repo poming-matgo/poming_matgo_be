@@ -25,8 +25,7 @@ import reactor.core.publisher.Mono;
 import java.util.HashMap;
 import java.util.Map;
 
-import static com.pomingmatgo.gameservice.global.exception.WebSocketErrorCode.NOT_IN_ROOM;
-import static com.pomingmatgo.gameservice.global.exception.WebSocketErrorCode.SYSTEM_ERROR;
+import static com.pomingmatgo.gameservice.global.exception.WebSocketErrorCode.*;
 
 
 @Component
@@ -79,19 +78,30 @@ public class GameWebSocketHandler implements WebSocketHandler {
     }
 
     private Mono<Void> handleJoinRoom(RequestEvent<?> event, WebSocketSession session) {
-        JoinRoomReq payload = (JoinRoomReq) event.getData();
-        long userId = payload.getUserId();
-        long roomId = payload.getRoomId();
+        Mono<Void> preconditionCheck = sessionManager.getPlayerContext(session)
+                .flatMap(playerContext ->
+                        Mono.error(new WebSocketBusinessException(ALREADY_JOIN))
+                )
+                .then();
 
-        return roomService.getGameState(roomId)
-                .flatMap(gameState -> determinePlayerNum(userId, gameState))
-                .flatMap(player ->
-                        sessionManager.addPlayer(roomId, player, userId, session)
-                                .thenReturn(player)
-                )
-                .flatMap(player ->
-                        messageSender.sendMessageToAllUser(roomId, WebSocketResDto.of(player, "CONNECT", "접속했습니다."))
-                )
+        Mono<Void> joinRoomLogic = Mono.defer(() -> {
+            JoinRoomReq payload = (JoinRoomReq) event.getData();
+            long userId = payload.getUserId();
+            long roomId = payload.getRoomId();
+
+            return roomService.getGameState(roomId)
+                    .flatMap(gameState -> determinePlayerNum(userId, gameState))
+                    .flatMap(player ->
+                            sessionManager.addPlayer(roomId, player, userId, session)
+                                    .thenReturn(player)
+                    )
+                    .flatMap(player ->
+                            messageSender.sendMessageToAllUser(roomId, WebSocketResDto.of(player, "CONNECT", "접속했습니다."))
+                    );
+        });
+
+        return preconditionCheck
+                .then(joinRoomLogic)
                 .onErrorResume(error -> handleWebSocketError(session, error));
     }
 
