@@ -119,11 +119,10 @@ public class GameService {
                 .collectList()
                 .flatMap(cardStack -> switch (cardStack.size()) {
                     case 0 -> handleZeroCardsOnFloor(card, roomId);
-                    case 1 -> handleOneCardOnFloor(card, cardStack, month, roomId);
+                    case 1 -> handleOneCardOnFloor(gameState, card, cardStack);
                     case 2 -> handleTwoCardsOnFloor(gameState, card, cardStack, nextCard, prevResult);
                     case 3 -> handleThreeCardsOnFloor(gameState, card, cardStack);
                     default-> {
-                        // TODO: size가 3인 경우의 구체적인 로직 구현 필요
                         yield Mono.just(ProcessCardResult.immediate(Collections.emptyList()));
                     }
                 });
@@ -134,11 +133,21 @@ public class GameService {
                 .then(Mono.just(ProcessCardResult.immediate(Collections.emptyList())));
     }
 
-    private Mono<ProcessCardResult> handleOneCardOnFloor(Card card, List<Card> cardStack, int month, long roomId) {
+    private Mono<List<Card>> acquireAndClearFloorCards(long roomId, int month, Card submittedCard, List<Card> cardStack) {
         List<Card> acquiredCards = new ArrayList<>(cardStack);
-        acquiredCards.add(card);
+        acquiredCards.add(submittedCard);
         return installedCardRepository.deleteAllRevealedCardByMonth(roomId, month)
-                .then(Mono.just(ProcessCardResult.immediate(acquiredCards)));
+                .thenReturn(acquiredCards);
+    }
+
+    private Mono<ProcessCardResult> handleOneCardOnFloor(GameState gameState, Card submittedCard, List<Card> cardStack) {
+        return acquireAndClearFloorCards(gameState.getRoomId(), submittedCard.getMonth(), submittedCard, cardStack)
+                .map(ProcessCardResult::immediate);
+    }
+
+    private Mono<ProcessCardResult> handleThreeCardsOnFloor(GameState gameState, Card submittedCard, List<Card> cardStack) {
+        return acquireAndClearFloorCards(gameState.getRoomId(), submittedCard.getMonth(), submittedCard, cardStack)
+                .map(ProcessCardResult::claimOpponentPi);
     }
 
     private Mono<ProcessCardResult> handleTwoCardsOnFloor(GameState gameState, Card submittedCard, List<Card> selectableCards, Card turnedCard, List<Card> prevCards) {
@@ -159,14 +168,6 @@ public class GameService {
                 .thenReturn(ProcessCardResult.choicePending(selectableCards));
     }
 
-    private Mono<ProcessCardResult> handleThreeCardsOnFloor(GameState gameState, Card submittedCard, List<Card> cardStack) {
-        int month = submittedCard.getMonth();
-        long roomId = gameState.getRoomId();
-        List<Card> acquiredCards = new ArrayList<>(cardStack);
-        acquiredCards.add(submittedCard);
-        return installedCardRepository.deleteAllRevealedCardByMonth(roomId, month)
-                .then(Mono.just(ProcessCardResult.claimOpponentPi(acquiredCards)));
-    }
 
     public Mono<ProcessCardResult> selectFloorCard(GameState gameState, Player player, RequestEvent<NormalSubmitReq> event) {
         validateFloorCardSelection(gameState, player, event.getData().getCardIndex());
