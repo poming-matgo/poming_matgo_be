@@ -3,15 +3,17 @@ package com.pomingmatgo.gameservice.domain.service.matgo;
 import com.pomingmatgo.gameservice.domain.card.Card;
 import lombok.Builder;
 import lombok.Getter;
+import lombok.Setter;
 
-import java.util.Collections;
 import java.util.List;
 
 @Getter
-@Builder
+@Setter
+@Builder(toBuilder = true)
 public class ProcessCardResult {
     private final List<Card> acquiredCards;
     private final boolean choiceRequired;
+    private Card turnedCard;
 
     public static ProcessCardResult immediate(List<Card> cards) {
         return ProcessCardResult.builder()

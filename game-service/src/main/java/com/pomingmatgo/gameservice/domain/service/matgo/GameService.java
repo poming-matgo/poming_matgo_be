@@ -85,13 +85,13 @@ public class GameService {
     }
 
     private Mono<ProcessCardResult> handleDifferentMonthCards(GameState gameState, Card submittedCard, Card turnedCard) {
-        return processCardByMonth(gameState, submittedCard)
+        return processCardByMonth(gameState, submittedCard, turnedCard)
                 .flatMap(submittedResult -> {
                     if (submittedResult.isChoiceRequired()) {
                         return Mono.just(submittedResult);
                     }
 
-                    return processCardByMonth(gameState, turnedCard)
+                    return processCardByMonth(gameState, turnedCard, null)
                             .map(turnedResult -> {
                                 if (turnedResult.isChoiceRequired()) {
                                     return turnedResult;
@@ -105,7 +105,7 @@ public class GameService {
                 });
     }
 
-    private Mono<ProcessCardResult> processCardByMonth(GameState gameState, Card card) {
+    private Mono<ProcessCardResult> processCardByMonth(GameState gameState, Card card, Card nextCard) {
         int month = card.getMonth();
         long roomId = gameState.getRoomId();
         return installedCardRepository.getRevealedCardByMonth(roomId, month)
@@ -126,6 +126,7 @@ public class GameService {
                                     .playerNumToChoose(gameState.getCurrentPlayer())
                                     .submittedCard(card)
                                     .selectableCards(cardStack)
+                                    .turnedCard(nextCard)
                                     .build();
 
                             GameState newGameState = gameState.toBuilder()
