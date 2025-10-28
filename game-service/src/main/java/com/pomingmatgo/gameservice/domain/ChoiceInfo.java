@@ -18,4 +18,5 @@ public class ChoiceInfo implements Serializable {
     private Card submittedCard;
     private List<Card> selectableCards;
     private Card turnedCard;
+    private List<Card> prevCards;
 }

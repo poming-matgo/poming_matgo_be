@@ -13,7 +13,6 @@ import java.util.List;
 public class ProcessCardResult {
     private final List<Card> acquiredCards;
     private final boolean choiceRequired;
-    private Card turnedCard;
 
     public static ProcessCardResult immediate(List<Card> cards) {
         return ProcessCardResult.builder()

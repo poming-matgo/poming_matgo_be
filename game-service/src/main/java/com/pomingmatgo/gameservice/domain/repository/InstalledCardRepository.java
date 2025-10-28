@@ -10,6 +10,7 @@ import org.springframework.stereotype.Repository;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 
+import java.util.Collection;
 import java.util.List;
 
 import static com.pomingmatgo.gameservice.global.exception.WebSocketErrorCode.SYSTEM_ERROR;
@@ -70,10 +71,10 @@ public class InstalledCardRepository {
                 .flatMapMany(map -> Flux.fromIterable(map.entrySet()))
                 .flatMap(entry -> {
                     int month = entry.getKey();
-                    List<String> cardNames = (List<String>) entry.getValue();
+                    Collection<String> cardsInMonth = entry.getValue();
                     String redisKey = String.format("%s%d:%d", REVEALED_CARD_KEY_PREFIX, roomId, month);
-                    return redisOps.opsForList()
-                            .rightPushAll(redisKey, cardNames)
+                    return redisOps.opsForSet()
+                            .add(redisKey, cardsInMonth.toArray(new String[0]))
                             .map(count -> count > 0);
                 })
                 .all(Boolean::booleanValue);
@@ -85,8 +86,8 @@ public class InstalledCardRepository {
 
     public Flux<Card> getRevealedCardByMonth(long roomId, long month) {
         String redisKey = String.format("%s%d:%d", REVEALED_CARD_KEY_PREFIX, roomId, month);
-        return redisOps.opsForList()
-                .range(redisKey, 0, -1)
+        return redisOps.opsForSet()
+                .members(redisKey)
                 .map(Card::valueOf);
     }
 

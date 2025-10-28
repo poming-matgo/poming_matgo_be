@@ -62,8 +62,13 @@ public class WsGameHandler {
     }
 
     private Mono<Void> handleFloorSelectEvent(RequestEvent<?> event, GameState gameState, Player player) {
+        long roomId = gameState.getRoomId();
         return gameService.selectFloorCard(gameState, player, (RequestEvent<NormalSubmitReq>) event)
-                .flatMap(cards -> sendAcquiredCardMessage(gameState.getRoomId(), player, cards));
+                .flatMap(processCardResult -> {
+                    if(processCardResult.isChoiceRequired())
+                        return sendChooseFloorCardMessage(roomId, player, processCardResult.getAcquiredCards());
+                    return sendAcquiredCardMessage(roomId, player, processCardResult.getAcquiredCards());
+                });
     }
 
     private Mono<Void> sendSubmitCardInfo(long roomId, Player player, Card card) {
