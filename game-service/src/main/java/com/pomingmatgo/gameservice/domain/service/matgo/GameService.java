@@ -4,6 +4,8 @@ import com.pomingmatgo.gameservice.api.handler.event.RequestEvent;
 import com.pomingmatgo.gameservice.api.request.websocket.NormalSubmitReq;
 import com.pomingmatgo.gameservice.domain.*;
 import com.pomingmatgo.gameservice.domain.card.Card;
+import com.pomingmatgo.gameservice.domain.card.CardType;
+import com.pomingmatgo.gameservice.domain.card.SpecialType;
 import com.pomingmatgo.gameservice.domain.repository.GameStateRepository;
 import com.pomingmatgo.gameservice.domain.repository.InstalledCardRepository;
 import com.pomingmatgo.gameservice.global.exception.WebSocketBusinessException;
@@ -15,7 +17,11 @@ import reactor.core.publisher.Mono;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import java.util.Optional;
+import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
+import static com.pomingmatgo.gameservice.domain.card.SpecialType.SSANG_PI;
 import static com.pomingmatgo.gameservice.global.exception.WebSocketErrorCode.*;
 
 
@@ -212,15 +218,40 @@ public class GameService {
                 .thenReturn(ProcessCardResult.immediate(finalAcquiredCards));
     }
 
-    /*public Mono<Card> moveCardPlayerToPlayer(long toPlayerNum, long fromPlayerNum, long roomId) {
-        Flux<Card> cards = scoreCardRepository.getPiCards(roomId, fromPlayerNum).cache();
+    public Mono<Void> moveCardPlayerToPlayer(Player fromPlayer, Player toPlayer, long roomId) {
+        Mono<List<Card>> toPlayerCardsMono = installedCardRepository.getPlayerCards(roomId, toPlayer).collectList();
+        Mono<List<Card>> fromPlayerCardsMono = installedCardRepository.getPlayerCards(roomId, fromPlayer).collectList();
 
-        return cards.filter(card -> card.getSpecialType() == null)
-                .next()
-                .switchIfEmpty(
-                        cards.filter(card -> card.getSpecialType() == SpecialType.SSANG_PI)
-                                .next()
-                );
-        //todo: toPlayer에 save 추가해야함
-    }*/
+        return Mono.zip(toPlayerCardsMono, fromPlayerCardsMono)
+                .flatMap(tuple -> {
+                    List<Card> originalToPlayerCards = tuple.getT1();
+                    List<Card> originalFromPlayerCards = tuple.getT2();
+
+                    return Mono.justOrEmpty(findMovablePiCard(originalFromPlayerCards))
+                            .flatMap(cardToMove -> {
+                                List<Card> newFromPlayerCards = originalFromPlayerCards.stream()
+                                        .filter(card -> card != cardToMove)
+                                        .collect(Collectors.toList());
+
+                                List<Card> newToPlayerCards = new ArrayList<>(originalToPlayerCards);
+                                newToPlayerCards.add(cardToMove);
+
+                                Mono<Void> updateFromPlayer = installedCardRepository.updatePlayerCards(roomId, fromPlayer, newFromPlayerCards);
+                                Mono<Void> updateToPlayer = installedCardRepository.updatePlayerCards(roomId, toPlayer, newToPlayerCards);
+
+                                return Mono.when(updateFromPlayer, updateToPlayer);
+                            });
+                })
+                .then();
+    }
+
+
+    private Optional<Card> findMovablePiCard(List<Card> playerCards) {
+        return playerCards.stream()
+                .filter(c -> c.getType() == CardType.PI && c.getSpecialType() != SpecialType.SSANG_PI)
+                .findFirst()
+                .or(() -> playerCards.stream()
+                        .filter(c -> c.getSpecialType() == SpecialType.SSANG_PI)
+                        .findFirst());
+    }
 }

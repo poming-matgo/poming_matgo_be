@@ -98,7 +98,7 @@ public class InstalledCardRepository {
                 .map(Card::valueOf);
     }
 
-    public Flux<Card> getCards(long roomId, String keyPrefix) {
+    private Flux<Card> getCards(long roomId, String keyPrefix) {
         String redisKey = keyPrefix + roomId;
         return redisOps.opsForList()
                 .range(redisKey, 0, -1)
