@@ -13,11 +13,13 @@ import java.util.List;
 public class ProcessCardResult {
     private final List<Card> acquiredCards;
     private final boolean choiceRequired;
+    private final boolean claimOpponentPi;
 
     public static ProcessCardResult immediate(List<Card> cards) {
         return ProcessCardResult.builder()
                 .acquiredCards(cards)
                 .choiceRequired(false)
+                .claimOpponentPi(false)
                 .build();
     }
 
@@ -25,6 +27,15 @@ public class ProcessCardResult {
         return ProcessCardResult.builder()
                 .acquiredCards(cards)
                 .choiceRequired(true)
+                .claimOpponentPi(false)
+                .build();
+    }
+
+    public static ProcessCardResult claimOpponentPi(List<Card> cards) {
+        return ProcessCardResult.builder()
+                .acquiredCards(cards)
+                .choiceRequired(false)
+                .claimOpponentPi(true)
                 .build();
     }
 }

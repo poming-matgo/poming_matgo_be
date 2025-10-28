@@ -121,6 +121,7 @@ public class GameService {
                     case 0 -> handleZeroCardsOnFloor(card, roomId);
                     case 1 -> handleOneCardOnFloor(card, cardStack, month, roomId);
                     case 2 -> handleTwoCardsOnFloor(gameState, card, cardStack, nextCard, prevResult);
+                    case 3 -> handleThreeCardsOnFloor(gameState, card, cardStack);
                     default-> {
                         // TODO: size가 3인 경우의 구체적인 로직 구현 필요
                         yield Mono.just(ProcessCardResult.immediate(Collections.emptyList()));
@@ -156,6 +157,15 @@ public class GameService {
 
         return gameStateRepository.save(newGameState)
                 .thenReturn(ProcessCardResult.choicePending(selectableCards));
+    }
+
+    private Mono<ProcessCardResult> handleThreeCardsOnFloor(GameState gameState, Card submittedCard, List<Card> cardStack) {
+        int month = submittedCard.getMonth();
+        long roomId = gameState.getRoomId();
+        List<Card> acquiredCards = new ArrayList<>(cardStack);
+        acquiredCards.add(submittedCard);
+        return installedCardRepository.deleteAllRevealedCardByMonth(roomId, month)
+                .then(Mono.just(ProcessCardResult.claimOpponentPi(acquiredCards)));
     }
 
     public Mono<ProcessCardResult> selectFloorCard(GameState gameState, Player player, RequestEvent<NormalSubmitReq> event) {
