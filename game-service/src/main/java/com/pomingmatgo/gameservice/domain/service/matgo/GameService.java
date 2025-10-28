@@ -108,43 +108,48 @@ public class GameService {
     private Mono<ProcessCardResult> processCardByMonth(GameState gameState, Card card, Card nextCard, List<Card> prevResult) {
         int month = card.getMonth();
         long roomId = gameState.getRoomId();
+
         return installedCardRepository.getRevealedCardByMonth(roomId, month)
                 .collectList()
-                .flatMap(cardStack -> {
-                    int size = cardStack.size();
-                    switch (size) {
-                        case 0:
-                            return installedCardRepository.saveRevealedCard(List.of(card), roomId)
-                                    .then(Mono.just(ProcessCardResult.immediate(Collections.emptyList())));
-                        case 1:
-                            List<Card> acquiredCards = new ArrayList<>(cardStack);
-                            acquiredCards.add(card);
-                            return installedCardRepository.deleteAllRevealedCardByMonth(roomId, month)
-                                    .then(Mono.just(ProcessCardResult.immediate(acquiredCards)));
-                        case 2:
-                            ChoiceInfo choiceInfo = ChoiceInfo.builder()
-                                    .playerNumToChoose(gameState.getCurrentPlayer())
-                                    .submittedCard(card)
-                                    .selectableCards(cardStack)
-                                    .turnedCard(nextCard)
-                                    .prevCards(prevResult)
-                                    .build();
-
-                            GameState newGameState = gameState.toBuilder()
-                                    .phase(GamePhase.AWAITING_FLOOR_CARD_CHOICE)
-                                    .choiceInfo(choiceInfo)
-                                    .build();
-
-                            return gameStateRepository.save(newGameState)
-                                    .thenReturn(ProcessCardResult.choicePending(cardStack));
-
-                        case 3:
-                            // TODO: size 2, 3인 경우 처리
-                            return Mono.just(ProcessCardResult.immediate(Collections.emptyList()));
-                        default:
-                            return Mono.just(ProcessCardResult.immediate(Collections.emptyList()));
+                .flatMap(cardStack -> switch (cardStack.size()) {
+                    case 0 -> handleZeroCardsOnFloor(card, roomId);
+                    case 1 -> handleOneCardOnFloor(card, cardStack, month, roomId);
+                    case 2 -> handleTwoCardsOnFloor(gameState, card, cardStack, nextCard, prevResult);
+                    default -> {
+                        // TODO: size가 3인 경우의 구체적인 로직 구현 필요
+                        yield Mono.just(ProcessCardResult.immediate(Collections.emptyList()));
                     }
                 });
+    }
+
+    private Mono<ProcessCardResult> handleZeroCardsOnFloor(Card card, long roomId) {
+        return installedCardRepository.saveRevealedCard(List.of(card), roomId)
+                .then(Mono.just(ProcessCardResult.immediate(Collections.emptyList())));
+    }
+
+    private Mono<ProcessCardResult> handleOneCardOnFloor(Card card, List<Card> cardStack, int month, long roomId) {
+        List<Card> acquiredCards = new ArrayList<>(cardStack);
+        acquiredCards.add(card);
+        return installedCardRepository.deleteAllRevealedCardByMonth(roomId, month)
+                .then(Mono.just(ProcessCardResult.immediate(acquiredCards)));
+    }
+
+    private Mono<ProcessCardResult> handleTwoCardsOnFloor(GameState gameState, Card submittedCard, List<Card> selectableCards, Card turnedCard, List<Card> prevCards) {
+        ChoiceInfo choiceInfo = ChoiceInfo.builder()
+                .playerNumToChoose(gameState.getCurrentPlayer())
+                .submittedCard(submittedCard)
+                .selectableCards(selectableCards)
+                .turnedCard(turnedCard)
+                .prevCards(prevCards)
+                .build();
+
+        GameState newGameState = gameState.toBuilder()
+                .phase(GamePhase.AWAITING_FLOOR_CARD_CHOICE)
+                .choiceInfo(choiceInfo)
+                .build();
+
+        return gameStateRepository.save(newGameState)
+                .thenReturn(ProcessCardResult.choicePending(selectableCards));
     }
 
     public Mono<ProcessCardResult> selectFloorCard(GameState gameState, Player player, RequestEvent<NormalSubmitReq> event) {
