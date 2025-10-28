@@ -115,7 +115,7 @@ public class GameService {
                     case 0 -> handleZeroCardsOnFloor(card, roomId);
                     case 1 -> handleOneCardOnFloor(card, cardStack, month, roomId);
                     case 2 -> handleTwoCardsOnFloor(gameState, card, cardStack, nextCard, prevResult);
-                    default -> {
+                    default-> {
                         // TODO: size가 3인 경우의 구체적인 로직 구현 필요
                         yield Mono.just(ProcessCardResult.immediate(Collections.emptyList()));
                     }
@@ -153,52 +153,63 @@ public class GameService {
     }
 
     public Mono<ProcessCardResult> selectFloorCard(GameState gameState, Player player, RequestEvent<NormalSubmitReq> event) {
-        int cardIndex = event.getData().getCardIndex();
+        validateFloorCardSelection(gameState, player, event.getData().getCardIndex());
         ChoiceInfo choiceInfo = gameState.getChoiceInfo();
-        if(gameState.getPhase() != GamePhase.AWAITING_FLOOR_CARD_CHOICE)
-            return Mono.error(new WebSocketBusinessException(NOT_EXIST_FLOOR_CARD));
-        if(choiceInfo.getPlayerNumToChoose()!=player)
-            return Mono.error(new WebSocketBusinessException(NOT_YOUR_TURN));
+        int cardIndex = event.getData().getCardIndex();
 
+        Card chosenFloorCard = choiceInfo.getSelectableCards().get(cardIndex);
+        Card submittedCard = choiceInfo.getSubmittedCard();
+        Card turnedCard = choiceInfo.getTurnedCard();
+
+        Mono<Void> cleanupPlayedCardsMono = Mono.defer(() ->
+                installedCardRepository.deleteRevealedCard(gameState.getRoomId(), chosenFloorCard)
+                        .then(installedCardRepository.deleteRevealedCard(gameState.getRoomId(), submittedCard)).then()
+        );
+
+        Mono<ProcessCardResult> processTurnMono = (turnedCard == null)
+                ? processSimpleAcquisition(chosenFloorCard, submittedCard)
+                : processCardByMonth(gameState, turnedCard, null, List.of(chosenFloorCard, submittedCard));
+
+        return processTurnMono
+                .flatMap(cleanupPlayedCardsMono::thenReturn)
+                .flatMap(turnResult -> {
+                    if (turnResult.isChoiceRequired()) {
+                        return Mono.just(turnResult);
+                    }
+                    return finalizeTurn(gameState, choiceInfo.getPrevCards(), turnResult.getAcquiredCards());
+                });
+    }
+
+    private void validateFloorCardSelection(GameState gameState, Player player, int cardIndex) {
+        if (gameState.getPhase() != GamePhase.AWAITING_FLOOR_CARD_CHOICE) {
+            throw new WebSocketBusinessException(NOT_EXIST_FLOOR_CARD);
+        }
+        ChoiceInfo choiceInfo = gameState.getChoiceInfo();
+        if (choiceInfo.getPlayerNumToChoose() != player) {
+            throw new WebSocketBusinessException(NOT_YOUR_TURN);
+        }
         List<Card> selectableCards = choiceInfo.getSelectableCards();
         if (cardIndex < 0 || cardIndex >= selectableCards.size()) {
-            return Mono.error(new WebSocketBusinessException(INVALID_CARD));
+            throw new WebSocketBusinessException(INVALID_CARD);
         }
+    }
 
-        Card card = selectableCards.get(cardIndex);
+    private Mono<ProcessCardResult> processSimpleAcquisition(Card card1, Card card2) {
+        List<Card> acquiredCards = List.of(card1, card2);
+        return Mono.just(ProcessCardResult.immediate(acquiredCards));
+    }
 
-        Card nextCard = choiceInfo.getTurnedCard();
+    private Mono<ProcessCardResult> finalizeTurn(GameState gameState, List<Card> prevCards, List<Card> newCards) {
+        List<Card> finalAcquiredCards = new ArrayList<>(prevCards);
+        finalAcquiredCards.addAll(newCards);
 
-        Mono<Boolean> deleteRevealedCard = Mono.defer(()->installedCardRepository.deleteRevealedCard(gameState.getRoomId(), card)
-                .then(installedCardRepository.deleteRevealedCard(gameState.getRoomId(), choiceInfo.getSubmittedCard())));
+        GameState newGameState = gameState.toBuilder()
+                .phase(GamePhase.IN_PROGRESS)
+                .choiceInfo(null)
+                .build();
 
-        if(nextCard==null) {
-            GameState.GameStateBuilder builder = gameState.toBuilder();
-            builder.phase(GamePhase.IN_PROGRESS)
-                    .choiceInfo(null);
-            GameState newGameState = builder.build();
-
-            List<Card> combinedList = new ArrayList<>(choiceInfo.getPrevCards());
-            combinedList.addAll(List.of(card, choiceInfo.getSubmittedCard()));
-
-            return deleteRevealedCard
-                    .then(gameStateRepository.save(newGameState))
-                    .thenReturn(ProcessCardResult.immediate((combinedList)));
-        }
-        else {
-            return deleteRevealedCard
-                    .then(processCardByMonth(gameState, nextCard, null, List.of(card, choiceInfo.getSubmittedCard())))
-                    .map(turnedResult -> {
-                        if (turnedResult.isChoiceRequired()) {
-                            return turnedResult;
-                        }
-
-                        List<Card> combinedList = new ArrayList<>(choiceInfo.getPrevCards());
-                        combinedList.addAll(turnedResult.getAcquiredCards());
-
-                        return ProcessCardResult.immediate(combinedList);
-                    });
-        }
+        return gameStateRepository.save(newGameState)
+                .thenReturn(ProcessCardResult.immediate(finalAcquiredCards));
     }
 
     /*public Mono<Card> moveCardPlayerToPlayer(long toPlayerNum, long fromPlayerNum, long roomId) {
