@@ -98,4 +98,12 @@ public class WsGameHandler {
                 session,
                 WebSocketResDto.of(player, "CHOOSE_FLOOR_CARD", "바닥 카드 선택", card));
     }
+
+    //뺏는것과 빼앗는것 구분 필요
+    private Mono<Void> sendMovingCardMessage(long roomId, Player player, List<Card> card) {
+        WebSocketSession session = sessionManager.getSession(roomId, player.getNumber());
+        return messageSender.sendMessageToSession(
+                session,
+                WebSocketResDto.of(player, "CHOOSE_FLOOR_CARD", "바닥 카드 선택", card));
+    }
 }

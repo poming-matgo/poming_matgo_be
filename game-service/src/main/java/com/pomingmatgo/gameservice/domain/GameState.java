@@ -61,4 +61,9 @@ public class GameState implements Serializable {
     public Player getCurrentPlayer() {
         return this.getLeadingPlayer()==this.getCurrentTurn() ? PLAYER_1 : PLAYER_2;
     }
+
+    @JsonIgnore
+    public Player getOtherPlayer() {
+        return this.getLeadingPlayer()==this.getCurrentTurn() ? PLAYER_2 : PLAYER_1;
+    }
 }

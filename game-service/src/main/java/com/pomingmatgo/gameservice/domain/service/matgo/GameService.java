@@ -147,7 +147,17 @@ public class GameService {
 
     private Mono<ProcessCardResult> handleThreeCardsOnFloor(GameState gameState, Card submittedCard, List<Card> cardStack) {
         return acquireAndClearFloorCards(gameState.getRoomId(), submittedCard.getMonth(), submittedCard, cardStack)
-                .map(ProcessCardResult::claimOpponentPi);
+                .flatMap(acquiredCards -> {
+                    Mono<Card> moveCardMono = moveCardPlayerToPlayer(
+                            gameState.getCurrentPlayer(),
+                            gameState.getOtherPlayer(),
+                            gameState.getRoomId()
+                    );
+
+                    return moveCardMono.map(movedCard ->
+                            ProcessCardResult.claimOpponentPi(acquiredCards, movedCard)
+                    );
+                });
     }
 
     private Mono<ProcessCardResult> handleTwoCardsOnFloor(GameState gameState, Card submittedCard, List<Card> selectableCards, Card turnedCard, List<Card> prevCards) {
@@ -229,7 +239,7 @@ public class GameService {
                 .thenReturn(ProcessCardResult.immediate(finalAcquiredCards));
     }
 
-    public Mono<Void> moveCardPlayerToPlayer(Player fromPlayer, Player toPlayer, long roomId) {
+    public Mono<Card> moveCardPlayerToPlayer(Player fromPlayer, Player toPlayer, long roomId) {
         Mono<List<Card>> toPlayerCardsMono = installedCardRepository.getPlayerCards(roomId, toPlayer).collectList();
         Mono<List<Card>> fromPlayerCardsMono = installedCardRepository.getPlayerCards(roomId, fromPlayer).collectList();
 
@@ -250,10 +260,10 @@ public class GameService {
                                 Mono<Void> updateFromPlayer = installedCardRepository.updatePlayerCards(roomId, fromPlayer, newFromPlayerCards);
                                 Mono<Void> updateToPlayer = installedCardRepository.updatePlayerCards(roomId, toPlayer, newToPlayerCards);
 
-                                return Mono.when(updateFromPlayer, updateToPlayer);
+                                return Mono.when(updateFromPlayer, updateToPlayer)
+                                        .thenReturn(cardToMove);
                             });
-                })
-                .then();
+                });
     }
 
 
