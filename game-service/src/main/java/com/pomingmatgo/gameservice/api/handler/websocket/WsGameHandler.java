@@ -55,8 +55,12 @@ public class WsGameHandler {
                     );
                 })
                 .flatMap(processCardResult -> {
+                    System.out.println(player + " " + gameState.getCurrentPlayer() + " " + gameState.getOtherPlayer());
                     if(processCardResult.isChoiceRequired())
                         return sendChooseFloorCardMessage(roomId, player, processCardResult.getAcquiredCards());
+                    if(processCardResult.isClaimOpponentPi())
+                        return sendMovingCardMessage(roomId, player, gameState.getOtherPlayer(), processCardResult.getMoveCard())
+                                .then(sendAcquiredCardMessage(roomId, player, processCardResult.getAcquiredCards()));
                     return sendAcquiredCardMessage(roomId, player, processCardResult.getAcquiredCards());
                 });
     }
@@ -97,5 +101,18 @@ public class WsGameHandler {
         return messageSender.sendMessageToSession(
                 session,
                 WebSocketResDto.of(player, "CHOOSE_FLOOR_CARD", "바닥 카드 선택", card));
+    }
+
+    //뺏는것과 빼앗는것 구분 필요
+    private Mono<Void> sendMovingCardMessage(long roomId, Player player, Player otherPlayer, Card card) {
+        WebSocketSession session = sessionManager.getSession(roomId, player.getNumber());
+        WebSocketSession otherSession = sessionManager.getSession(roomId, otherPlayer.getNumber());
+        return messageSender.sendMessageToSession(
+                session,
+                WebSocketResDto.of(player, "OPPONENT_PI_CLAIMED", "상대방의 카드를 빼았습니다.", card)).then(
+                messageSender.sendMessageToSession(
+                        otherSession,
+                        WebSocketResDto.of(otherPlayer, "OPPONENT_PI_CLAIMED", "상대방이 피를 뺏습니다.", card)
+        ));
     }
 }
