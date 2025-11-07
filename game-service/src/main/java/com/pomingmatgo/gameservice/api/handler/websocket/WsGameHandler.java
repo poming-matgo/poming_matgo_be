@@ -61,13 +61,22 @@ public class WsGameHandler {
                     );
                 })
                 .flatMap(processCardResult -> {
-                    System.out.println(player + " " + gameState.getCurrentPlayer() + " " + gameState.getOtherPlayer());
-                    if(processCardResult.isChoiceRequired())
-                        return sendChooseFloorCardMessage(roomId, player, processCardResult.getAcquiredCards());
-                    if(processCardResult.isClaimOpponentPi())
-                        return sendMovingCardMessage(roomId, player, gameState.getOtherPlayer(), processCardResult.getMoveCard())
+                    Mono<Void> messagingMono;
+
+                    if (processCardResult.isChoiceRequired()) {
+                        messagingMono = sendChooseFloorCardMessage(roomId, player, processCardResult.getAcquiredCards());
+                        return messagingMono;
+                    }
+
+                    if (processCardResult.isClaimOpponentPi()) {
+                        messagingMono = sendMovingCardMessage(roomId, player, gameState.getOtherPlayer(), processCardResult.getMoveCard())
                                 .then(sendAcquiredCardMessage(roomId, player, processCardResult.getAcquiredCards()));
-                    return sendAcquiredCardMessage(roomId, player, processCardResult.getAcquiredCards());
+                    } else {
+                        messagingMono = sendAcquiredCardMessage(roomId, player, processCardResult.getAcquiredCards());
+                    }
+
+                    //return messagingMono.then(gameService.setNextTurn(roomId, gameState));
+                    return messagingMono; // setNextTurn부분은 이후에 처리
                 });
     }
 
