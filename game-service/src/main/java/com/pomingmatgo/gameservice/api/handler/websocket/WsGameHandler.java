@@ -8,6 +8,7 @@ import com.pomingmatgo.gameservice.domain.card.Card;
 import com.pomingmatgo.gameservice.domain.service.matgo.GameService;
 import com.pomingmatgo.gameservice.global.MessageSender;
 import com.pomingmatgo.gameservice.global.WebSocketResDto;
+import com.pomingmatgo.gameservice.global.exception.WebSocketBusinessException;
 import com.pomingmatgo.gameservice.global.session.SessionManager;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
@@ -15,6 +16,8 @@ import org.springframework.web.reactive.socket.WebSocketSession;
 import reactor.core.publisher.Mono;
 
 import java.util.List;
+
+import static com.pomingmatgo.gameservice.global.exception.WebSocketErrorCode.NOT_YOUR_TURN;
 
 @Component
 @RequiredArgsConstructor
@@ -29,6 +32,9 @@ public class WsGameHandler {
     }
 
     public Mono<Void> handleGameEvent(RequestEvent<?> event, GameState gameState, Player player) {
+        if(player != gameState.getCurrentPlayer()) {
+            throw new WebSocketBusinessException(NOT_YOUR_TURN);
+        }
         WsGameHandler.GameEventType eventType;
         try {
             eventType = WsGameHandler.GameEventType.valueOf(event.getEventType().getSubType());
