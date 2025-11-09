@@ -2,6 +2,7 @@ package com.pomingmatgo.gameservice.api.handler.websocket;
 
 import com.pomingmatgo.gameservice.api.handler.event.RequestEvent;
 import com.pomingmatgo.gameservice.api.request.websocket.NormalSubmitReq;
+import com.pomingmatgo.gameservice.api.response.websocket.AnnounceRoundRes;
 import com.pomingmatgo.gameservice.domain.GameState;
 import com.pomingmatgo.gameservice.domain.Player;
 import com.pomingmatgo.gameservice.domain.card.Card;
@@ -17,6 +18,7 @@ import reactor.core.publisher.Mono;
 
 import java.util.List;
 
+import static com.pomingmatgo.gameservice.domain.Player.PLAYER_NOTHING;
 import static com.pomingmatgo.gameservice.global.exception.WebSocketErrorCode.NOT_YOUR_TURN;
 
 @Component
@@ -75,8 +77,8 @@ public class WsGameHandler {
                         messagingMono = sendAcquiredCardMessage(roomId, player, processCardResult.getAcquiredCards());
                     }
 
-                    //return messagingMono.then(gameService.setNextTurn(roomId, gameState));
-                    return messagingMono; // setNextTurn부분은 이후에 처리
+                    return messagingMono.then(gameService.setNextTurn(gameState))
+                            .flatMap(this::sendTurnInfo);
                 });
     }
 
@@ -109,6 +111,16 @@ public class WsGameHandler {
                 roomId,
                 WebSocketResDto.of(player, "ACQUIRED_CARD", "카드 획득", card)
         );
+    }
+
+    private Mono<Void> sendTurnInfo(GameState gameState) {
+        AnnounceRoundRes res = new AnnounceRoundRes(
+                gameState.getRound(),
+                gameState.getCurrentTurn(),
+                gameState.getCurrentPlayer()
+        );
+        return messageSender.sendMessageToAllUser(gameState.getRoomId(),
+                WebSocketResDto.of(PLAYER_NOTHING, "ANNOUNCE_TURN_INFORMATION", "턴을 알립니다.", res));
     }
 
     private Mono<Void> sendChooseFloorCardMessage(long roomId, Player player, List<Card> card) {

@@ -274,4 +274,21 @@ public class GameService {
                         .filter(c -> c.getSpecialType() == SpecialType.SSANG_PI)
                         .findFirst());
     }
+
+    public Mono<GameState> setNextTurn(GameState gameState) {
+        Player nextPlayer = gameState.getCurrentPlayer() == Player.PLAYER_1 ? Player.PLAYER_2 : Player.PLAYER_1;
+        GameState newGameState = gameState.toBuilder()
+                .currentTurn(nextPlayer.getNumber())
+                .phase(GamePhase.IN_PROGRESS)
+                .choiceInfo(null)
+                .build();
+
+        if(newGameState.getLeadingPlayer() == gameState.getCurrentTurn()) {
+            newGameState = newGameState.toBuilder()
+                    .round(gameState.getRound() + 1) // todo: 마지막 라운드는 향후 처리 예정
+                    .build();
+        }
+        return gameStateRepository.save(newGameState)
+                .thenReturn(newGameState);
+    }
 }
