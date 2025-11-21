@@ -7,6 +7,7 @@ import com.pomingmatgo.gameservice.domain.GameState;
 import com.pomingmatgo.gameservice.domain.Player;
 import com.pomingmatgo.gameservice.domain.card.Card;
 import com.pomingmatgo.gameservice.domain.service.matgo.GameService;
+import com.pomingmatgo.gameservice.domain.service.matgo.ProcessCardResult;
 import com.pomingmatgo.gameservice.global.MessageSender;
 import com.pomingmatgo.gameservice.global.WebSocketResDto;
 import com.pomingmatgo.gameservice.global.exception.WebSocketBusinessException;
@@ -51,6 +52,12 @@ public class WsGameHandler {
     }
 
     private Mono<Void> handleNormalSubmitEvent(RequestEvent<?> event, GameState gameState, Player player) {
+        return processCardSubmission(event, gameState, player)
+                .flatMap(processCardResult -> handleCardSubmissionResult(processCardResult, gameState, player));
+    }
+
+
+    private Mono<ProcessCardResult> processCardSubmission(RequestEvent<?> event, GameState gameState, Player player) {
         long roomId = gameState.getRoomId();
         return gameService.submitCardEvent(roomId, player, (RequestEvent<NormalSubmitReq>) event)
                 .flatMap(submittedCard -> {
@@ -61,26 +68,29 @@ public class WsGameHandler {
                             sendTopCardInfo(roomId, player, topCard)
                                     .then(gameService.submitCard(gameState, submittedCard, topCard))
                     );
-                })
-                .flatMap(processCardResult -> {
-                    Mono<Void> messagingMono;
-
-                    if (processCardResult.isChoiceRequired()) {
-                        messagingMono = sendChooseFloorCardMessage(roomId, player, processCardResult.getAcquiredCards());
-                        return messagingMono;
-                    }
-
-                    if (processCardResult.isClaimOpponentPi()) {
-                        messagingMono = sendMovingCardMessage(roomId, player, gameState.getOtherPlayer(), processCardResult.getMoveCard())
-                                .then(sendAcquiredCardMessage(roomId, player, processCardResult.getAcquiredCards()));
-                    } else {
-                        messagingMono = sendAcquiredCardMessage(roomId, player, processCardResult.getAcquiredCards());
-                    }
-
-                    return messagingMono.then(gameService.setNextTurn(gameState))
-                            .flatMap(this::sendTurnInfo);
                 });
     }
+
+    private Mono<Void> handleCardSubmissionResult(ProcessCardResult processCardResult, GameState gameState, Player player) {
+        long roomId = gameState.getRoomId();
+        Mono<Void> messagingMono;
+
+        if (processCardResult.isChoiceRequired()) {
+            messagingMono = sendChooseFloorCardMessage(roomId, player, processCardResult.getAcquiredCards());
+            return messagingMono;
+        }
+
+        if (processCardResult.isClaimOpponentPi()) {
+            messagingMono = sendMovingCardMessage(roomId, player, gameState.getOtherPlayer(), processCardResult.getMoveCard())
+                    .then(sendAcquiredCardMessage(roomId, player, processCardResult.getAcquiredCards()));
+        } else {
+            messagingMono = sendAcquiredCardMessage(roomId, player, processCardResult.getAcquiredCards());
+        }
+
+        return messagingMono.then(gameService.setNextTurn(gameState))
+                .flatMap(this::sendTurnInfo);
+    }
+
 
     private Mono<Void> handleFloorSelectEvent(RequestEvent<?> event, GameState gameState, Player player) {
         long roomId = gameState.getRoomId();
