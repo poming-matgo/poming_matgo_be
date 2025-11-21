@@ -276,18 +276,17 @@ public class GameService {
     }
 
     public Mono<GameState> setNextTurn(GameState gameState) {
-        Player nextPlayer = gameState.getCurrentPlayer() == Player.PLAYER_1 ? Player.PLAYER_2 : Player.PLAYER_1;
-        GameState newGameState = gameState.toBuilder()
-                .currentTurn(nextPlayer.getNumber())
+        GameState.GameStateBuilder builder = gameState.toBuilder()
+                .currentTurn((gameState.getCurrentTurn() == 1 ? 2 : 1))
                 .phase(GamePhase.IN_PROGRESS)
-                .choiceInfo(null)
-                .build();
+                .choiceInfo(null);
 
-        if(newGameState.getLeadingPlayer() == gameState.getCurrentTurn()) {
-            newGameState = newGameState.toBuilder()
-                    .round(gameState.getRound() + 1) // todo: 마지막 라운드는 향후 처리 예정
-                    .build();
+        if (gameState.getCurrentTurn() == 2) {
+            builder.round(gameState.getRound() + 1); // todo: 마지막 라운드는 향후 처리 예정
         }
+
+        GameState newGameState = builder.build();
+
         return gameStateRepository.save(newGameState)
                 .thenReturn(newGameState);
     }
