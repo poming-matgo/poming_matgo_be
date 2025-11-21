@@ -89,7 +89,9 @@ public class WsGameHandler {
                     if(processCardResult.isChoiceRequired())
                         return sendChooseFloorCardMessage(roomId, player, processCardResult.getAcquiredCards());
                     return sendAcquiredCardMessage(roomId, player, processCardResult.getAcquiredCards());
-                });
+                })
+                .then(gameService.setNextTurn(gameState))
+                .flatMap(this::sendTurnInfo);
     }
 
     private Mono<Void> sendSubmitCardInfo(long roomId, Player player, Card card) {
