@@ -226,7 +226,8 @@ public class GameService {
     }
 
     private Mono<ProcessCardResult> finalizeTurn(GameState gameState, List<Card> prevCards, List<Card> newCards) {
-        List<Card> finalAcquiredCards = new ArrayList<>(prevCards);
+        List<Card> nonNullPrevCards = Optional.ofNullable(prevCards).orElse(Collections.emptyList());
+        List<Card> finalAcquiredCards = new ArrayList<>(nonNullPrevCards);
         finalAcquiredCards.addAll(newCards);
 
         GameState newGameState = gameState.toBuilder()
