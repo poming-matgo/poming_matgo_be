@@ -90,6 +90,7 @@ public class GameWebSocketHandler implements WebSocketHandler {
             long roomId = payload.getRoomId();
 
             return roomService.getGameState(roomId)
+                    .switchIfEmpty(Mono.error(new WebSocketBusinessException(NOT_EXISTED_ROOM)))
                     .flatMap(gameState -> determinePlayerNum(userId, gameState))
                     .flatMap(player ->
                             sessionManager.addPlayer(roomId, player, userId, session)
