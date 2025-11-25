@@ -85,7 +85,7 @@ public class GameService {
                     } else {
                         //뻑
                         return installedCardRepository.saveRevealedCard(List.of(turnedCard, submittedCard), roomId)
-                                .then(Mono.just(ProcessCardResult.immediate(Collections.emptyList())));
+                                .then(Mono.just(ProcessCardResult.ppeok(Collections.emptyList())));
                     }
                 });
     }

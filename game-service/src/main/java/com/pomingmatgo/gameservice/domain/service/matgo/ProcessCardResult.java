@@ -12,6 +12,7 @@ import java.util.List;
 @Builder(toBuilder = true)
 public class ProcessCardResult {
     private final List<Card> acquiredCards;
+    private final boolean ppeok; // 뻑
     private final boolean choiceRequired;
     private final boolean claimOpponentPi;
     private final Card moveCard;
@@ -21,6 +22,7 @@ public class ProcessCardResult {
                 .acquiredCards(cards)
                 .choiceRequired(false)
                 .claimOpponentPi(false)
+                .ppeok(false)
                 .build();
     }
 
@@ -29,6 +31,7 @@ public class ProcessCardResult {
                 .acquiredCards(cards)
                 .choiceRequired(true)
                 .claimOpponentPi(false)
+                .ppeok(false)
                 .build();
     }
 
@@ -37,7 +40,17 @@ public class ProcessCardResult {
                 .acquiredCards(cards)
                 .choiceRequired(false)
                 .claimOpponentPi(true)
+                .ppeok(false)
                 .moveCard(_moveCard)
+                .build();
+    }
+
+    public static ProcessCardResult ppeok(List<Card> cards) {
+        return ProcessCardResult.builder()
+                .acquiredCards(cards)
+                .choiceRequired(false)
+                .claimOpponentPi(false)
+                .ppeok(true)
                 .build();
     }
 }

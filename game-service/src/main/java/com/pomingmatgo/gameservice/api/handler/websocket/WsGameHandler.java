@@ -75,6 +75,12 @@ public class WsGameHandler {
         long roomId = gameState.getRoomId();
         Mono<Void> messagingMono;
 
+        if (processCardResult.isPpeok()) {
+            messagingMono = sendPpeokMessage(roomId, player);
+            return messagingMono.then(gameService.setNextTurn(gameState))
+                    .flatMap(this::sendTurnInfo);
+        }
+
         if (processCardResult.isChoiceRequired()) {
             messagingMono = sendChooseFloorCardMessage(roomId, player, processCardResult.getAcquiredCards());
             return messagingMono;
@@ -122,6 +128,13 @@ public class WsGameHandler {
         return messageSender.sendMessageToAllUser(
                 roomId,
                 WebSocketResDto.of(player, "ACQUIRED_CARD", "카드 획득", card)
+        );
+    }
+
+    private Mono<Void> sendPpeokMessage(long roomId, Player player) {
+        return messageSender.sendMessageToAllUser(
+                roomId,
+                WebSocketResDto.of(player, "PPEOK", "뻑!")
         );
     }
 
