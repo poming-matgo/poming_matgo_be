@@ -19,13 +19,15 @@ public class MessageSender {
     private final ObjectMapper objectMapper;
     private final SessionManager sessionManager;
     public <T> Mono<Void> sendMessageToSession(WebSocketSession session, WebSocketResDto<T> response) {
-        try {
-            String jsonMessage = objectMapper.writeValueAsString(response);
-            WebSocketMessage webSocketMessage = session.textMessage(jsonMessage);
-            return session.send(Mono.just(webSocketMessage));
-        } catch (Exception e) {
-            return Mono.empty(); //todo: 예외처리로직  추가해야함
+        //todo: 상세 예외처리 필요
+        if (!session.isOpen()) {
+            return Mono.empty();
         }
+
+        return Mono.fromCallable(() -> objectMapper.writeValueAsString(response))
+                .map(session::textMessage)
+                .flatMap(msg -> session.send(Mono.just(msg)))
+                .onErrorResume(e -> Mono.empty());
     }
 
     public <T> Mono<Void> sendMessageToUsers(Collection<WebSocketSession> users, WebSocketResDto<T> response) {
