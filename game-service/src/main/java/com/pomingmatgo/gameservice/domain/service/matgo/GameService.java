@@ -88,14 +88,21 @@ public class GameService {
         long roomId = gameState.getRoomId();
         int month = turnedCard.getMonth();
 
-        List<Card> acquiredCards = new ArrayList<>();
-        acquiredCards.add(turnedCard);
-        acquiredCards.add(submittedCard);
-        acquiredCards.addAll(cardStack);
+        List<Card> acquiredCards = Stream.concat(
+                Stream.of(turnedCard, submittedCard),
+                cardStack.stream()
+        ).collect(Collectors.toList());
+
+        Mono<Card> moveCardMono = moveCardPlayerToPlayer(
+                gameState.getOtherPlayer(),
+                gameState.getCurrentPlayer(),
+                roomId
+        );
 
         return installedCardRepository.deleteAllRevealedCardByMonth(roomId, month)
-                .then(Mono.just(ProcessCardResult.immediate(acquiredCards)));
-        //todo: 다른 사람 카드 가져오는 로직 추가
+                .then(moveCardMono)
+                .map(movedCard -> ProcessCardResult.claimOpponentPi(acquiredCards, movedCard));
+
     }
 
     private Mono<ProcessCardResult> processPpeok(long roomId, Card submittedCard, Card turnedCard) {
