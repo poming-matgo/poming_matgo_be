@@ -70,24 +70,37 @@ public class GameService {
     private Mono<ProcessCardResult> handleSameMonthCards(GameState gameState, Card submittedCard, Card turnedCard) {
         int month = turnedCard.getMonth();
         long roomId = gameState.getRoomId();
+
         return installedCardRepository.getRevealedCardByMonth(roomId, month)
                 .collectList()
                 .flatMap(cardStack -> {
-                    if (cardStack.size() != 1) {
-                        List<Card> acquiredCards = new ArrayList<>();
-                        acquiredCards.add(turnedCard);
-                        acquiredCards.add(submittedCard);
-                        acquiredCards.addAll(cardStack);
+                    boolean isPpeokCondition = (cardStack.size() == 1);
 
-                        return installedCardRepository.deleteAllRevealedCardByMonth(roomId, month)
-                                .then(Mono.just(ProcessCardResult.immediate(acquiredCards)));
-                        //todo: 다른 사람 카드 가져오는 로직 추가
+                    if (isPpeokCondition) {
+                        return processPpeok(roomId, submittedCard, turnedCard);
                     } else {
-                        //뻑
-                        return installedCardRepository.saveRevealedCard(List.of(turnedCard, submittedCard), roomId)
-                                .then(Mono.just(ProcessCardResult.ppeok(Collections.emptyList())));
+                        return processCardAcquisition(gameState, submittedCard, turnedCard, cardStack);
                     }
                 });
+    }
+
+    private Mono<ProcessCardResult> processCardAcquisition(GameState gameState, Card submittedCard, Card turnedCard, List<Card> cardStack) {
+        long roomId = gameState.getRoomId();
+        int month = turnedCard.getMonth();
+
+        List<Card> acquiredCards = new ArrayList<>();
+        acquiredCards.add(turnedCard);
+        acquiredCards.add(submittedCard);
+        acquiredCards.addAll(cardStack);
+
+        return installedCardRepository.deleteAllRevealedCardByMonth(roomId, month)
+                .then(Mono.just(ProcessCardResult.immediate(acquiredCards)));
+        //todo: 다른 사람 카드 가져오는 로직 추가
+    }
+
+    private Mono<ProcessCardResult> processPpeok(long roomId, Card submittedCard, Card turnedCard) {
+        return installedCardRepository.saveRevealedCard(List.of(turnedCard, submittedCard), roomId)
+                .then(Mono.just(ProcessCardResult.ppeok(Collections.emptyList())));
     }
 
     private Mono<ProcessCardResult> handleDifferentMonthCards(GameState gameState, Card submittedCard, Card turnedCard) {
