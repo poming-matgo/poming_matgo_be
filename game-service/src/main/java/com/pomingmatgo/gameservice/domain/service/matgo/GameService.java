@@ -101,8 +101,10 @@ public class GameService {
 
         return installedCardRepository.deleteAllRevealedCardByMonth(roomId, month)
                 .then(moveCardMono)
-                .map(movedCard -> ProcessCardResult.claimOpponentPi(acquiredCards, movedCard));
-
+                .map(movedCard -> cardStack.size() == 1
+                        ? ProcessCardResult.jjok(acquiredCards, movedCard)
+                        : ProcessCardResult.ttadak(acquiredCards, movedCard)
+                );
     }
 
     private Mono<ProcessCardResult> processPpeok(long roomId, Card submittedCard, Card turnedCard) {

@@ -8,11 +8,10 @@ import lombok.Setter;
 import java.util.List;
 
 @Getter
-@Setter
 @Builder(toBuilder = true)
 public class ProcessCardResult {
     private final List<Card> acquiredCards;
-    private final boolean ppeok; // 뻑
+    private final SpecialEvent specialEvent;
     private final boolean choiceRequired;
     private final boolean claimOpponentPi;
     private final Card moveCard;
@@ -22,7 +21,7 @@ public class ProcessCardResult {
                 .acquiredCards(cards)
                 .choiceRequired(false)
                 .claimOpponentPi(false)
-                .ppeok(false)
+                .specialEvent(SpecialEvent.NONE)
                 .build();
     }
 
@@ -31,7 +30,7 @@ public class ProcessCardResult {
                 .acquiredCards(cards)
                 .choiceRequired(true)
                 .claimOpponentPi(false)
-                .ppeok(false)
+                .specialEvent(SpecialEvent.NONE)
                 .build();
     }
 
@@ -40,8 +39,9 @@ public class ProcessCardResult {
                 .acquiredCards(cards)
                 .choiceRequired(false)
                 .claimOpponentPi(true)
-                .ppeok(false)
+                .specialEvent(SpecialEvent.NONE)
                 .moveCard(_moveCard)
+
                 .build();
     }
 
@@ -50,7 +50,28 @@ public class ProcessCardResult {
                 .acquiredCards(cards)
                 .choiceRequired(false)
                 .claimOpponentPi(false)
-                .ppeok(true)
+                .specialEvent(SpecialEvent.PPEOK)
                 .build();
     }
+
+    public static ProcessCardResult ttadak(List<Card> cards, Card _moveCard) {
+        return ProcessCardResult.builder()
+                .acquiredCards(cards)
+                .choiceRequired(false)
+                .claimOpponentPi(true)
+                .specialEvent(SpecialEvent.TTADAK)
+                .moveCard(_moveCard)
+                .build();
+    }
+
+    public static ProcessCardResult jjok(List<Card> cards, Card _moveCard) {
+        return ProcessCardResult.builder()
+                .acquiredCards(cards)
+                .choiceRequired(false)
+                .claimOpponentPi(true)
+                .specialEvent(SpecialEvent.JJOK)
+                .moveCard(_moveCard)
+                .build();
+    }
+
 }

@@ -8,6 +8,7 @@ import com.pomingmatgo.gameservice.domain.Player;
 import com.pomingmatgo.gameservice.domain.card.Card;
 import com.pomingmatgo.gameservice.domain.service.matgo.GameService;
 import com.pomingmatgo.gameservice.domain.service.matgo.ProcessCardResult;
+import com.pomingmatgo.gameservice.domain.service.matgo.SpecialEvent;
 import com.pomingmatgo.gameservice.global.MessageSender;
 import com.pomingmatgo.gameservice.global.WebSocketResDto;
 import com.pomingmatgo.gameservice.global.exception.WebSocketBusinessException;
@@ -79,16 +80,16 @@ public class WsGameHandler {
         }
 
         Mono<Void> messagingMono;
-        if (processCardResult.isPpeok()) {
-            messagingMono = sendPpeokMessage(roomId, player);
+        if (processCardResult.getSpecialEvent()== SpecialEvent.PPEOK) {
+            messagingMono = Mono.empty();
         } else if (processCardResult.isClaimOpponentPi()) {
             messagingMono = sendMovingCardMessage(roomId, player, gameState.getOtherPlayer(), processCardResult.getMoveCard())
                     .then(sendAcquiredCardMessage(roomId, player, processCardResult.getAcquiredCards()));
         } else {
             messagingMono = sendAcquiredCardMessage(roomId, player, processCardResult.getAcquiredCards());
         }
-
-        return messagingMono.then(proceedToNextTurn(gameState));
+        return messagingMono.then(sendSpecialEventMessageIfNeeded(roomId, player, processCardResult))
+                .then(proceedToNextTurn(gameState));
     }
 
 
@@ -134,11 +135,15 @@ public class WsGameHandler {
         );
     }
 
-    private Mono<Void> sendPpeokMessage(long roomId, Player player) {
-        return messageSender.sendMessageToAllUser(
-                roomId,
-                WebSocketResDto.of(player, "PPEOK", "뻑!")
-        );
+    private Mono<Void> sendSpecialEventMessageIfNeeded(long roomId, Player player, ProcessCardResult processCardResult) {
+        SpecialEvent event = processCardResult.getSpecialEvent();
+        if (event != SpecialEvent.NONE) {
+            return messageSender.sendMessageToAllUser(
+                    roomId,
+                    WebSocketResDto.of(player, event.name(), event.getDisplayName())
+            );
+        }
+        return Mono.empty();
     }
 
     private Mono<Void> sendTurnInfo(GameState gameState) {
