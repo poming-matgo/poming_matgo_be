@@ -73,28 +73,22 @@ public class WsGameHandler {
 
     private Mono<Void> handleCardSubmissionResult(ProcessCardResult processCardResult, GameState gameState, Player player) {
         long roomId = gameState.getRoomId();
-        Mono<Void> messagingMono;
-
-        if (processCardResult.isPpeok()) {
-            messagingMono = sendPpeokMessage(roomId, player);
-            return messagingMono.then(gameService.setNextTurn(gameState))
-                    .flatMap(this::sendTurnInfo);
-        }
 
         if (processCardResult.isChoiceRequired()) {
-            messagingMono = sendChooseFloorCardMessage(roomId, player, processCardResult.getAcquiredCards());
-            return messagingMono;
+            return sendChooseFloorCardMessage(roomId, player, processCardResult.getAcquiredCards());
         }
 
-        if (processCardResult.isClaimOpponentPi()) {
+        Mono<Void> messagingMono;
+        if (processCardResult.isPpeok()) {
+            messagingMono = sendPpeokMessage(roomId, player);
+        } else if (processCardResult.isClaimOpponentPi()) {
             messagingMono = sendMovingCardMessage(roomId, player, gameState.getOtherPlayer(), processCardResult.getMoveCard())
                     .then(sendAcquiredCardMessage(roomId, player, processCardResult.getAcquiredCards()));
         } else {
             messagingMono = sendAcquiredCardMessage(roomId, player, processCardResult.getAcquiredCards());
         }
 
-        return messagingMono.then(gameService.setNextTurn(gameState))
-                .flatMap(this::sendTurnInfo);
+        return messagingMono.then(proceedToNextTurn(gameState));
     }
 
 
@@ -102,11 +96,20 @@ public class WsGameHandler {
         long roomId = gameState.getRoomId();
         return gameService.selectFloorCard(gameState, player, (RequestEvent<NormalSubmitReq>) event)
                 .flatMap(processCardResult -> {
-                    if(processCardResult.isChoiceRequired())
-                        return sendChooseFloorCardMessage(roomId, player, processCardResult.getAcquiredCards());
-                    return sendAcquiredCardMessage(roomId, player, processCardResult.getAcquiredCards());
-                })
-                .then(gameService.setNextTurn(gameState))
+                    Mono<Void> messagingMono = processCardResult.isChoiceRequired()
+                            ? sendChooseFloorCardMessage(roomId, player, processCardResult.getAcquiredCards())
+                            : sendAcquiredCardMessage(roomId, player, processCardResult.getAcquiredCards());
+
+                    if (processCardResult.isChoiceRequired()) {
+                        return messagingMono;
+                    }
+
+                    return messagingMono.then(proceedToNextTurn(gameState));
+                });
+    }
+
+    private Mono<Void> proceedToNextTurn(GameState gameState) {
+        return gameService.setNextTurn(gameState)
                 .flatMap(this::sendTurnInfo);
     }
 
