@@ -21,7 +21,6 @@ import java.util.Optional;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
-import static com.pomingmatgo.gameservice.domain.card.SpecialType.SSANG_PI;
 import static com.pomingmatgo.gameservice.global.exception.WebSocketErrorCode.*;
 
 
