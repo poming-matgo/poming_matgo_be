@@ -3,6 +3,7 @@ package com.pomingmatgo.gameservice.api.response.websocket;
 import com.pomingmatgo.gameservice.domain.GameState;
 import com.pomingmatgo.gameservice.domain.Player;
 import com.pomingmatgo.gameservice.domain.card.Card;
+import com.pomingmatgo.gameservice.domain.card.CardType;
 import com.pomingmatgo.gameservice.domain.service.matgo.ProcessCardResult;
 import com.pomingmatgo.gameservice.domain.service.matgo.SpecialEvent;
 import com.pomingmatgo.gameservice.global.MessageSender;
@@ -14,6 +15,8 @@ import org.springframework.web.reactive.socket.WebSocketSession;
 import reactor.core.publisher.Mono;
 
 import java.util.List;
+import java.util.Map;
+import java.util.stream.Collectors;
 
 import static com.pomingmatgo.gameservice.domain.Player.PLAYER_NOTHING;
 
@@ -39,10 +42,13 @@ public class GameMessageSender {
         );
     }
 
-    public Mono<Void> sendAcquiredCardMessage(long roomId, Player player, List<Card> card) {
+    public Mono<Void> sendAcquiredCardMessage(long roomId, Player player, List<Card> acquiredCards) {
+        Map<CardType, List<Card>> classifiedCards = acquiredCards.stream()
+                .collect(Collectors.groupingBy(Card::getType));
+
         return messageSender.sendMessageToAllUser(
                 roomId,
-                WebSocketResDto.of(player, "ACQUIRED_CARD", "카드 획득", card)
+                WebSocketResDto.of(player, "ACQUIRED_CARD", "카드 획득", classifiedCards)
         );
     }
 
