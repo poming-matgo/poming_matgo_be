@@ -60,6 +60,19 @@ public class RedisConfig {
         return new ReactiveRedisTemplate<>(redisConnectionFactory, context);
     }
 
+    @Bean(name="acquiredCardRedisTemplate")
+    public ReactiveRedisOperations<String, String> acquiredCardRedisTemplate(ReactiveRedisConnectionFactory redisConnectionFactory) {
+        Jackson2JsonRedisSerializer<String> serializer = new Jackson2JsonRedisSerializer<>(String.class);
+
+        RedisSerializationContext.RedisSerializationContextBuilder<String, String> builder = RedisSerializationContext
+                .newSerializationContext(new StringRedisSerializer());
+
+        RedisSerializationContext<String, String> context = builder.value(serializer).hashValue(serializer)
+                .hashKey(serializer).build();
+
+        return new ReactiveRedisTemplate<>(redisConnectionFactory, context);
+    }
+
     @Bean(name="chooseLeadPlayerTemplate")
     public ReactiveRedisOperations<String, ChooseLeadPlayer> chooseLeadPlayerRedisTemplate(ReactiveRedisConnectionFactory redisConnectionFactory) {
         Jackson2JsonRedisSerializer<ChooseLeadPlayer> serializer = new Jackson2JsonRedisSerializer<>(ChooseLeadPlayer.class);
