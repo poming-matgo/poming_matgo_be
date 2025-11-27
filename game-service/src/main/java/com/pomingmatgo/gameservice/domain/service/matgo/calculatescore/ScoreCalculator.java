@@ -3,6 +3,7 @@ package com.pomingmatgo.gameservice.domain.service.matgo.calculatescore;
 import com.pomingmatgo.gameservice.domain.card.Card;
 import com.pomingmatgo.gameservice.domain.card.CardType;
 import com.pomingmatgo.gameservice.domain.card.SpecialType;
+import org.springframework.stereotype.Component;
 import reactor.core.publisher.Mono;
 
 import java.util.List;
@@ -11,6 +12,7 @@ import java.util.Objects;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
+@Component
 public final class ScoreCalculator {
     private ScoreCalculator() {}
 
