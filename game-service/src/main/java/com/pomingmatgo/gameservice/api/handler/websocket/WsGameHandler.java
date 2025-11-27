@@ -54,7 +54,14 @@ public class WsGameHandler {
 
     private Mono<Void> handleNormalSubmitEvent(RequestEvent<?> event, GameState gameState, Player player) {
         return processCardSubmission(event, gameState, player)
-                .flatMap(processCardResult -> handleCardSubmissionResult(processCardResult, gameState, player));
+                .flatMap(processCardResult -> {
+                    Mono<Void> applyMono = applyTurnResult(gameState.getRoomId(), gameState, processCardResult);
+
+                    Mono<Void> handleMono = Mono.defer(() ->
+                            handleCardSubmissionResult(processCardResult, gameState, player)
+                    );
+                    return applyMono.then(handleMono);
+                });
     }
 
 
@@ -70,6 +77,21 @@ public class WsGameHandler {
                                     .then(gameService.submitCard(gameState, submittedCard, topCard))
                     );
                 });
+    }
+
+    //getAndLossCard가 이미 확정된 상황에서 redis에 반영하기만 하는 코드
+    private Mono<Void> applyTurnResult(long roomId, GameState gameState, ProcessCardResult processCardResult) {
+        if (processCardResult.isChoiceRequired()) {
+            return Mono.empty();
+        }
+
+        Mono<Void> precedingOperation = Mono.empty();
+        if (processCardResult.isClaimOpponentPi()) {
+            precedingOperation = gameService.loseCard(roomId, gameState.getOtherPlayer(), processCardResult.getMoveCard());
+        }
+        List<Card> acquiredCards = processCardResult.getAcquiredCards();
+        return precedingOperation
+                .then(gameService.acquireCards(roomId, gameState.getCurrentPlayer(), acquiredCards));
     }
 
     private Mono<Void> handleCardSubmissionResult(ProcessCardResult processCardResult, GameState gameState, Player player) {
@@ -96,16 +118,14 @@ public class WsGameHandler {
     private Mono<Void> handleFloorSelectEvent(RequestEvent<?> event, GameState gameState, Player player) {
         long roomId = gameState.getRoomId();
         return gameService.selectFloorCard(gameState, player, (RequestEvent<NormalSubmitReq>) event)
-                .flatMap(processCardResult -> {
-                    Mono<Void> messagingMono = processCardResult.isChoiceRequired()
-                            ? gameMessageSender.sendChooseFloorCardMessage(roomId, player, processCardResult.getAcquiredCards())
-                            : gameMessageSender.sendAcquiredCardMessage(roomId, player, processCardResult.getAcquiredCards());
-
-                    if (processCardResult.isChoiceRequired()) {
-                        return messagingMono;
+                .flatMap(result -> {
+                    if (result.isChoiceRequired()) {
+                        return gameMessageSender.sendChooseFloorCardMessage(roomId, player, result.getAcquiredCards());
                     }
 
-                    return messagingMono.then(proceedToNextTurn(gameState));
+                    return applyTurnResult(roomId, gameState, result)
+                            .then(gameMessageSender.sendAcquiredCardMessage(roomId, player, result.getAcquiredCards()))
+                            .then(proceedToNextTurn(gameState));
                 });
     }
 
