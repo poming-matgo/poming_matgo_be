@@ -30,6 +30,7 @@ public class WsGameHandler {
         FLOOR_SELECT
     }
 
+
     public Mono<Void> handleGameEvent(RequestEvent<?> event, GameState gameState, Player player) {
         if(player != gameState.getCurrentPlayer()) {
             throw new WebSocketBusinessException(NOT_YOUR_TURN);
@@ -127,12 +128,15 @@ public class WsGameHandler {
     }
 
     private Mono<Void> proceedToNextTurn(GameState gameState) {
-        ScoreInfoRes scoreInfoRes = ScoreInfoRes.from(gameState);
+        return gameService.setNextTurn(gameState)
+                .flatMap(updatedGameState -> {
+                    Mono<Void> saveStateMono = gameService.setGameInProgress(updatedGameState);
 
-        Mono<Void> nextTurnMono = gameService.setNextTurn(gameState)
-                .flatMap(gameMessageSender::sendTurnInfo);
-        Mono<Void> scoreInfoMono = gameMessageSender.sendScoreInfo(gameState.getRoomId(), scoreInfoRes);
+                    ScoreInfoRes scoreInfoRes = ScoreInfoRes.from(updatedGameState);
+                    Mono<Void> sendTurnInfoMono = gameMessageSender.sendTurnInfo(updatedGameState);
+                    Mono<Void> sendScoreInfoMono = gameMessageSender.sendScoreInfo(updatedGameState.getRoomId(), scoreInfoRes);
 
-        return Mono.when(nextTurnMono, scoreInfoMono);
+                    return saveStateMono.then(Mono.when(sendTurnInfoMono, sendScoreInfoMono));
+                });
     }
 }

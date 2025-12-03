@@ -31,6 +31,9 @@ public class GameService {
     private final AcquiredCardRepository acquiredCardRepository;
     private final ScoreCalculator scoreCalculator;
 
+    public Mono<Void> setGameInProgress(GameState gameState) {
+        return gameStateRepository.save(gameState).then();
+    }
     public Mono<GameState> calculateAndApplyScores(long roomId, GameState gameState) {
         Mono<List<Card>> player1Card = acquiredCardRepository.getAllCards(roomId, 1);
         Mono<List<Card>> player2Card = acquiredCardRepository.getAllCards(roomId, 2);
@@ -324,7 +327,6 @@ public class GameService {
 
         GameState newGameState = builder.build();
 
-        return gameStateRepository.save(newGameState)
-                .thenReturn(newGameState);
+        return Mono.just(newGameState);
     }
 }
