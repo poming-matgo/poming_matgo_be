@@ -2,26 +2,21 @@ package com.pomingmatgo.gameservice.api.handler.websocket;
 
 import com.pomingmatgo.gameservice.api.handler.event.RequestEvent;
 import com.pomingmatgo.gameservice.api.request.websocket.NormalSubmitReq;
-import com.pomingmatgo.gameservice.api.response.websocket.AnnounceRoundRes;
 import com.pomingmatgo.gameservice.api.response.websocket.GameMessageSender;
+import com.pomingmatgo.gameservice.api.response.websocket.ScoreInfoRes;
 import com.pomingmatgo.gameservice.domain.GameState;
 import com.pomingmatgo.gameservice.domain.Player;
 import com.pomingmatgo.gameservice.domain.card.Card;
 import com.pomingmatgo.gameservice.domain.service.matgo.GameService;
 import com.pomingmatgo.gameservice.domain.service.matgo.ProcessCardResult;
 import com.pomingmatgo.gameservice.domain.service.matgo.SpecialEvent;
-import com.pomingmatgo.gameservice.global.MessageSender;
-import com.pomingmatgo.gameservice.global.WebSocketResDto;
 import com.pomingmatgo.gameservice.global.exception.WebSocketBusinessException;
-import com.pomingmatgo.gameservice.global.session.SessionManager;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
-import org.springframework.web.reactive.socket.WebSocketSession;
 import reactor.core.publisher.Mono;
 
 import java.util.List;
 
-import static com.pomingmatgo.gameservice.domain.Player.PLAYER_NOTHING;
 import static com.pomingmatgo.gameservice.global.exception.WebSocketErrorCode.NOT_YOUR_TURN;
 
 @Component
@@ -58,7 +53,8 @@ public class WsGameHandler {
                     Mono<Void> applyMono = applyTurnResult(gameState.getRoomId(), gameState, processCardResult);
 
                     Mono<Void> handleMono = Mono.defer(() ->
-                            handleCardSubmissionResult(processCardResult, gameState, player)
+                            gameService.calculateAndApplyScores(gameState.getRoomId(), gameState)
+                                    .flatMap(newGs -> handleCardSubmissionResult(processCardResult, newGs, player))
                     );
                     return applyMono.then(handleMono);
                 });
@@ -110,6 +106,7 @@ public class WsGameHandler {
         } else {
             messagingMono = gameMessageSender.sendAcquiredCardMessage(roomId, player, processCardResult.getAcquiredCards());
         }
+
         return messagingMono.then(gameMessageSender.sendSpecialEventMessageIfNeeded(roomId, player, processCardResult))
                 .then(proceedToNextTurn(gameState));
     }
@@ -130,7 +127,12 @@ public class WsGameHandler {
     }
 
     private Mono<Void> proceedToNextTurn(GameState gameState) {
-        return gameService.setNextTurn(gameState)
+        ScoreInfoRes scoreInfoRes = ScoreInfoRes.from(gameState);
+
+        Mono<Void> nextTurnMono = gameService.setNextTurn(gameState)
                 .flatMap(gameMessageSender::sendTurnInfo);
+        Mono<Void> scoreInfoMono = gameMessageSender.sendScoreInfo(gameState.getRoomId(), scoreInfoRes);
+
+        return Mono.when(nextTurnMono, scoreInfoMono);
     }
 }

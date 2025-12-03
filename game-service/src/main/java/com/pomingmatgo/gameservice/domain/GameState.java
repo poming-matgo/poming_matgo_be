@@ -27,6 +27,8 @@ public class GameState implements Serializable {
     int leadingPlayer;
     int round;
     int currentTurn;
+    int player1Score;
+    int player2Score;
 
     @Builder.Default
     private GamePhase phase = GamePhase.IN_PROGRESS;

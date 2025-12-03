@@ -9,6 +9,7 @@ import com.pomingmatgo.gameservice.domain.card.SpecialType;
 import com.pomingmatgo.gameservice.domain.repository.AcquiredCardRepository;
 import com.pomingmatgo.gameservice.domain.repository.GameStateRepository;
 import com.pomingmatgo.gameservice.domain.repository.InstalledCardRepository;
+import com.pomingmatgo.gameservice.domain.service.matgo.calculatescore.ScoreCalculator;
 import com.pomingmatgo.gameservice.global.exception.WebSocketBusinessException;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
@@ -28,6 +29,26 @@ public class GameService {
     private final InstalledCardRepository installedCardRepository;
     private final GameStateRepository gameStateRepository;
     private final AcquiredCardRepository acquiredCardRepository;
+    private final ScoreCalculator scoreCalculator;
+
+    public Mono<GameState> calculateAndApplyScores(long roomId, GameState gameState) {
+        Mono<List<Card>> player1Card = acquiredCardRepository.getAllCards(roomId, 1);
+        Mono<List<Card>> player2Card = acquiredCardRepository.getAllCards(roomId, 2);
+        return Mono.zip(player1Card, player2Card)
+                .flatMap(tuple -> {
+                    List<Card> player1Cards = tuple.getT1();
+                    List<Card> player2Cards = tuple.getT2();
+
+                    int player1Score = scoreCalculator.calculateTotalScore(player1Cards);
+                    int player2Score = scoreCalculator.calculateTotalScore(player2Cards);
+
+                    GameState newState = gameState.toBuilder()
+                            .player1Score(player1Score)
+                            .player2Score(player2Score)
+                            .build();
+                    return Mono.just(newState);
+                });
+    }
 
     public Mono<Void> acquireCards(long roomId, Player player, List<Card> acquiredCards) {
         return acquiredCardRepository.addCards(roomId, player.getNumber(), acquiredCards).then();

@@ -92,4 +92,11 @@ public class GameMessageSender {
         }
         return Mono.empty();
     }
+
+    public Mono<Void> sendScoreInfo(long roomId, ScoreInfoRes scoreInfo) {
+        return messageSender.sendMessageToAllUser(
+                roomId,
+                WebSocketResDto.of(PLAYER_NOTHING, "SCORE_UPDATE", "점수 정보 업데이트", scoreInfo)
+        );
+    }
 }
