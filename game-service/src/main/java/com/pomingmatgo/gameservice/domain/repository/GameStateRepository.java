@@ -15,16 +15,20 @@ public class GameStateRepository {
     @Autowired
     private ReactiveRedisOperations<String, GameState> redisOps;
 
-    private static final String GAME_STATE_KEY_PREFIX = "gameState:";
+    private static final String GAME_STATE_KEY_FORMAT = "game:%d:state";
 
+
+    private String generateKey(long roomId) {
+        return String.format(GAME_STATE_KEY_FORMAT, roomId);
+    }
     public Mono<GameState> findById(long roomId) {
-        String redisKey = GAME_STATE_KEY_PREFIX + roomId;
+        String redisKey = generateKey(roomId);
 
         return redisOps.opsForValue().get(redisKey);
     }
 
     public Mono<Long> create(GameState gameState) {
-        String redisKey = GAME_STATE_KEY_PREFIX + gameState.getRoomId();
+        String redisKey = generateKey(gameState.getRoomId());
 
         return redisOps.opsForValue()
                 .setIfAbsent(redisKey, gameState)
@@ -38,7 +42,7 @@ public class GameStateRepository {
     }
 
     public Mono<Long> delete(long roomId) {
-        String redisKey = GAME_STATE_KEY_PREFIX + roomId;
+        String redisKey = generateKey(roomId);
         return redisOps.hasKey(redisKey)
                 .flatMap(exists -> {
                     if (Boolean.TRUE.equals(exists)) {
@@ -49,7 +53,7 @@ public class GameStateRepository {
     }
 
     public Mono<Long> save(GameState gameState) {
-        String redisKey = GAME_STATE_KEY_PREFIX + gameState.getRoomId();
+        String redisKey = generateKey(gameState.getRoomId());
 
         return saveState(gameState, redisKey)
                 .filter(isSaved -> isSaved) // true 값만 통과시킴

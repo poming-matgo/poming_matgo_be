@@ -20,13 +20,32 @@ public class InstalledCardRepository {
     @Qualifier("cardRedisTemplate")
     @Autowired
     private ReactiveRedisOperations<String, String> redisOps;
-    private static final String PLAYER1_CARD_KEY_PREFIX = "player1Card:";
-    private static final String PLAYER2_CARD_KEY_PREFIX = "player2Card:";
-    private static final String REVEALED_CARD_KEY_PREFIX = "revealedCard:";
-    private static final String HIDDEN_CARD_KEY_PREFIX = "hiddenCard:";
+    private static final String PLAYER1_CARD_KEY_FORMAT = "game:%d:cards:player1Card:";
+    private static final String PLAYER2_CARD_KEY_FORMAT = "game:%d:cards:player2Card:";
+    private static final String REVEALED_CARD_KEY_FORMAT = "game:%d:cards:revealed:%d";
+    private static final String HIDDEN_CARD_KEY_FORMAT = "game:%d:cards:hidden";
 
-    public Mono<Boolean> saveCards(List<Card> cards, long roomId, String keyPrefix) {
-        String redisKey = keyPrefix + roomId;
+    private String getKeyPrefixForPlayer(Player player, long roomId) {
+        switch (player) {
+            case PLAYER_1:
+                return String.format(PLAYER1_CARD_KEY_FORMAT, roomId);
+            case PLAYER_2:
+                return String.format(PLAYER2_CARD_KEY_FORMAT, roomId);
+            default:
+                throw new WebSocketBusinessException(SYSTEM_ERROR);
+        }
+    }
+
+    private String generateRevealedCardKey(long roomId, long month) {
+        return String.format(REVEALED_CARD_KEY_FORMAT, roomId, month);
+    }
+
+    private String generateHiddenCardKey(long roomId) {
+        return String.format(HIDDEN_CARD_KEY_FORMAT, roomId);
+    }
+
+
+    public Mono<Boolean> saveCards(List<Card> cards, String redisKey) {
         List<String> cardNames = cards.stream()
                 .map(Enum::name)
                 .toList();
@@ -37,30 +56,28 @@ public class InstalledCardRepository {
 
 
     public Mono<Boolean> deleteAllRevealedCardByMonth(long roomId, int month) {
-        String redisKey = String.format("%s%d:%d", REVEALED_CARD_KEY_PREFIX, roomId, month);
+        String redisKey = generateRevealedCardKey(roomId, month);
         return redisOps.delete(redisKey)
                 .thenReturn(true);
     }
 
     public Mono<Boolean> deleteRevealedCard(long roomId, Card card) {
         int month = card.getMonth();
-        String redisKey = String.format("%s%d:%d",  REVEALED_CARD_KEY_PREFIX, roomId, month);
+        String redisKey = generateRevealedCardKey(roomId, month);
         return redisOps.opsForSet().remove(redisKey, card)
                 .map(removedCount -> removedCount > 0);
     }
 
     public Mono<Boolean> savePlayerCards(List<Card> cards, long roomId, Player player) {
-        String keyPrefix = getKeyPrefixForPlayer(player);
-        return saveCards(cards, roomId, keyPrefix);
+        String redisKey = getKeyPrefixForPlayer(player, roomId);
+        return saveCards(cards, redisKey);
     }
 
     public Mono<Boolean> deletePlayerCards(long roomId, Player player) {
-        String keyPrefix = getKeyPrefixForPlayer(player);
-        return deleteAllPlayerCard(roomId, keyPrefix);
+        return deleteAllPlayerCard(roomId, getKeyPrefixForPlayer(player, roomId));
     }
 
-    private Mono<Boolean> deleteAllPlayerCard(long roomId, String keyPrefix) {
-        String redisKey = keyPrefix + roomId;
+    private Mono<Boolean> deleteAllPlayerCard(long roomId, String redisKey) {
         return redisOps.delete(redisKey)
                 .thenReturn(true);
     }
@@ -72,7 +89,7 @@ public class InstalledCardRepository {
                 .flatMap(entry -> {
                     int month = entry.getKey();
                     Collection<String> cardsInMonth = entry.getValue();
-                    String redisKey = String.format("%s%d:%d", REVEALED_CARD_KEY_PREFIX, roomId, month);
+                    String redisKey = generateRevealedCardKey(roomId, month);
                     return redisOps.opsForSet()
                             .add(redisKey, cardsInMonth.toArray(new String[0]))
                             .map(count -> count > 0);
@@ -81,49 +98,36 @@ public class InstalledCardRepository {
     }
 
     public Mono<Boolean> saveHiddenCard(List<Card> cards, long roomId) {
-        return saveCards(cards, roomId, HIDDEN_CARD_KEY_PREFIX);
+        return saveCards(cards, generateHiddenCardKey(roomId));
     }
 
     public Flux<Card> getRevealedCardByMonth(long roomId, long month) {
-        String redisKey = String.format("%s%d:%d", REVEALED_CARD_KEY_PREFIX, roomId, month);
+        String redisKey = generateRevealedCardKey(roomId, month);
         return redisOps.opsForSet()
                 .members(redisKey)
                 .map(Card::valueOf);
     }
 
     public Mono<Card> getTopCard(long roomId) {
-        String redisKey = HIDDEN_CARD_KEY_PREFIX + roomId;
+        String redisKey = generateHiddenCardKey(roomId);
         return redisOps.opsForList()
                 .leftPop(redisKey)
                 .map(Card::valueOf);
     }
 
-    private Flux<Card> getCards(long roomId, String keyPrefix) {
-        String redisKey = keyPrefix + roomId;
+    private Flux<Card> getCards(long roomId, String redisKey) {
         return redisOps.opsForList()
                 .range(redisKey, 0, -1)
                 .map(Card::valueOf);
     }
     public Flux<Card> getPlayerCards(Long roomId, Player player) {
-        String keyPrefix = getKeyPrefixForPlayer(player);
-        return getCards(roomId, keyPrefix);
+        return getCards(roomId, getKeyPrefixForPlayer(player, roomId));
     }
 
     public Mono<Void> updatePlayerCards(long roomId, Player player, List<Card> cards) {
         return deletePlayerCards(roomId, player)
                 .then(savePlayerCards(cards, roomId, player))
                 .then();
-    }
-
-    private String getKeyPrefixForPlayer(Player player) {
-        switch (player) {
-            case PLAYER_1:
-                return PLAYER1_CARD_KEY_PREFIX;
-            case PLAYER_2:
-                return PLAYER2_CARD_KEY_PREFIX;
-            default:
-                throw new WebSocketBusinessException(SYSTEM_ERROR);
-        }
     }
 }
 
