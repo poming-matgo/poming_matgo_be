@@ -3,7 +3,7 @@ package com.example.gameservice;
 import com.pomingmatgo.gameservice.domain.Player;
 import com.pomingmatgo.gameservice.domain.card.Card;
 import com.pomingmatgo.gameservice.domain.repository.InstalledCardRepository;
-import com.pomingmatgo.gameservice.domain.service.matgo.GameService;
+import com.pomingmatgo.gameservice.domain.service.matgo.PreGameService;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -28,7 +28,7 @@ class ConfusedPlayerTest {
     private InstalledCardRepository installedCardRepository;
 
     @InjectMocks
-    private GameService gameService;
+    private PreGameService preGameService;
 
     private static final long ROOM_ID = 1L;
     private static final Player PLAYER_1 = Player.PLAYER_1;
@@ -60,7 +60,7 @@ class ConfusedPlayerTest {
         given(installedCardRepository.getPlayerCards(ROOM_ID, player))
                 .willReturn(playerCards);
 
-        StepVerifier.create(gameService.isConfusedPlayer(ROOM_ID, player))
+        StepVerifier.create(preGameService.isConfusedPlayer(ROOM_ID, player))
                 .expectNext(expectedResult)
                 .verifyComplete();
     }

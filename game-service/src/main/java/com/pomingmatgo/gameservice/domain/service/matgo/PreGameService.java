@@ -55,6 +55,15 @@ public class PreGameService {
                 .flatMap(selectedCards -> leadingPlayerRepository.saveSelectedCard(selectedCards, roomId));
     }
 
+    public Mono<Boolean> isConfusedPlayer(long roomId, Player player) {
+        Flux<Card> cardFlux = installedCardRepository.getPlayerCards(roomId, player);
+
+        return cardFlux
+                .groupBy(Card::getMonth)
+                .flatMap(group -> group.count().map(count -> count == 4))
+                .any(Boolean::booleanValue);
+    }
+
     public Mono<Void> selectCard(RequestEvent<LeadSelectionReq> event, GameState gameState, Player player) {
         Long roomId = gameState.getRoomId();
         Mono<ChooseLeadPlayer> selectedCardsMono = leadingPlayerRepository.getPlayerSelectedCard(roomId);

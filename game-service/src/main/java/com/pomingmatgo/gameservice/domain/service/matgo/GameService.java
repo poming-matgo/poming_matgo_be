@@ -61,15 +61,6 @@ public class GameService {
         return acquiredCardRepository.removeCard(roomId, player.getNumber(), lostCard).then();
     }
 
-    public Mono<Boolean> isConfusedPlayer(long roomId, Player player) {
-        Flux<Card> cardFlux = installedCardRepository.getPlayerCards(roomId, player);
-
-        return cardFlux
-                .groupBy(Card::getMonth)
-                .flatMap(group -> group.count().map(count -> count == 4))
-                .any(Boolean::booleanValue);
-    }
-
     public Mono<Card> getTopCard(long roomId) {
         return installedCardRepository.getTopCard(roomId);
     }
