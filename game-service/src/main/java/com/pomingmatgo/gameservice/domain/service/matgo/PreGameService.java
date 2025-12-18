@@ -11,7 +11,6 @@ import com.pomingmatgo.gameservice.domain.ChooseLeadPlayer;
 import com.pomingmatgo.gameservice.domain.repository.GameStateRepository;
 import com.pomingmatgo.gameservice.domain.repository.InstalledCardRepository;
 import com.pomingmatgo.gameservice.domain.repository.LeadingPlayerRepository;
-import com.pomingmatgo.gameservice.global.exception.WebSocketBusinessException;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import reactor.core.publisher.Flux;
@@ -20,8 +19,6 @@ import reactor.core.publisher.Mono;
 import java.util.*;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.stream.Collectors;
-
-import static com.pomingmatgo.gameservice.global.exception.WebSocketErrorCode.ALREADY_SELECTED_CARD;
 
 @Service
 @RequiredArgsConstructor
