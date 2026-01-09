@@ -1,4 +1,4 @@
-package com.example.gameservice;
+package com.pomingmatgo.gameservice;
 
 import com.pomingmatgo.gameservice.domain.GameState;
 import com.pomingmatgo.gameservice.domain.repository.GameStateRepository;

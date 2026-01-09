@@ -1,4 +1,4 @@
-package com.example.gameservice;
+package com.pomingmatgo.gameservice;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.test.context.SpringBootTest;

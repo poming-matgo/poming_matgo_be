@@ -1,4 +1,4 @@
-package com.example.gameservice.service;
+package com.pomingmatgo.gameservice.service;
 
 import com.pomingmatgo.gameservice.domain.card.Card;
 import com.pomingmatgo.gameservice.domain.repository.InstalledCardRepository;

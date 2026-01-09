@@ -1,4 +1,4 @@
-package com.example.gameservice.service.calculatescore;
+package com.pomingmatgo.gameservice.service.calculatescore;
 
 import com.pomingmatgo.gameservice.domain.card.Card;
 import com.pomingmatgo.gameservice.domain.service.matgo.calculatescore.ScoreCalculator;
