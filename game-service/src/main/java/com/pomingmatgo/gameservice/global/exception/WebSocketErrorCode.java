@@ -21,8 +21,10 @@ public enum WebSocketErrorCode {
     //카드 제출
     INVALID_CARD("유효하지 않은 카드입니다."),
     NOT_EXIST_FLOOR_CARD("선택할 수 있는 바닥패가 없습니다."),
-    NOT_YOUR_TURN("턴이 아닙니다.");
+    NOT_YOUR_TURN("턴이 아닙니다."),
 
+    //다시 시도
+    TRY_AGAIN("다시 시도해주세요");
     private final String message;
 
     WebSocketErrorCode(String message) {
