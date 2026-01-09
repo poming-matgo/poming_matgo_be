@@ -12,6 +12,7 @@ import com.pomingmatgo.gameservice.domain.repository.GameStateRepository;
 import com.pomingmatgo.gameservice.domain.repository.InstalledCardRepository;
 import com.pomingmatgo.gameservice.domain.repository.LeadingPlayerRepository;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
@@ -22,6 +23,7 @@ import java.util.stream.Collectors;
 
 @Service
 @RequiredArgsConstructor
+@Slf4j
 public class PreGameService {
     private final LeadingPlayerRepository leadingPlayerRepository;
     private final InstalledCardRepository installedCardRepository;
@@ -61,6 +63,7 @@ public class PreGameService {
                 .any(Boolean::booleanValue);
     }
 
+    @GameLock(key = "'game:' + #roomId + ':lead:playerChoice'")
     public Mono<Void> selectCard(RequestEvent<LeadSelectionReq> event, GameState gameState, Player player) {
         Long roomId = gameState.getRoomId();
         Mono<ChooseLeadPlayer> selectedCardsMono = leadingPlayerRepository.getPlayerSelectedCard(roomId);
