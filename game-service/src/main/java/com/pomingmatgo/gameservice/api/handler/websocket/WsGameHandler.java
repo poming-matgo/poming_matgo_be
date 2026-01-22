@@ -7,9 +7,7 @@ import com.pomingmatgo.gameservice.api.response.websocket.ScoreInfoRes;
 import com.pomingmatgo.gameservice.domain.GameState;
 import com.pomingmatgo.gameservice.domain.Player;
 import com.pomingmatgo.gameservice.domain.card.Card;
-import com.pomingmatgo.gameservice.domain.service.matgo.GameService;
-import com.pomingmatgo.gameservice.domain.service.matgo.ProcessCardResult;
-import com.pomingmatgo.gameservice.domain.service.matgo.SpecialEvent;
+import com.pomingmatgo.gameservice.domain.service.matgo.*;
 import com.pomingmatgo.gameservice.global.exception.WebSocketBusinessException;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
@@ -48,31 +46,44 @@ public class WsGameHandler {
         };
     }
 
-    private Mono<Void> handleNormalSubmitEvent(RequestEvent<?> event, GameState gameState, Player player) {
-        return processCardSubmission(event, gameState, player)
-                .flatMap(processCardResult -> {
-                    Mono<Void> applyMono = applyTurnResult(gameState.getRoomId(), gameState, processCardResult);
+    public Mono<Void> handleNormalSubmitEvent(RequestEvent<?> event, GameState gameState, Player player) {
+        return executeTurnStateUpdate(event, gameState, player)
+                .flatMap(context -> {
+                    long roomId = gameState.getRoomId();
 
-                    Mono<Void> handleMono = Mono.defer(() ->
-                            gameService.calculateAndApplyScores(gameState.getRoomId(), gameState)
-                                    .flatMap(newGs -> handleCardSubmissionResult(processCardResult, newGs, player))
+                    Mono<Void> sendSubmitMono = gameMessageSender.sendSubmitCardInfo(roomId, player, context.submittedCard());
+
+                    Mono<Void> sendTopCardMono = gameMessageSender.sendTopCardInfo(roomId, player, context.topCard());
+
+                    Mono<Void> handleResultMono = handleCardSubmissionResult(
+                            context.processCardResult(),
+                            context.newGameState(),
+                            player
                     );
-                    return applyMono.then(handleMono);
+
+                    return sendSubmitMono
+                            .then(sendTopCardMono)
+                            .then(handleResultMono);
                 });
     }
 
-
-    private Mono<ProcessCardResult> processCardSubmission(RequestEvent<?> event, GameState gameState, Player player) {
+    private Mono<TurnResultContext> executeTurnStateUpdate(RequestEvent<?> event, GameState gameState, Player player) {
         long roomId = gameState.getRoomId();
-        return gameService.submitCardEvent(roomId, player, (RequestEvent<NormalSubmitReq>) event)
-                .flatMap(submittedCard -> {
-                    Mono<Card> topCardMono = gameMessageSender.sendSubmitCardInfo(roomId, player, submittedCard)
-                            .then(gameService.getTopCard(roomId));
 
-                    return topCardMono.flatMap(topCard ->
-                            gameMessageSender.sendTopCardInfo(roomId, player, topCard)
-                                    .then(gameService.submitCard(gameState, submittedCard, topCard))
-                    );
+        Mono<Card> submittedCardMono = gameService.submitCardEvent(roomId, player, (RequestEvent<NormalSubmitReq>) event);
+        Mono<Card> topCardMono = gameService.getTopCard(roomId);
+
+        return Mono.zip(submittedCardMono, topCardMono)
+                .flatMap(tuple -> {
+                    Card submittedCard = tuple.getT1();
+                    Card topCard = tuple.getT2();
+
+                    return gameService.submitCard(gameState, submittedCard, topCard)
+                            .flatMap(processCardResult ->
+                                    applyTurnResult(roomId, gameState, processCardResult)
+                                            .then(gameService.calculateAndApplyScores(roomId, gameState))
+                                            .map(newGs -> new TurnResultContext(submittedCard, topCard, processCardResult, newGs))
+                            );
                 });
     }
 
@@ -112,8 +123,7 @@ public class WsGameHandler {
                 .then(proceedToNextTurn(gameState));
     }
 
-
-    private Mono<Void> handleFloorSelectEvent(RequestEvent<?> event, GameState gameState, Player player) {
+    @GameLock(key = "'game:' + #gameState.roomId")    private Mono<Void> handleFloorSelectEvent(RequestEvent<?> event, GameState gameState, Player player) {
         long roomId = gameState.getRoomId();
         return gameService.selectFloorCard(gameState, player, (RequestEvent<NormalSubmitReq>) event)
                 .flatMap(result -> {
