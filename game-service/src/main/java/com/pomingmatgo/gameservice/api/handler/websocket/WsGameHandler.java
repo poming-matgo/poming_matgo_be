@@ -124,18 +124,42 @@ public class WsGameHandler {
                 .then(proceedToNextTurn(gameState));
     }
 
-    @GameLock(key = "'game:' + #gameState.roomId")
-    private Mono<Void> handleFloorSelectEvent(RequestEvent<?> event, GameState gameState, Player player) {
+    public Mono<Void> handleFloorSelectEvent(RequestEvent<?> event, GameState gameState, Player player) {
         long roomId = gameState.getRoomId();
-        return gameService.selectFloorCard(gameState, player, (RequestEvent<NormalSubmitReq>) event)
+
+        return executeFloorSelectionStateUpdate((RequestEvent<NormalSubmitReq>) event, gameState, player)
+                .flatMap(context -> {
+                    if (context.isChoiceRequired()) {
+                        return gameMessageSender.sendChooseFloorCardMessage(roomId, player, context.result().getAcquiredCards());
+                    }
+
+                    Mono<Void> sendAcquired = gameMessageSender.sendAcquiredCardMessage(roomId, player, context.result().getAcquiredCards());
+
+                    ScoreInfoRes scoreInfoRes = ScoreInfoRes.from(context.updatedGameState());
+                    Mono<Void> sendTurnInfo = gameMessageSender.sendTurnInfo(context.updatedGameState());
+                    Mono<Void> sendScoreInfo = gameMessageSender.sendScoreInfo(roomId, scoreInfoRes);
+
+                    return sendAcquired
+                            .then(Mono.when(sendTurnInfo, sendScoreInfo));
+                });
+    }
+
+    @GameLock(key = "'game:' + #gameState.roomId")
+    public Mono<FloorSelectContext> executeFloorSelectionStateUpdate(RequestEvent<NormalSubmitReq> event, GameState gameState, Player player) {
+        long roomId = gameState.getRoomId();
+
+        return gameService.selectFloorCard(gameState, player, event)
                 .flatMap(result -> {
                     if (result.isChoiceRequired()) {
-                        return gameMessageSender.sendChooseFloorCardMessage(roomId, player, result.getAcquiredCards());
+                        return Mono.just(new FloorSelectContext(result, gameState, true));
                     }
 
                     return applyTurnResult(roomId, gameState, result)
-                            .then(gameMessageSender.sendAcquiredCardMessage(roomId, player, result.getAcquiredCards()))
-                            .then(proceedToNextTurn(gameState));
+                            .then(gameService.setNextTurn(gameState))
+                            .flatMap(nextState ->
+                                    gameService.setGameInProgress(nextState)
+                                            .thenReturn(new FloorSelectContext(result, nextState, false))
+                            );
                 });
     }
 
