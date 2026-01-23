@@ -67,6 +67,7 @@ public class WsGameHandler {
                 });
     }
 
+    @GameLock(key = "'game:' + #gameState.roomId")
     private Mono<TurnResultContext> executeTurnStateUpdate(RequestEvent<?> event, GameState gameState, Player player) {
         long roomId = gameState.getRoomId();
 
@@ -123,7 +124,8 @@ public class WsGameHandler {
                 .then(proceedToNextTurn(gameState));
     }
 
-    @GameLock(key = "'game:' + #gameState.roomId")    private Mono<Void> handleFloorSelectEvent(RequestEvent<?> event, GameState gameState, Player player) {
+    @GameLock(key = "'game:' + #gameState.roomId")
+    private Mono<Void> handleFloorSelectEvent(RequestEvent<?> event, GameState gameState, Player player) {
         long roomId = gameState.getRoomId();
         return gameService.selectFloorCard(gameState, player, (RequestEvent<NormalSubmitReq>) event)
                 .flatMap(result -> {
