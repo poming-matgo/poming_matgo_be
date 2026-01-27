@@ -20,159 +20,101 @@ import static com.pomingmatgo.gameservice.global.exception.WebSocketErrorCode.NO
 @Component
 @RequiredArgsConstructor
 public class WsGameHandler {
-    private final GameService gameService;
+
+    private final GamePlayService gamePlayService;
     private final GameMessageSender gameMessageSender;
 
     private enum GameEventType {
         NORMAL_SUBMIT,
-        FLOOR_SELECT
+        FLOOR_SELECT;
+
+        public static GameEventType from(String subType) {
+            try {
+                return valueOf(subType);
+            } catch (IllegalArgumentException e) {
+                throw new IllegalArgumentException("Unsupported event type: " + subType);
+            }
+        }
     }
 
-
     public Mono<Void> handleGameEvent(RequestEvent<?> event, GameState gameState, Player player) {
-        if(player != gameState.getCurrentPlayer()) {
-            throw new WebSocketBusinessException(NOT_YOUR_TURN);
+        if (!player.equals(gameState.getCurrentPlayer())) {
+            return Mono.error(new WebSocketBusinessException(NOT_YOUR_TURN));
         }
-        WsGameHandler.GameEventType eventType;
-        try {
-            eventType = WsGameHandler.GameEventType.valueOf(event.getEventType().getSubType());
-        } catch (IllegalArgumentException e) {
-            return Mono.error(new IllegalArgumentException("Unsupported event type: " + event.getEventType().getSubType()));
-        }
+
+        GameEventType eventType = GameEventType.from(event.getEventType().getSubType());
+
+        @SuppressWarnings("unchecked")
+        RequestEvent<NormalSubmitReq> submitEvent = (RequestEvent<NormalSubmitReq>) event;
 
         return switch (eventType) {
-            case NORMAL_SUBMIT -> handleNormalSubmitEvent(event, gameState, player);
-            case FLOOR_SELECT->  handleFloorSelectEvent(event, gameState, player);
+            case NORMAL_SUBMIT -> handleNormalSubmit(submitEvent, gameState, player);
+            case FLOOR_SELECT -> handleFloorSelect(submitEvent, gameState, player);
         };
     }
 
-    public Mono<Void> handleNormalSubmitEvent(RequestEvent<?> event, GameState gameState, Player player) {
-        return executeTurnStateUpdate(event, gameState, player)
-                .flatMap(context -> {
-                    long roomId = gameState.getRoomId();
+    private Mono<Void> handleNormalSubmit(RequestEvent<NormalSubmitReq> event, GameState gameState, Player player) {
+        long roomId = gameState.getRoomId();
 
-                    Mono<Void> sendSubmitMono = gameMessageSender.sendSubmitCardInfo(roomId, player, context.submittedCard());
-
-                    Mono<Void> sendTopCardMono = gameMessageSender.sendTopCardInfo(roomId, player, context.topCard());
-
-                    Mono<Void> handleResultMono = handleCardSubmissionResult(
-                            context.processCardResult(),
-                            context.newGameState(),
-                            player
+        return gamePlayService.executeNormalSubmit(roomId, gameState, player, event)
+                .flatMap(ctx -> {
+                    Mono<Void> sendInfos = Mono.when(
+                            gameMessageSender.sendSubmitCardInfo(roomId, player, ctx.submittedCard()),
+                            gameMessageSender.sendTopCardInfo(roomId, player, ctx.topCard())
                     );
 
-                    return sendSubmitMono
-                            .then(sendTopCardMono)
-                            .then(handleResultMono);
-                });
-    }
-
-    @GameLock(key = "'game:' + #gameState.roomId")
-    private Mono<TurnResultContext> executeTurnStateUpdate(RequestEvent<?> event, GameState gameState, Player player) {
-        long roomId = gameState.getRoomId();
-
-        Mono<Card> submittedCardMono = gameService.submitCardEvent(roomId, player, (RequestEvent<NormalSubmitReq>) event);
-        Mono<Card> topCardMono = gameService.getTopCard(roomId);
-
-        return Mono.zip(submittedCardMono, topCardMono)
-                .flatMap(tuple -> {
-                    Card submittedCard = tuple.getT1();
-                    Card topCard = tuple.getT2();
-
-                    return gameService.submitCard(gameState, submittedCard, topCard)
-                            .flatMap(processCardResult ->
-                                    applyTurnResult(roomId, gameState, processCardResult)
-                                            .then(gameService.calculateAndApplyScores(roomId, gameState))
-                                            .map(newGs -> new TurnResultContext(submittedCard, topCard, processCardResult, newGs))
-                            );
-                });
-    }
-
-    //getAndLossCard가 이미 확정된 상황에서 redis에 반영하기만 하는 코드
-    private Mono<Void> applyTurnResult(long roomId, GameState gameState, ProcessCardResult processCardResult) {
-        if (processCardResult.isChoiceRequired()) {
-            return Mono.empty();
-        }
-
-        Mono<Void> precedingOperation = Mono.empty();
-        if (processCardResult.isClaimOpponentPi()) {
-            precedingOperation = gameService.loseCard(roomId, gameState.getOtherPlayer(), processCardResult.getMoveCard());
-        }
-        List<Card> acquiredCards = processCardResult.getAcquiredCards();
-        return precedingOperation
-                .then(gameService.acquireCards(roomId, gameState.getCurrentPlayer(), acquiredCards));
-    }
-
-    private Mono<Void> handleCardSubmissionResult(ProcessCardResult processCardResult, GameState gameState, Player player) {
-        long roomId = gameState.getRoomId();
-
-        if (processCardResult.isChoiceRequired()) {
-            return gameMessageSender.sendChooseFloorCardMessage(roomId, player, processCardResult.getAcquiredCards());
-        }
-
-        Mono<Void> messagingMono;
-        if (processCardResult.getSpecialEvent()== SpecialEvent.PPEOK) {
-            messagingMono = Mono.empty();
-        } else if (processCardResult.isClaimOpponentPi()) {
-            messagingMono = gameMessageSender.sendMovingCardMessage(roomId, player, gameState.getOtherPlayer(), processCardResult.getMoveCard())
-                    .then(gameMessageSender.sendAcquiredCardMessage(roomId, player, processCardResult.getAcquiredCards()));
-        } else {
-            messagingMono = gameMessageSender.sendAcquiredCardMessage(roomId, player, processCardResult.getAcquiredCards());
-        }
-
-        return messagingMono.then(gameMessageSender.sendSpecialEventMessageIfNeeded(roomId, player, processCardResult))
-                .then(proceedToNextTurn(gameState));
-    }
-
-    public Mono<Void> handleFloorSelectEvent(RequestEvent<?> event, GameState gameState, Player player) {
-        long roomId = gameState.getRoomId();
-
-        return executeFloorSelectionStateUpdate((RequestEvent<NormalSubmitReq>) event, gameState, player)
-                .flatMap(context -> {
-                    if (context.isChoiceRequired()) {
-                        return gameMessageSender.sendChooseFloorCardMessage(roomId, player, context.result().getAcquiredCards());
+                    Mono<Void> handleResult;
+                    if (ctx.isChoiceRequired()) {
+                        handleResult = gameMessageSender.sendChooseFloorCardMessage(roomId, player, ctx.cardResult().getAcquiredCards());
+                    } else {
+                        handleResult = broadcastTurnResult(roomId, player, ctx.updatedGameState(), ctx.cardResult());
                     }
 
-                    Mono<Void> sendAcquired = gameMessageSender.sendAcquiredCardMessage(roomId, player, context.result().getAcquiredCards());
-
-                    ScoreInfoRes scoreInfoRes = ScoreInfoRes.from(context.updatedGameState());
-                    Mono<Void> sendTurnInfo = gameMessageSender.sendTurnInfo(context.updatedGameState());
-                    Mono<Void> sendScoreInfo = gameMessageSender.sendScoreInfo(roomId, scoreInfoRes);
-
-                    return sendAcquired
-                            .then(Mono.when(sendTurnInfo, sendScoreInfo));
+                    return sendInfos.then(handleResult);
                 });
     }
 
-    @GameLock(key = "'game:' + #gameState.roomId")
-    public Mono<FloorSelectContext> executeFloorSelectionStateUpdate(RequestEvent<NormalSubmitReq> event, GameState gameState, Player player) {
+    private Mono<Void> handleFloorSelect(RequestEvent<NormalSubmitReq> event, GameState gameState, Player player) {
         long roomId = gameState.getRoomId();
 
-        return gameService.selectFloorCard(gameState, player, event)
-                .flatMap(result -> {
-                    if (result.isChoiceRequired()) {
-                        return Mono.just(new FloorSelectContext(result, gameState, true));
+        return gamePlayService.executeFloorSelection(roomId, gameState, player, event)
+                .flatMap(ctx -> {
+                    if (ctx.isChoiceRequired()) {
+                        return gameMessageSender.sendChooseFloorCardMessage(roomId, player, ctx.cardResult().getAcquiredCards());
                     }
 
-                    return applyTurnResult(roomId, gameState, result)
-                            .then(gameService.setNextTurn(gameState))
-                            .flatMap(nextState ->
-                                    gameService.setGameInProgress(nextState)
-                                            .thenReturn(new FloorSelectContext(result, nextState, false))
-                            );
+                    Mono<Void> sendAcquired = gameMessageSender.sendAcquiredCardMessage(roomId, player, ctx.cardResult().getAcquiredCards());
+                    Mono<Void> broadcastNextTurn = broadcastNextTurnInfo(ctx.updatedGameState());
+
+                    return sendAcquired.then(broadcastNextTurn);
                 });
     }
 
-    private Mono<Void> proceedToNextTurn(GameState gameState) {
-        return gameService.setNextTurn(gameState)
-                .flatMap(updatedGameState -> {
-                    Mono<Void> saveStateMono = gameService.setGameInProgress(updatedGameState);
 
-                    ScoreInfoRes scoreInfoRes = ScoreInfoRes.from(updatedGameState);
-                    Mono<Void> sendTurnInfoMono = gameMessageSender.sendTurnInfo(updatedGameState);
-                    Mono<Void> sendScoreInfoMono = gameMessageSender.sendScoreInfo(updatedGameState.getRoomId(), scoreInfoRes);
+    private Mono<Void> broadcastTurnResult(long roomId, Player player, GameState gameState, ProcessCardResult result) {
+        Mono<Void> sendAcquired = Mono.empty();
 
-                    return saveStateMono.then(Mono.when(sendTurnInfoMono, sendScoreInfoMono));
-                });
+        if (result.isClaimOpponentPi()) {
+            sendAcquired = gameMessageSender.sendMovingCardMessage(roomId, player, gameState.getOtherPlayer(), result.getMoveCard());
+        }
+
+        if (result.getSpecialEvent() != SpecialEvent.PPEOK) {
+            sendAcquired = sendAcquired.then(gameMessageSender.sendAcquiredCardMessage(roomId, player, result.getAcquiredCards()));
+        }
+
+        Mono<Void> sendSpecial = gameMessageSender.sendSpecialEventMessageIfNeeded(roomId, player, result);
+
+        return sendAcquired
+                .then(sendSpecial)
+                .then(gamePlayService.proceedToNextTurn(gameState))
+                .flatMap(this::broadcastNextTurnInfo);
+    }
+
+    private Mono<Void> broadcastNextTurnInfo(GameState nextState) {
+        ScoreInfoRes scoreInfoRes = ScoreInfoRes.from(nextState);
+        return Mono.when(
+                gameMessageSender.sendTurnInfo(nextState),
+                gameMessageSender.sendScoreInfo(nextState.getRoomId(), scoreInfoRes)
+        );
     }
 }
