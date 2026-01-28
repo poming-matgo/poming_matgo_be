@@ -7,6 +7,7 @@ import com.pomingmatgo.gameservice.api.response.websocket.LeadSelectionRes;
 import com.pomingmatgo.gameservice.domain.GameState;
 import com.pomingmatgo.gameservice.domain.InstalledCard;
 import com.pomingmatgo.gameservice.domain.Player;
+import com.pomingmatgo.gameservice.domain.card.Card;
 import com.pomingmatgo.gameservice.domain.service.matgo.PreGameService;
 import com.pomingmatgo.gameservice.global.MessageSender;
 import com.pomingmatgo.gameservice.global.WebSocketResDto;
@@ -17,6 +18,8 @@ import org.springframework.web.reactive.socket.WebSocketSession;
 import reactor.core.publisher.Mono;
 
 import java.util.List;
+import java.util.Map;
+import java.util.stream.Collectors;
 
 import static com.pomingmatgo.gameservice.domain.Player.*;
 
@@ -140,12 +143,19 @@ public class WsPreGameHandler {
                         .map(Enum::name)
                         .toList());
 
+        Map<Integer, List<Card>> revealedCards = installedCard.getRevealedCard().stream()
+                .collect(Collectors.groupingBy(Card::getMonth));
+
         WebSocketSession player1Session = sessionManager.getSession(roomId, 1);
         WebSocketSession player2Session = sessionManager.getSession(roomId, 2);
 
         return Mono.when(
                 messageSender.sendMessageToSession(player1Session, ret1),
-                messageSender.sendMessageToSession(player2Session, ret2)
+                messageSender.sendMessageToSession(player2Session, ret2),
+                messageSender.sendMessageToAllUser(
+                        roomId,
+                        WebSocketResDto.of(PLAYER_NOTHING, "DISTRIBUTED_FLOOD_CARD", "카드 획득", revealedCards)
+                )
         );
     }
 
