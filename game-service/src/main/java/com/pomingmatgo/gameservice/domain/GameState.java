@@ -7,6 +7,7 @@ import lombok.*;
 import org.springframework.data.annotation.Id;
 
 import java.io.Serializable;
+import java.util.Objects;
 
 import static com.pomingmatgo.gameservice.domain.Player.PLAYER_1;
 import static com.pomingmatgo.gameservice.domain.Player.PLAYER_2;
@@ -26,6 +27,8 @@ public class GameState implements Serializable {
     int leadingPlayer;
     int round;
     int currentTurn;
+    int player1Score;
+    int player2Score;
 
     @Builder.Default
     private GamePhase phase = GamePhase.IN_PROGRESS;
@@ -38,10 +41,10 @@ public class GameState implements Serializable {
     }
 
     public int getPlayerNumber(long userId) {
-        if (userId == this.player1Id) {
+        if (Objects.equals(this.player1Id, userId)) {
             return 1;
         }
-        if (userId == this.player2Id) {
+        if (Objects.equals(this.player2Id, userId)) {
             return 2;
         }
         throw new WebSocketBusinessException(WebSocketErrorCode.NOT_IN_ROOM);

@@ -11,8 +11,8 @@ import com.pomingmatgo.gameservice.domain.ChooseLeadPlayer;
 import com.pomingmatgo.gameservice.domain.repository.GameStateRepository;
 import com.pomingmatgo.gameservice.domain.repository.InstalledCardRepository;
 import com.pomingmatgo.gameservice.domain.repository.LeadingPlayerRepository;
-import com.pomingmatgo.gameservice.global.exception.WebSocketBusinessException;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
@@ -21,10 +21,9 @@ import java.util.*;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.stream.Collectors;
 
-import static com.pomingmatgo.gameservice.global.exception.WebSocketErrorCode.ALREADY_SELECTED_CARD;
-
 @Service
 @RequiredArgsConstructor
+@Slf4j
 public class PreGameService {
     private final LeadingPlayerRepository leadingPlayerRepository;
     private final InstalledCardRepository installedCardRepository;
@@ -55,6 +54,16 @@ public class PreGameService {
                 .flatMap(selectedCards -> leadingPlayerRepository.saveSelectedCard(selectedCards, roomId));
     }
 
+    public Mono<Boolean> isConfusedPlayer(long roomId, Player player) {
+        Flux<Card> cardFlux = installedCardRepository.getPlayerCards(roomId, player);
+
+        return cardFlux
+                .groupBy(Card::getMonth)
+                .flatMap(group -> group.count().map(count -> count == 4))
+                .any(Boolean::booleanValue);
+    }
+
+    @GameLock(key = "'game:' + #roomId + ':lead:playerChoice'")
     public Mono<Void> selectCard(RequestEvent<LeadSelectionReq> event, GameState gameState, Player player) {
         Long roomId = gameState.getRoomId();
         Mono<ChooseLeadPlayer> selectedCardsMono = leadingPlayerRepository.getPlayerSelectedCard(roomId);

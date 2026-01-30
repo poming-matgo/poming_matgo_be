@@ -9,6 +9,7 @@ import org.springframework.boot.autoconfigure.data.redis.RedisAutoConfiguration;
 import org.springframework.boot.autoconfigure.data.redis.RedisReactiveAutoConfiguration;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.context.annotation.Primary;
 import org.springframework.data.redis.connection.ReactiveRedisConnectionFactory;
 import org.springframework.data.redis.connection.lettuce.LettuceConnectionFactory;
 import org.springframework.data.redis.core.ReactiveRedisOperations;
@@ -29,6 +30,7 @@ public class RedisConfig {
     private int port;
 
     @Bean
+    @Primary
     public ReactiveRedisConnectionFactory redisConnectionFactory() {
         return new LettuceConnectionFactory(host, port);
     }
@@ -49,6 +51,19 @@ public class RedisConfig {
 
     @Bean(name="cardRedisTemplate")
     public ReactiveRedisOperations<String, String> cardRedisTemplate(ReactiveRedisConnectionFactory redisConnectionFactory) {
+        Jackson2JsonRedisSerializer<String> serializer = new Jackson2JsonRedisSerializer<>(String.class);
+
+        RedisSerializationContext.RedisSerializationContextBuilder<String, String> builder = RedisSerializationContext
+                .newSerializationContext(new StringRedisSerializer());
+
+        RedisSerializationContext<String, String> context = builder.value(serializer).hashValue(serializer)
+                .hashKey(serializer).build();
+
+        return new ReactiveRedisTemplate<>(redisConnectionFactory, context);
+    }
+
+    @Bean(name="acquiredCardRedisTemplate")
+    public ReactiveRedisOperations<String, String> acquiredCardRedisTemplate(ReactiveRedisConnectionFactory redisConnectionFactory) {
         Jackson2JsonRedisSerializer<String> serializer = new Jackson2JsonRedisSerializer<>(String.class);
 
         RedisSerializationContext.RedisSerializationContextBuilder<String, String> builder = RedisSerializationContext

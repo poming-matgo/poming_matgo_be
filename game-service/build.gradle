@@ -9,7 +9,7 @@ version = '0.0.1-SNAPSHOT'
 
 java {
     toolchain {
-        languageVersion = JavaLanguageVersion.of(17)
+        languageVersion = JavaLanguageVersion.of(21)
     }
 }
 
@@ -26,6 +26,8 @@ repositories {
 dependencies {
     implementation 'org.springframework.boot:spring-boot-starter-data-redis-reactive'
     implementation 'org.springframework.boot:spring-boot-starter-webflux'
+    implementation 'org.redisson:redisson-spring-boot-starter:3.52.0'
+    implementation 'org.springframework.boot:spring-boot-starter-aop'
     runtimeOnly 'io.projectreactor:reactor-tools'
     //implementation 'org.springframework.boot:spring-boot-starter-websocket'
     compileOnly 'org.projectlombok:lombok'

@@ -11,5 +11,5 @@ import lombok.Setter;
 public class AnnounceRoundRes {
     private int round;
     private int turn;
-    private Player player;
+    private Player curPlayer;
 }

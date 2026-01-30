@@ -6,22 +6,19 @@ import com.pomingmatgo.gameservice.domain.*;
 import com.pomingmatgo.gameservice.domain.card.Card;
 import com.pomingmatgo.gameservice.domain.card.CardType;
 import com.pomingmatgo.gameservice.domain.card.SpecialType;
+import com.pomingmatgo.gameservice.domain.repository.AcquiredCardRepository;
 import com.pomingmatgo.gameservice.domain.repository.GameStateRepository;
 import com.pomingmatgo.gameservice.domain.repository.InstalledCardRepository;
+import com.pomingmatgo.gameservice.domain.service.matgo.calculatescore.ScoreCalculator;
 import com.pomingmatgo.gameservice.global.exception.WebSocketBusinessException;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
-import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 
-import java.util.ArrayList;
-import java.util.Collections;
-import java.util.List;
-import java.util.Optional;
+import java.util.*;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
-import static com.pomingmatgo.gameservice.domain.card.SpecialType.SSANG_PI;
 import static com.pomingmatgo.gameservice.global.exception.WebSocketErrorCode.*;
 
 
@@ -30,18 +27,43 @@ import static com.pomingmatgo.gameservice.global.exception.WebSocketErrorCode.*;
 public class GameService {
     private final InstalledCardRepository installedCardRepository;
     private final GameStateRepository gameStateRepository;
-    public Mono<Boolean> isConfusedPlayer(long roomId, Player player) {
-        Flux<Card> cardFlux = installedCardRepository.getPlayerCards(roomId, player);
+    private final AcquiredCardRepository acquiredCardRepository;
+    private final ScoreCalculator scoreCalculator;
 
-        return cardFlux
-                .groupBy(Card::getMonth)
-                .flatMap(group -> group.count().map(count -> count == 4))
-                .any(Boolean::booleanValue);
+    public Mono<Void> setGameInProgress(GameState gameState) {
+        return gameStateRepository.save(gameState).then();
+    }
+    public Mono<GameState> calculateAndApplyScores(long roomId, GameState gameState) {
+        Mono<List<Card>> player1Card = acquiredCardRepository.getAllCards(roomId, 1);
+        Mono<List<Card>> player2Card = acquiredCardRepository.getAllCards(roomId, 2);
+        return Mono.zip(player1Card, player2Card)
+                .flatMap(tuple -> {
+                    List<Card> player1Cards = tuple.getT1();
+                    List<Card> player2Cards = tuple.getT2();
+
+                    int player1Score = scoreCalculator.calculateTotalScore(player1Cards);
+                    int player2Score = scoreCalculator.calculateTotalScore(player2Cards);
+
+                    GameState newState = gameState.toBuilder()
+                            .player1Score(player1Score)
+                            .player2Score(player2Score)
+                            .build();
+                    return Mono.just(newState);
+                });
+    }
+
+    public Mono<Void> acquireCards(long roomId, Player player, List<Card> acquiredCards) {
+        return acquiredCardRepository.addCards(roomId, player.getNumber(), acquiredCards).then();
+    }
+
+    public Mono<Void> loseCard(long roomId, Player player,Card lostCard) {
+        return acquiredCardRepository.removeCard(roomId, player.getNumber(), lostCard).then();
     }
 
     public Mono<Card> getTopCard(long roomId) {
         return installedCardRepository.getTopCard(roomId);
     }
+
 
     public Mono<Card> submitCardEvent(long roomId, Player player, RequestEvent<NormalSubmitReq> event) {
         int cardIndex = event.getData().getCardIndex();
@@ -70,30 +92,53 @@ public class GameService {
     private Mono<ProcessCardResult> handleSameMonthCards(GameState gameState, Card submittedCard, Card turnedCard) {
         int month = turnedCard.getMonth();
         long roomId = gameState.getRoomId();
+
         return installedCardRepository.getRevealedCardByMonth(roomId, month)
                 .collectList()
                 .flatMap(cardStack -> {
-                    if (cardStack.size() != 1) {
-                        List<Card> acquiredCards = new ArrayList<>();
-                        acquiredCards.add(turnedCard);
-                        acquiredCards.add(submittedCard);
-                        acquiredCards.addAll(cardStack);
+                    boolean isPpeokCondition = (cardStack.size() == 1);
 
-                        return installedCardRepository.deleteAllRevealedCardByMonth(roomId, month)
-                                .then(Mono.just(ProcessCardResult.immediate(acquiredCards)));
-                        //todo: 다른 사람 카드 가져오는 로직 추가
+                    if (isPpeokCondition) {
+                        return processPpeok(roomId, submittedCard, turnedCard);
                     } else {
-                        //뻑
-                        return installedCardRepository.saveRevealedCard(List.of(turnedCard, submittedCard), roomId)
-                                .then(Mono.just(ProcessCardResult.immediate(Collections.emptyList())));
+                        return processCardAcquisition(gameState, submittedCard, turnedCard, cardStack);
                     }
                 });
+    }
+
+    private Mono<ProcessCardResult> processCardAcquisition(GameState gameState, Card submittedCard, Card turnedCard, List<Card> cardStack) {
+        long roomId = gameState.getRoomId();
+        int month = turnedCard.getMonth();
+
+        List<Card> acquiredCards = Stream.concat(
+                Stream.of(turnedCard, submittedCard),
+                cardStack.stream()
+        ).collect(Collectors.toList());
+
+        Mono<Card> moveCardMono = determineCardToMove(
+                gameState.getOtherPlayer(),
+                roomId
+        );
+
+        return installedCardRepository.deleteAllRevealedCardByMonth(roomId, month)
+                .then(moveCardMono)
+                .map(movedCard -> {
+                    acquiredCards.add(movedCard);
+                    return cardStack.size() == 1
+                            ? ProcessCardResult.jjok(acquiredCards, movedCard)
+                            : ProcessCardResult.ttadak(acquiredCards, movedCard);
+                });
+    }
+
+    private Mono<ProcessCardResult> processPpeok(long roomId, Card submittedCard, Card turnedCard) {
+        return installedCardRepository.saveRevealedCard(List.of(turnedCard, submittedCard), roomId)
+                .then(Mono.just(ProcessCardResult.ppeok(Collections.emptyList())));
     }
 
     private Mono<ProcessCardResult> handleDifferentMonthCards(GameState gameState, Card submittedCard, Card turnedCard) {
         return processCardByMonth(gameState, submittedCard, turnedCard, null)
                 .flatMap(submittedResult -> {
-                    if (submittedResult.isChoiceRequired()) {
+                    if (submittedResult.isChoiceRequired() || submittedResult.isClaimOpponentPi()) {
                         return Mono.just(submittedResult);
                     }
 
@@ -102,11 +147,10 @@ public class GameService {
                                 if (turnedResult.isChoiceRequired()) {
                                     return turnedResult;
                                 }
-
                                 List<Card> combinedList = new ArrayList<>(submittedResult.getAcquiredCards());
                                 combinedList.addAll(turnedResult.getAcquiredCards());
-
-                                return ProcessCardResult.immediate(combinedList);
+                                if(turnedResult.isClaimOpponentPi()) return ProcessCardResult.claimOpponentPi(combinedList, turnedResult.getMoveCard());
+                                else return ProcessCardResult.immediate(combinedList);
                             });
                 });
     }
@@ -146,17 +190,25 @@ public class GameService {
     }
 
     private Mono<ProcessCardResult> handleThreeCardsOnFloor(GameState gameState, Card submittedCard, List<Card> cardStack) {
-        return acquireAndClearFloorCards(gameState.getRoomId(), submittedCard.getMonth(), submittedCard, cardStack)
-                .flatMap(acquiredCards -> {
-                    Mono<Card> moveCardMono = moveCardPlayerToPlayer(
-                            gameState.getCurrentPlayer(),
-                            gameState.getOtherPlayer(),
-                            gameState.getRoomId()
-                    );
+        Mono<List<Card>> acquiredCardsMono = acquireAndClearFloorCards(
+                gameState.getRoomId(),
+                submittedCard.getMonth(),
+                submittedCard,
+                cardStack
+        );
 
-                    return moveCardMono.map(movedCard ->
-                            ProcessCardResult.claimOpponentPi(acquiredCards, movedCard)
-                    );
+        Mono<Card> moveCardMono = determineCardToMove(
+                gameState.getOtherPlayer(),
+                gameState.getRoomId()
+        );
+
+        return acquiredCardsMono.zipWith(moveCardMono)
+                .map(tuple -> {
+                    List<Card> acquiredCards = tuple.getT1();
+                    Card movedCard = tuple.getT2();
+
+                    acquiredCards.add(movedCard);
+                    return ProcessCardResult.claimOpponentPi(acquiredCards, movedCard);
                 });
     }
 
@@ -227,7 +279,8 @@ public class GameService {
     }
 
     private Mono<ProcessCardResult> finalizeTurn(GameState gameState, List<Card> prevCards, List<Card> newCards) {
-        List<Card> finalAcquiredCards = new ArrayList<>(prevCards);
+        List<Card> nonNullPrevCards = Optional.ofNullable(prevCards).orElse(Collections.emptyList());
+        List<Card> finalAcquiredCards = new ArrayList<>(nonNullPrevCards);
         finalAcquiredCards.addAll(newCards);
 
         GameState newGameState = gameState.toBuilder()
@@ -239,40 +292,31 @@ public class GameService {
                 .thenReturn(ProcessCardResult.immediate(finalAcquiredCards));
     }
 
-    public Mono<Card> moveCardPlayerToPlayer(Player fromPlayer, Player toPlayer, long roomId) {
-        Mono<List<Card>> toPlayerCardsMono = installedCardRepository.getPlayerCards(roomId, toPlayer).collectList();
-        Mono<List<Card>> fromPlayerCardsMono = installedCardRepository.getPlayerCards(roomId, fromPlayer).collectList();
-
-        return Mono.zip(toPlayerCardsMono, fromPlayerCardsMono)
-                .flatMap(tuple -> {
-                    List<Card> originalToPlayerCards = tuple.getT1();
-                    List<Card> originalFromPlayerCards = tuple.getT2();
-
-                    return Mono.justOrEmpty(findMovablePiCard(originalFromPlayerCards))
-                            .flatMap(cardToMove -> {
-                                List<Card> newFromPlayerCards = originalFromPlayerCards.stream()
-                                        .filter(card -> card != cardToMove)
-                                        .collect(Collectors.toList());
-
-                                List<Card> newToPlayerCards = new ArrayList<>(originalToPlayerCards);
-                                newToPlayerCards.add(cardToMove);
-
-                                Mono<Void> updateFromPlayer = installedCardRepository.updatePlayerCards(roomId, fromPlayer, newFromPlayerCards);
-                                Mono<Void> updateToPlayer = installedCardRepository.updatePlayerCards(roomId, toPlayer, newToPlayerCards);
-
-                                return Mono.when(updateFromPlayer, updateToPlayer)
-                                        .thenReturn(cardToMove);
-                            });
-                });
+    public Mono<Card> determineCardToMove(Player fromPlayer, long roomId) {
+        return acquiredCardRepository.getAllCards(roomId, fromPlayer.getNumber())
+                .flatMap(playerCards ->
+                        Mono.justOrEmpty(findMovablePiCard(playerCards))
+                );
     }
-
 
     private Optional<Card> findMovablePiCard(List<Card> playerCards) {
         return playerCards.stream()
-                .filter(c -> c.getType() == CardType.PI && c.getSpecialType() != SpecialType.SSANG_PI)
-                .findFirst()
-                .or(() -> playerCards.stream()
-                        .filter(c -> c.getSpecialType() == SpecialType.SSANG_PI)
-                        .findFirst());
+                .filter(c -> c.getType() == CardType.PI)
+                .min(Comparator.comparing(c -> c.getSpecialType() == SpecialType.SSANG_PI));
+    }
+
+    public Mono<GameState> setNextTurn(GameState gameState) {
+        GameState.GameStateBuilder builder = gameState.toBuilder()
+                .currentTurn((gameState.getCurrentTurn() == 1 ? 2 : 1))
+                .phase(GamePhase.IN_PROGRESS)
+                .choiceInfo(null);
+
+        if (gameState.getCurrentTurn() == 2) {
+            builder.round(gameState.getRound() + 1); // todo: 마지막 라운드는 향후 처리 예정
+        }
+
+        GameState newGameState = builder.build();
+
+        return Mono.just(newGameState);
     }
 }
