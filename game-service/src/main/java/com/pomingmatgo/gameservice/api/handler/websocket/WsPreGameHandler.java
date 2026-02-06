@@ -43,24 +43,25 @@ public class WsPreGameHandler {
         }
 
         return switch (eventType) {
-            case LEADER_SELECTION -> handleLeaderSelectionEvent(event, gameState, player);
+            case LEADER_SELECTION -> handleLeaderSelectionEvent((RequestEvent<LeadSelectionReq>)event, gameState, player);
         };
     }
 
-    private Mono<Void> handleLeaderSelectionEvent(RequestEvent<?> event, GameState gameState, Player player) {
+    private Mono<Void> handleLeaderSelectionEvent(RequestEvent<LeadSelectionReq> event, GameState gameState, Player player) {
         long roomId = gameState.getRoomId();
 
-        return preGameService.selectCard((RequestEvent<LeadSelectionReq>)event, gameState, player)
-                .then(sendLeaderSelectionMessage(roomId, player))
+        int cardIndex = event.getData().getCardIndex();
+        return preGameService.selectCard(cardIndex, gameState, player)
+                .then(sendLeaderSelectionMessage(roomId, player, cardIndex))
                 .then(preGameService.isAllPlayerCardSelected(roomId))
                 .filter(allSelected -> allSelected)
                 .flatMap(allSelected -> afterleaderSelectionCardAllSelection(gameState));
     }
 
-    private Mono<Void> sendLeaderSelectionMessage(long roomId, Player player) {
+    private Mono<Void> sendLeaderSelectionMessage(long roomId, Player player, int cardIndex) {
         return messageSender.sendMessageToAllUser(
                 roomId,
-                WebSocketResDto.of(player, "LEADER_SELECTION", "선두 플레이어 선택")
+                WebSocketResDto.of(player, "LEADER_SELECTION", "선두 플레이어 선택", cardIndex)
         );
     }
 

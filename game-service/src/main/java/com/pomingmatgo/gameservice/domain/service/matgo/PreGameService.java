@@ -64,10 +64,10 @@ public class PreGameService {
     }
 
     @GameLock(key = "'game:' + #roomId + ':lead:playerChoice'")
-    public Mono<Void> selectCard(RequestEvent<LeadSelectionReq> event, GameState gameState, Player player) {
+    public Mono<Void> selectCard(int cardIndex, GameState gameState, Player player) {
         Long roomId = gameState.getRoomId();
         Mono<ChooseLeadPlayer> selectedCardsMono = leadingPlayerRepository.getPlayerSelectedCard(roomId);
-        Mono<Card> curUserSelectedCardMono = leadingPlayerRepository.getCardByIndex(roomId, event.getData().getCardIndex());
+        Mono<Card> curUserSelectedCardMono = leadingPlayerRepository.getCardByIndex(roomId, cardIndex);
 
         return Mono.zip(selectedCardsMono, curUserSelectedCardMono)
                 .flatMap(tuple -> {
