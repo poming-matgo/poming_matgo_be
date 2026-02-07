@@ -38,7 +38,7 @@ public class GameMessageSender {
     public Mono<Void> sendTopCardInfo(long roomId, Player player, Card card) {
         return messageSender.sendMessageToAllUser(
                 roomId,
-                WebSocketResDto.of(player, "SUBMIT_CARD", "상단 카드 정보", card)
+                WebSocketResDto.of(player, "CARD_REVEALED", "상단 카드 정보", card)
         );
     }
 
