@@ -155,7 +155,7 @@ public class WsPreGameHandler {
                 messageSender.sendMessageToSession(player2Session, ret2),
                 messageSender.sendMessageToAllUser(
                         roomId,
-                        WebSocketResDto.of(PLAYER_NOTHING, "DISTRIBUTED_FLOOD_CARD", "카드 획득", revealedCards)
+                        WebSocketResDto.of(PLAYER_NOTHING, "DISTRIBUTED_FLOOR_CARD", "바닥패 정보", revealedCards)
                 )
         );
     }
