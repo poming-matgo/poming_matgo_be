@@ -24,6 +24,7 @@ public class GameState implements Serializable {
     Long player2Id;
     boolean player1Ready;
     boolean player2Ready;
+    boolean gameStarted;
     int leadingPlayer;
     int round;
     int currentTurn;
@@ -58,6 +59,13 @@ public class GameState implements Serializable {
             builder.player2Ready(isReady);
         }
         return builder.build();
+    }
+
+    public static GameState createEmptyRoom(Long roomId) {
+        return GameState.builder()
+                .roomId(roomId)
+                .phase(GamePhase.NONE)
+                .build();
     }
 
     @JsonIgnore

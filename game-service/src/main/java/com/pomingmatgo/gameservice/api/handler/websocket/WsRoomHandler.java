@@ -62,6 +62,7 @@ public class WsRoomHandler {
     private Mono<Void> checkAndProceedIfAllReady(GameState updatedGameState) {
         return Mono.just(updatedGameState)
                 .filter(roomService::checkAllPlayersReady)
+                .flatMap(roomService::startGame)
                 .flatMap(state -> handleAllReadyEvent(state.getRoomId())
                         .then(preGameService.pickFiveCardsAndSave(state.getRoomId()))
                 );

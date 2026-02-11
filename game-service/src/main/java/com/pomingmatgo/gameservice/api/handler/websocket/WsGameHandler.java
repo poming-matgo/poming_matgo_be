@@ -15,6 +15,8 @@ import reactor.core.publisher.Mono;
 
 import java.util.List;
 
+import static com.pomingmatgo.gameservice.domain.GamePhase.*;
+import static com.pomingmatgo.gameservice.global.exception.WebSocketErrorCode.INVALID_GAME_PHASE;
 import static com.pomingmatgo.gameservice.global.exception.WebSocketErrorCode.NOT_YOUR_TURN;
 
 @Component
@@ -54,6 +56,10 @@ public class WsGameHandler {
     }
 
     private Mono<Void> handleNormalSubmit(RequestEvent<NormalSubmitReq> event, GameState gameState, Player player) {
+        if(gameState.getPhase() != IN_PROGRESS) {
+            return Mono.error(new WebSocketBusinessException(INVALID_GAME_PHASE));
+        }
+
         long roomId = gameState.getRoomId();
 
         return gamePlayService.executeNormalSubmit(roomId, gameState, player, event)
@@ -75,6 +81,9 @@ public class WsGameHandler {
     }
 
     private Mono<Void> handleFloorSelect(RequestEvent<NormalSubmitReq> event, GameState gameState, Player player) {
+        if(gameState.getPhase() != AWAITING_FLOOR_CARD_CHOICE) {
+            return Mono.error(new WebSocketBusinessException(INVALID_GAME_PHASE));
+        }
         long roomId = gameState.getRoomId();
 
         return gamePlayService.executeFloorSelection(roomId, gameState, player, event)

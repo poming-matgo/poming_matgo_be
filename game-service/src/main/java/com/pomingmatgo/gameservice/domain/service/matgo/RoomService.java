@@ -1,5 +1,6 @@
 package com.pomingmatgo.gameservice.domain.service.matgo;
 
+import com.pomingmatgo.gameservice.domain.GamePhase;
 import com.pomingmatgo.gameservice.domain.GameState;
 import com.pomingmatgo.gameservice.domain.Player;
 import com.pomingmatgo.gameservice.domain.repository.GameStateRepository;
@@ -11,6 +12,9 @@ import com.pomingmatgo.gameservice.global.session.SessionManager;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import reactor.core.publisher.Mono;
+
+import static com.pomingmatgo.gameservice.domain.GamePhase.DETERMINING_STARTING_PLAYER;
+import static com.pomingmatgo.gameservice.domain.GamePhase.NONE;
 
 
 @Service
@@ -80,7 +84,7 @@ public class RoomService {
     }
 
     public Mono<Long> createRoom(Long roomId) {
-        GameState gameState = new GameState(roomId);
+        GameState gameState = GameState.createEmptyRoom(roomId);
 
         return sessionManager.addRoom(roomId)
                 .then(gameStateRepository.create(gameState))
@@ -113,4 +117,17 @@ public class RoomService {
         return gs.isPlayer1Ready() && gs.isPlayer2Ready();
     }
 
+    public Mono<GameState> startGame(GameState gameState) {
+        if (gameState == null) {
+            return Mono.error(new WebSocketBusinessException(WebSocketErrorCode.NOT_EXISTED_ROOM));
+        }
+
+        GameState.GameStateBuilder builder = gameState.toBuilder();
+        builder.gameStarted(true)
+                .phase(DETERMINING_STARTING_PLAYER);
+
+        GameState newState = builder.build();
+        return gameStateRepository.save(newState)
+                .thenReturn(newState);
+    }
 }

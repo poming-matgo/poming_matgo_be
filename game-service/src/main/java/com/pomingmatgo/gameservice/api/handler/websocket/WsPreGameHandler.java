@@ -4,6 +4,7 @@ import com.pomingmatgo.gameservice.api.handler.event.RequestEvent;
 import com.pomingmatgo.gameservice.api.request.websocket.LeadSelectionReq;
 import com.pomingmatgo.gameservice.api.response.websocket.AnnounceRoundRes;
 import com.pomingmatgo.gameservice.api.response.websocket.LeadSelectionRes;
+import com.pomingmatgo.gameservice.domain.GamePhase;
 import com.pomingmatgo.gameservice.domain.GameState;
 import com.pomingmatgo.gameservice.domain.InstalledCard;
 import com.pomingmatgo.gameservice.domain.Player;
@@ -11,6 +12,7 @@ import com.pomingmatgo.gameservice.domain.card.Card;
 import com.pomingmatgo.gameservice.domain.service.matgo.PreGameService;
 import com.pomingmatgo.gameservice.global.MessageSender;
 import com.pomingmatgo.gameservice.global.WebSocketResDto;
+import com.pomingmatgo.gameservice.global.exception.WebSocketBusinessException;
 import com.pomingmatgo.gameservice.global.session.SessionManager;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
@@ -21,7 +23,9 @@ import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
 
+import static com.pomingmatgo.gameservice.domain.GamePhase.DETERMINING_STARTING_PLAYER;
 import static com.pomingmatgo.gameservice.domain.Player.*;
+import static com.pomingmatgo.gameservice.global.exception.WebSocketErrorCode.INVALID_GAME_PHASE;
 
 @Component
 @RequiredArgsConstructor
@@ -42,6 +46,9 @@ public class WsPreGameHandler {
             return Mono.error(new IllegalArgumentException("Unsupported event type: " + event.getEventType().getSubType()));
         }
 
+        if(gameState.getPhase() != DETERMINING_STARTING_PLAYER) {
+            return Mono.error(new WebSocketBusinessException(INVALID_GAME_PHASE));
+        }
         return switch (eventType) {
             case LEADER_SELECTION -> handleLeaderSelectionEvent((RequestEvent<LeadSelectionReq>)event, gameState, player);
         };
@@ -116,7 +123,7 @@ public class WsPreGameHandler {
     }
 
     private Mono<Void> startFirstTurn(GameState gameState) {
-        return preGameService.setRoundInfo(gameState)
+        return preGameService.setFirstTurn(gameState)
                 .flatMap(this::announceTurnToAllPlayers);
     }
 

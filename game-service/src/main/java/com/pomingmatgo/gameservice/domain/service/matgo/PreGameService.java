@@ -3,11 +3,8 @@ package com.pomingmatgo.gameservice.domain.service.matgo;
 import com.pomingmatgo.gameservice.api.handler.event.RequestEvent;
 import com.pomingmatgo.gameservice.api.request.websocket.LeadSelectionReq;
 import com.pomingmatgo.gameservice.api.response.websocket.LeadSelectionRes;
-import com.pomingmatgo.gameservice.domain.GameState;
-import com.pomingmatgo.gameservice.domain.InstalledCard;
-import com.pomingmatgo.gameservice.domain.Player;
+import com.pomingmatgo.gameservice.domain.*;
 import com.pomingmatgo.gameservice.domain.card.Card;
-import com.pomingmatgo.gameservice.domain.ChooseLeadPlayer;
 import com.pomingmatgo.gameservice.domain.repository.GameStateRepository;
 import com.pomingmatgo.gameservice.domain.repository.InstalledCardRepository;
 import com.pomingmatgo.gameservice.domain.repository.LeadingPlayerRepository;
@@ -20,6 +17,8 @@ import reactor.core.publisher.Mono;
 import java.util.*;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.stream.Collectors;
+
+import static com.pomingmatgo.gameservice.domain.GamePhase.IN_PROGRESS;
 
 @Service
 @RequiredArgsConstructor
@@ -132,9 +131,9 @@ public class PreGameService {
         ).thenReturn(installedCard).retry(3);
     }
 
-    public Mono<GameState> setRoundInfo(GameState gameState) {
+    public Mono<GameState> setFirstTurn(GameState gameState) {
         GameState.GameStateBuilder builder = gameState.toBuilder();
-        GameState newState = builder.round(1).currentTurn(1).build();
+        GameState newState = builder.round(1).currentTurn(1).phase(IN_PROGRESS).build();
 
         return gameStateRepository.save(newState)
                 .thenReturn(newState);

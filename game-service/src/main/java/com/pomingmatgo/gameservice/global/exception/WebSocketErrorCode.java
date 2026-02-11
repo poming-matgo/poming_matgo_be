@@ -5,6 +5,8 @@ import lombok.Getter;
 @Getter
 public enum WebSocketErrorCode {
 
+    //게임 phase
+    INVALID_GAME_PHASE("현재 게임 상태에서 허용되지 않는 동작입니다."),
 
     //유저
     INVALID_USER("유효하지 않은 사용자입니다."),
