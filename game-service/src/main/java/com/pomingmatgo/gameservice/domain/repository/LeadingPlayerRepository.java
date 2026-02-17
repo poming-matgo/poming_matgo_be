@@ -54,11 +54,12 @@ public class LeadingPlayerRepository {
                 .map(Card::valueOf);
     }
 
-    public Flux<Card> getAllCards(Long roomId) {
+    public Mono<List<Card>> getAllCards(Long roomId) {
         String redisKey = generateSelectedFiveCardKey(roomId);
         return cardRedisOps.opsForList()
                 .range(redisKey, 0, -1)  // 전체 리스트 반환
-                .map(Card::valueOf);
+                .map(Card::valueOf)
+                .collectList();
     }
 
     public Mono<Void> savePlayerSelectedCard(Long roomId, ChooseLeadPlayer chooseLeadPlayer) {

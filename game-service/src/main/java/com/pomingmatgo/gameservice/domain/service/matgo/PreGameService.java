@@ -89,7 +89,7 @@ public class PreGameService {
 
     public Mono<LeadSelectionRes> getLeadSelectionRes(Long roomId) {
         return leadingPlayerRepository.getPlayerSelectedCard(roomId)
-                .zipWith(leadingPlayerRepository.getAllCards(roomId).collectList())
+                .zipWith(leadingPlayerRepository.getAllCards(roomId))
                 .map(tuple -> {
                     ChooseLeadPlayer chooseLeadPlayer = tuple.getT1();
                     List<Card> cards = tuple.getT2();
