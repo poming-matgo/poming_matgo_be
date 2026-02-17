@@ -54,12 +54,16 @@ public class PreGameService {
     }
 
     public Mono<Boolean> isConfusedPlayer(long roomId, Player player) {
-        Flux<Card> cardFlux = installedCardRepository.getPlayerCards(roomId, player);
-
-        return cardFlux
-                .groupBy(Card::getMonth)
-                .flatMap(group -> group.count().map(count -> count == 4))
-                .any(Boolean::booleanValue);
+        return installedCardRepository.getPlayerCards(roomId, player)
+                .map(cardList -> {
+                    if (cardList.isEmpty()) {
+                        return false;
+                    }
+                    return cardList.stream()
+                            .collect(Collectors.groupingBy(Card::getMonth, Collectors.counting()))
+                            .values().stream()
+                            .anyMatch(count -> count == 4);
+                });
     }
 
     @GameLock(key = "'game:' + #roomId + ':lead:playerChoice'")

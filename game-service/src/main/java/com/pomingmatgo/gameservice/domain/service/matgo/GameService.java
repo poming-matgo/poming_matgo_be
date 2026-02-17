@@ -68,7 +68,6 @@ public class GameService {
     public Mono<Card> submitCardEvent(long roomId, Player player, RequestEvent<NormalSubmitReq> event) {
         int cardIndex = event.getData().getCardIndex();
         return installedCardRepository.getPlayerCards(roomId, player)
-                .collectList()
                 .flatMap(playerCards -> {
                     if (cardIndex < 0 || cardIndex >= playerCards.size()) {
                         return Mono.error(new WebSocketBusinessException(INVALID_CARD));
@@ -94,7 +93,6 @@ public class GameService {
         long roomId = gameState.getRoomId();
 
         return installedCardRepository.getRevealedCardByMonth(roomId, month)
-                .collectList()
                 .flatMap(cardStack -> {
                     boolean isPpeokCondition = (cardStack.size() == 1);
 
@@ -160,7 +158,6 @@ public class GameService {
         long roomId = gameState.getRoomId();
 
         return installedCardRepository.getRevealedCardByMonth(roomId, month)
-                .collectList()
                 .flatMap(cardStack -> switch (cardStack.size()) {
                     case 0 -> handleZeroCardsOnFloor(card, roomId);
                     case 1 -> handleOneCardOnFloor(gameState, card, cardStack);

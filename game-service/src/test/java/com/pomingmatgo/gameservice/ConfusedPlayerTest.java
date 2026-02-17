@@ -13,6 +13,7 @@ import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import reactor.core.publisher.Flux;
+import reactor.core.publisher.Mono;
 import reactor.test.StepVerifier;
 
 import java.util.List;
@@ -56,7 +57,7 @@ class ConfusedPlayerTest {
     @ParameterizedTest(name = "[{index}] {0}")
     @MethodSource("chongtongTestCases")
     void isConfusedPlayer_shouldReturnCorrectState(Player player, List<Card> cards, boolean expectedResult) {
-        Flux<Card> playerCards = Flux.fromIterable(cards);
+        Mono<List<Card>> playerCards = Mono.just(cards);
         given(installedCardRepository.getPlayerCards(ROOM_ID, player))
                 .willReturn(playerCards);
 

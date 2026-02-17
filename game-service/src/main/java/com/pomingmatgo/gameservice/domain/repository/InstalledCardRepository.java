@@ -104,11 +104,12 @@ public class InstalledCardRepository {
         return saveCards(cards, generateHiddenCardKey(roomId));
     }
 
-    public Flux<Card> getRevealedCardByMonth(long roomId, long month) {
+    public Mono<List<Card>> getRevealedCardByMonth(long roomId, long month) {
         String redisKey = generateRevealedCardKey(roomId, month);
         return redisOps.opsForSet()
                 .members(redisKey)
-                .map(Card::valueOf);
+                .map(Card::valueOf)
+                .collectList(); // Flux -> Mono<List>로 변환
     }
 
     public Mono<Card> getTopCard(long roomId) {
@@ -118,12 +119,14 @@ public class InstalledCardRepository {
                 .map(Card::valueOf);
     }
 
-    private Flux<Card> getCards(long roomId, String redisKey) {
+    private Mono<List<Card>> getCards(long roomId, String redisKey) {
         return redisOps.opsForList()
                 .range(redisKey, 0, -1)
-                .map(Card::valueOf);
+                .map(Card::valueOf)
+                .collectList(); // Flux -> Mono<List>로 변환
     }
-    public Flux<Card> getPlayerCards(Long roomId, Player player) {
+
+    public Mono<List<Card>> getPlayerCards(Long roomId, Player player) {
         return getCards(roomId, getKeyPrefixForPlayer(player, roomId));
     }
 
