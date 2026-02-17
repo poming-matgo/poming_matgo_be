@@ -46,6 +46,9 @@ public class InstalledCardRepository {
 
 
     public Mono<Boolean> saveCards(List<Card> cards, String redisKey) {
+        if (cards == null || cards.isEmpty()) {
+            return Mono.just(true);
+        }
         List<String> cardNames = cards.stream()
                 .map(Enum::name)
                 .toList();
