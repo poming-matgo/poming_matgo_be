@@ -139,21 +139,11 @@ public class GameService {
                     if (submittedResult.isChoiceRequired() || submittedResult.isClaimOpponentPi()) {
                         return Mono.just(submittedResult);
                     }
-
-                    return processCardByMonth(gameState, turnedCard, null, submittedResult.getAcquiredCards())
-                            .map(turnedResult -> {
-                                if (turnedResult.isChoiceRequired()) {
-                                    return turnedResult;
-                                }
-                                List<Card> combinedList = new ArrayList<>(submittedResult.getAcquiredCards());
-                                combinedList.addAll(turnedResult.getAcquiredCards());
-                                if(turnedResult.isClaimOpponentPi()) return ProcessCardResult.claimOpponentPi(combinedList, turnedResult.getMoveCard());
-                                else return ProcessCardResult.immediate(combinedList);
-                            });
+                    return processCardByMonth(gameState, turnedCard, null, submittedResult.getAcquiredCards());
                 });
     }
 
-    private Mono<ProcessCardResult> processCardByMonth(GameState gameState, Card card, Card nextCard, List<Card> prevResult) {
+    private Mono<ProcessCardResult> processCardByMonth(GameState gameState, Card card, Card nextCard, List<Card> prevAcquiredCards) {
         int month = card.getMonth();
         long roomId = gameState.getRoomId();
 
@@ -161,10 +151,26 @@ public class GameService {
                 .flatMap(cardStack -> switch (cardStack.size()) {
                     case 0 -> handleZeroCardsOnFloor(card, roomId);
                     case 1 -> handleOneCardOnFloor(gameState, card, cardStack);
-                    case 2 -> handleTwoCardsOnFloor(gameState, card, cardStack, nextCard, prevResult);
+                    case 2 -> handleTwoCardsOnFloor(gameState, card, cardStack, nextCard, prevAcquiredCards);
                     case 3 -> handleThreeCardsOnFloor(gameState, card, cardStack);
-                    default-> {
-                        yield Mono.just(ProcessCardResult.immediate(Collections.emptyList()));
+                    default -> Mono.just(ProcessCardResult.immediate(Collections.emptyList()));
+                })
+                .map(currentResult -> {
+                    if (prevAcquiredCards == null || prevAcquiredCards.isEmpty()) {
+                        return currentResult;
+                    }
+
+                    if (currentResult.isChoiceRequired()) {
+                        return currentResult;
+                    }
+
+                    List<Card> combinedList = new ArrayList<>(prevAcquiredCards);
+                    combinedList.addAll(currentResult.getAcquiredCards());
+
+                    if (currentResult.isClaimOpponentPi()) {
+                        return ProcessCardResult.claimOpponentPi(combinedList, currentResult.getMoveCard());
+                    } else {
+                        return ProcessCardResult.immediate(combinedList);
                     }
                 });
     }
