@@ -6,14 +6,12 @@ import com.pomingmatgo.gameservice.api.response.websocket.GameMessageSender;
 import com.pomingmatgo.gameservice.api.response.websocket.ScoreInfoRes;
 import com.pomingmatgo.gameservice.domain.GameState;
 import com.pomingmatgo.gameservice.domain.Player;
-import com.pomingmatgo.gameservice.domain.card.Card;
 import com.pomingmatgo.gameservice.domain.service.matgo.*;
 import com.pomingmatgo.gameservice.global.exception.WebSocketBusinessException;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
+import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
-
-import java.util.List;
 
 import static com.pomingmatgo.gameservice.domain.GamePhase.*;
 import static com.pomingmatgo.gameservice.global.exception.WebSocketErrorCode.INVALID_GAME_PHASE;
@@ -101,19 +99,22 @@ public class WsGameHandler {
 
 
     private Mono<Void> broadcastTurnResult(long roomId, Player player, GameState gameState, ProcessCardResult result) {
+        Mono<Void> sendMoveCards = Flux.fromIterable(result.getMoveCards())
+                .concatMap(card -> gameMessageSender.sendMovingCardMessage(roomId, player, gameState.getOtherPlayer(), card))
+                .then();
+
         Mono<Void> sendAcquired = Mono.empty();
-
-        if (result.isClaimOpponentPi()) {
-            sendAcquired = gameMessageSender.sendMovingCardMessage(roomId, player, gameState.getOtherPlayer(), result.getMoveCard());
+        if (!result.getSpecialEvents().contains(SpecialEvent.PPEOK)) {
+            sendAcquired = gameMessageSender.sendAcquiredCardMessage(roomId, player, result.getAcquiredCards());
         }
 
-        if (result.getSpecialEvent() != SpecialEvent.PPEOK) {
-            sendAcquired = sendAcquired.then(gameMessageSender.sendAcquiredCardMessage(roomId, player, result.getAcquiredCards()));
-        }
+        Mono<Void> sendSpecial = Flux.fromIterable(result.getSpecialEvents())
+                .concatMap(event -> gameMessageSender.sendSpecialEventMessageIfNeeded(roomId, player, event))
+                .then();
 
-        Mono<Void> sendSpecial = gameMessageSender.sendSpecialEventMessageIfNeeded(roomId, player, result);
-
-        return sendAcquired
+        // 4. 모든 작업을 순차적으로 연결
+        return sendMoveCards
+                .then(sendAcquired)
                 .then(sendSpecial)
                 .then(gamePlayService.proceedToNextTurn(gameState))
                 .flatMap(this::broadcastNextTurnInfo);

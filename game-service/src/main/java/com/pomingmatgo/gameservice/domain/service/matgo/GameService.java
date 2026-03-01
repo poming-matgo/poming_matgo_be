@@ -136,10 +136,11 @@ public class GameService {
     private Mono<ProcessCardResult> handleDifferentMonthCards(GameState gameState, Card submittedCard, Card turnedCard) {
         return processCardByMonth(gameState, submittedCard, turnedCard, null)
                 .flatMap(submittedResult -> {
-                    if (submittedResult.isChoiceRequired() || submittedResult.isClaimOpponentPi()) {
+                    if (submittedResult.isChoiceRequired()) {
                         return Mono.just(submittedResult);
                     }
-                    return processCardByMonth(gameState, turnedCard, null, submittedResult.getAcquiredCards());
+                    return processCardByMonth(gameState, turnedCard, null, null)
+                            .map(submittedResult::merge);
                 });
     }
 
@@ -167,11 +168,9 @@ public class GameService {
                     List<Card> combinedList = new ArrayList<>(prevAcquiredCards);
                     combinedList.addAll(currentResult.getAcquiredCards());
 
-                    if (currentResult.isClaimOpponentPi()) {
-                        return ProcessCardResult.claimOpponentPi(combinedList, currentResult.getMoveCard());
-                    } else {
-                        return ProcessCardResult.immediate(combinedList);
-                    }
+                    return currentResult.toBuilder()
+                            .acquiredCards(combinedList)
+                            .build();
                 });
     }
 

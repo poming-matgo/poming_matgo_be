@@ -4,7 +4,6 @@ import com.pomingmatgo.gameservice.domain.GameState;
 import com.pomingmatgo.gameservice.domain.Player;
 import com.pomingmatgo.gameservice.domain.card.Card;
 import com.pomingmatgo.gameservice.domain.card.CardType;
-import com.pomingmatgo.gameservice.domain.service.matgo.ProcessCardResult;
 import com.pomingmatgo.gameservice.domain.service.matgo.SpecialEvent;
 import com.pomingmatgo.gameservice.global.MessageSender;
 import com.pomingmatgo.gameservice.global.WebSocketResDto;
@@ -82,14 +81,15 @@ public class GameMessageSender {
                 ));
     }
 
-    public Mono<Void> sendSpecialEventMessageIfNeeded(long roomId, Player player, ProcessCardResult processCardResult) {
-        SpecialEvent event = processCardResult.getSpecialEvent();
+    public Mono<Void> sendSpecialEventMessageIfNeeded(long roomId, Player player, SpecialEvent event) {
         if (event != SpecialEvent.NONE) {
             return messageSender.sendMessageToAllUser(
                     roomId,
                     WebSocketResDto.of(player, event.name(), event.getDisplayName())
             );
         }
+
+        // NONE이거나 처리할 게 없으면 빈 Mono 반환
         return Mono.empty();
     }
 

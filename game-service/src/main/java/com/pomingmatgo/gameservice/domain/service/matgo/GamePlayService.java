@@ -7,6 +7,7 @@ import com.pomingmatgo.gameservice.domain.Player;
 import com.pomingmatgo.gameservice.domain.card.Card;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
+import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 
 @Service
@@ -60,10 +61,9 @@ public class GamePlayService {
 
     private Mono<Void> applyTurnEffects(long roomId, GameState gameState, ProcessCardResult result) {
         if (result.isChoiceRequired()) return Mono.empty();
-
-        Mono<Void> precedingOperation = result.isClaimOpponentPi()
-                ? gameService.loseCard(roomId, gameState.getOtherPlayer(), result.getMoveCard())
-                : Mono.empty();
+        Mono<Void> precedingOperation = Flux.fromIterable(result.getMoveCards())
+                .concatMap(card -> gameService.loseCard(roomId, gameState.getOtherPlayer(), card))
+                .then();
 
         return precedingOperation
                 .then(gameService.acquireCards(roomId, gameState.getCurrentPlayer(), result.getAcquiredCards()));
