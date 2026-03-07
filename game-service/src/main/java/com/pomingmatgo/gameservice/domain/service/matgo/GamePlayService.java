@@ -42,8 +42,7 @@ public class GamePlayService {
 
                     return applyTurnEffects(roomId, gameState, result)
                             .then(gameService.calculateAndApplyScores(roomId, gameState))
-                            .then(gameService.setNextTurn(gameState))
-                            .flatMap(nextState -> gameService.setGameInProgress(nextState).thenReturn(nextState))
+                            .then(proceedToNextTurn(gameState))
                             .map(nextState -> new FloorSelectionResult(result, nextState, false));
                 });
     }
