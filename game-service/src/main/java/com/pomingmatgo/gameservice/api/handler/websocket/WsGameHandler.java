@@ -112,7 +112,6 @@ public class WsGameHandler {
                 .concatMap(event -> gameMessageSender.sendSpecialEventMessageIfNeeded(roomId, player, event))
                 .then();
 
-        // 4. 모든 작업을 순차적으로 연결
         return sendMoveCards
                 .then(sendAcquired)
                 .then(sendSpecial)
