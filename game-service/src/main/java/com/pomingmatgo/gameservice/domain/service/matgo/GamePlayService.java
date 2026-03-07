@@ -26,15 +26,9 @@ public class GamePlayService {
                     Card topCard = tuple.getT2();
 
                     return gameService.submitCard(gameState, submittedCard, topCard)
-                            .flatMap(processResult -> {
-                                if (processResult.isChoiceRequired()) {
-                                    return Mono.just(new TurnExecutionResult(submittedCard, topCard, processResult, gameState, true));
-                                }
-
-                                return applyTurnEffects(roomId, gameState, processResult)
-                                        .then(gameService.calculateAndApplyScores(roomId, gameState))
-                                        .map(newGs -> new TurnExecutionResult(submittedCard, topCard, processResult, newGs, false));
-                            });
+                            .flatMap(processResult -> buildNormalSubmitResult(
+                                    roomId, gameState, submittedCard, topCard, processResult
+                            ));
                 });
     }
 
@@ -52,6 +46,16 @@ public class GamePlayService {
                             .flatMap(nextState -> gameService.setGameInProgress(nextState).thenReturn(nextState))
                             .map(nextState -> new FloorSelectionResult(result, nextState, false));
                 });
+    }
+
+    private Mono<TurnExecutionResult> buildNormalSubmitResult(long roomId, GameState gameState, Card submittedCard, Card topCard, ProcessCardResult processResult) {
+        if (processResult.isChoiceRequired()) {
+            return Mono.just(new TurnExecutionResult(submittedCard, topCard, processResult, gameState, true));
+        }
+
+        return applyTurnEffects(roomId, gameState, processResult)
+                .then(gameService.calculateAndApplyScores(roomId, gameState))
+                .map(newGs -> new TurnExecutionResult(submittedCard, topCard, processResult, newGs, false));
     }
 
     public Mono<GameState> proceedToNextTurn(GameState gameState) {
