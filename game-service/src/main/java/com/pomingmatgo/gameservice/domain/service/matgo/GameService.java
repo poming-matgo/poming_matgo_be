@@ -134,17 +134,17 @@ public class GameService {
     }
 
     private Mono<ProcessCardResult> handleDifferentMonthCards(GameState gameState, Card submittedCard, Card turnedCard) {
-        return processCardByMonth(gameState, submittedCard, turnedCard, null)
+        return processCardByMonth(gameState, submittedCard, turnedCard)
                 .flatMap(submittedResult -> {
                     if (submittedResult.isChoiceRequired()) {
                         return Mono.just(submittedResult);
                     }
-                    return processCardByMonth(gameState, turnedCard, null, null)
+                    return processCardByMonth(gameState, turnedCard, null)
                             .map(submittedResult::merge);
                 });
     }
 
-    private Mono<ProcessCardResult> processCardByMonth(GameState gameState, Card card, Card nextCard, List<Card> prevAcquiredCards) {
+    private Mono<ProcessCardResult> processCardByMonth(GameState gameState, Card card, Card nextCard) {
         int month = card.getMonth();
         long roomId = gameState.getRoomId();
 
@@ -152,25 +152,9 @@ public class GameService {
                 .flatMap(cardStack -> switch (cardStack.size()) {
                     case 0 -> handleZeroCardsOnFloor(card, roomId);
                     case 1 -> handleOneCardOnFloor(gameState, card, cardStack);
-                    case 2 -> handleTwoCardsOnFloor(gameState, card, cardStack, nextCard, prevAcquiredCards);
+                    case 2 -> handleTwoCardsOnFloor(gameState, card, cardStack, nextCard);
                     case 3 -> handleThreeCardsOnFloor(gameState, card, cardStack);
                     default -> Mono.just(ProcessCardResult.immediate(Collections.emptyList()));
-                })
-                .map(currentResult -> {
-                    if (prevAcquiredCards == null || prevAcquiredCards.isEmpty()) {
-                        return currentResult;
-                    }
-
-                    if (currentResult.isChoiceRequired()) {
-                        return currentResult;
-                    }
-
-                    List<Card> combinedList = new ArrayList<>(prevAcquiredCards);
-                    combinedList.addAll(currentResult.getAcquiredCards());
-
-                    return currentResult.toBuilder()
-                            .acquiredCards(combinedList)
-                            .build();
                 });
     }
 
@@ -214,13 +198,12 @@ public class GameService {
                 });
     }
 
-    private Mono<ProcessCardResult> handleTwoCardsOnFloor(GameState gameState, Card submittedCard, List<Card> selectableCards, Card turnedCard, List<Card> prevCards) {
+    private Mono<ProcessCardResult> handleTwoCardsOnFloor(GameState gameState, Card submittedCard, List<Card> selectableCards, Card turnedCard) {
         ChoiceInfo choiceInfo = ChoiceInfo.builder()
                 .playerNumToChoose(gameState.getCurrentPlayer())
                 .submittedCard(submittedCard)
                 .selectableCards(selectableCards)
                 .turnedCard(turnedCard)
-                .prevCards(prevCards)
                 .build();
 
         GameState newGameState = gameState.toBuilder()
@@ -234,25 +217,29 @@ public class GameService {
 
 
     public Mono<ProcessCardResult> selectFloorCard(GameState gameState, Player player, RequestEvent<NormalSubmitReq> event) {
-        validateFloorCardSelection(gameState, player, event.getData().getCardIndex());
-        ChoiceInfo choiceInfo = gameState.getChoiceInfo();
         int cardIndex = event.getData().getCardIndex();
+        validateFloorCardSelection(gameState, player, cardIndex);
 
+        ChoiceInfo choiceInfo = gameState.getChoiceInfo();
         Card chosenFloorCard = choiceInfo.getSelectableCards().get(cardIndex);
         Card submittedCard = choiceInfo.getSubmittedCard();
         Card turnedCard = choiceInfo.getTurnedCard();
 
-        Mono<Void> cleanupPlayedCardsMono = Mono.defer(() ->
-                installedCardRepository.deleteRevealedCard(gameState.getRoomId(), chosenFloorCard)
-                        .then(installedCardRepository.deleteRevealedCard(gameState.getRoomId(), submittedCard)).then()
-        );
+        ProcessCardResult baseResult = ProcessCardResult.immediate(List.of(chosenFloorCard, submittedCard));
 
-        Mono<ProcessCardResult> processTurnMono = (turnedCard == null)
-                ? processSimpleAcquisition(chosenFloorCard, submittedCard)
-                : processCardByMonth(gameState, turnedCard, null, List.of(chosenFloorCard, submittedCard));
+        Mono<ProcessCardResult> turnResultMono;
+        if (turnedCard == null) {
+            turnResultMono = Mono.just(baseResult);
+        } else {
+            turnResultMono = processCardByMonth(gameState, turnedCard, null)
+                    .map(baseResult::merge);
+        }
 
-        return processTurnMono
-                .flatMap(cleanupPlayedCardsMono::thenReturn)
+        return turnResultMono
+                .delayUntil(result ->
+                        installedCardRepository.deleteRevealedCard(gameState.getRoomId(), chosenFloorCard)
+                                .then(installedCardRepository.deleteRevealedCard(gameState.getRoomId(), submittedCard))
+                )
                 .flatMap(turnResult -> {
                     if (turnResult.isChoiceRequired()) {
                         return Mono.just(turnResult);
