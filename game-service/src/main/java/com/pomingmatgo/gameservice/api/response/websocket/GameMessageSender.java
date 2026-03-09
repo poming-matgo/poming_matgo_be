@@ -99,4 +99,12 @@ public class GameMessageSender {
                 WebSocketResDto.of(PLAYER_NOTHING, "SCORE_UPDATE", "점수 정보 업데이트", scoreInfo)
         );
     }
+
+    public Mono<Void> sendGoStopChoiceMessage(long roomId, Player player) {
+        WebSocketSession session = sessionManager.getSession(roomId, player.getNumber());
+        return messageSender.sendMessageToSession(
+                session,
+                WebSocketResDto.of(player, "GO_STOP_CHOICE", "고/스톱 선택", null)
+        );
+    }
 }

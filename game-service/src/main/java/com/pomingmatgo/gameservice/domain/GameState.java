@@ -17,6 +17,7 @@ import static com.pomingmatgo.gameservice.domain.Player.PLAYER_2;
 @NoArgsConstructor
 @Builder(toBuilder = true)
 public class GameState implements Serializable {
+    private static final int MIN_GO_STOP_SCORE = 7;
     private static final long serialVersionUID = 1L;
     @Id
     Long roomId;
@@ -76,5 +77,10 @@ public class GameState implements Serializable {
     @JsonIgnore
     public Player getOtherPlayer() {
         return this.getLeadingPlayer()==this.getCurrentTurn() ? PLAYER_2 : PLAYER_1;
+    }
+
+    public boolean canGoStop(Player player) {
+        int score = player.getNumber() == 1 ? player1Score : player2Score;
+        return score >=  MIN_GO_STOP_SCORE;
     }
 }

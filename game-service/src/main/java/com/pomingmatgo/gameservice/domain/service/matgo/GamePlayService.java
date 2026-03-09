@@ -42,7 +42,6 @@ public class GamePlayService {
 
                     return applyTurnEffects(roomId, gameState, result)
                             .then(gameService.calculateAndApplyScores(roomId, gameState))
-                            .then(proceedToNextTurn(gameState))
                             .map(nextState -> new FloorSelectionResult(result, nextState, false));
                 });
     }
@@ -71,5 +70,9 @@ public class GamePlayService {
 
         return precedingOperation
                 .then(gameService.acquireCards(roomId, gameState.getCurrentPlayer(), result.getAcquiredCards()));
+    }
+
+    public boolean canGoStop(GameState gameState, Player player) {
+        return gameState.canGoStop(player);
     }
 }

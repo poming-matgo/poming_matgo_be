@@ -308,4 +308,6 @@ public class GameService {
 
         return Mono.just(newGameState);
     }
+
+    private static final int MIN_GO_STOP_SCORE = 7;
 }
