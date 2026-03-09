@@ -20,21 +20,27 @@ public class GameState implements Serializable {
     private static final int MIN_GO_STOP_SCORE = 7;
     private static final long serialVersionUID = 1L;
     @Id
-    Long roomId;
-    Long player1Id;
-    Long player2Id;
-    boolean player1Ready;
-    boolean player2Ready;
-    boolean gameStarted;
-    int leadingPlayer;
-    int round;
-    int currentTurn;
-    int player1Score;
-    int player2Score;
-    int player1Go;
-    int player2Go;
-    int player1GoScore;
-    int player2GoScore;
+    private Long roomId;
+
+    //player 1
+    private Long player1Id;
+    private boolean player1Ready;
+    private int player1Score;
+    private int player1Go;
+    private int player1GoScore;
+
+    //player 2
+    private Long player2Id;
+    private boolean player2Ready;
+    private int player2Score;
+    private int player2Go;
+    private int player2GoScore;
+
+    //game phase
+    private boolean gameStarted;
+    private int leadingPlayer;
+    private int currentTurn;
+    private int round;
 
     @Builder.Default
     private GamePhase phase = GamePhase.IN_PROGRESS;
