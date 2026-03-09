@@ -91,9 +91,10 @@ public class WsGameHandler {
                     }
 
                     Mono<Void> sendAcquired = gameMessageSender.sendAcquiredCardMessage(roomId, player, ctx.cardResult().getAcquiredCards());
-                    Mono<Void> broadcastNextTurn = broadcastNextTurnInfo(ctx.updatedGameState());
+                    Mono<GameState> setNextTurn = gamePlayService.proceedToNextTurn(ctx.updatedGameState());
 
-                    return sendAcquired.then(broadcastNextTurn);
+                    return sendAcquired.then(setNextTurn)
+                            .flatMap(this::broadcastNextTurnInfo);
                 });
     }
 
@@ -115,8 +116,20 @@ public class WsGameHandler {
         return sendMoveCards
                 .then(sendAcquired)
                 .then(sendSpecial)
-                .then(gamePlayService.proceedToNextTurn(gameState))
-                .flatMap(this::broadcastNextTurnInfo);
+                .then(sendScoreInfo(gameState))
+                .then(Mono.defer(() -> {
+                    if (gamePlayService.canGoStop(gameState, player)) {
+                        return gameMessageSender.sendGoStopChoiceMessage(roomId, player);
+                    } else {
+                        return gamePlayService.proceedToNextTurn(gameState)
+                                .flatMap(gameMessageSender::sendTurnInfo);
+                    }
+                }));
+    }
+
+    private Mono<Void> sendScoreInfo(GameState gameState) {
+        ScoreInfoRes scoreInfoRes = ScoreInfoRes.from(gameState);
+        return gameMessageSender.sendScoreInfo(gameState.getRoomId(), scoreInfoRes);
     }
 
     private Mono<Void> broadcastNextTurnInfo(GameState nextState) {
