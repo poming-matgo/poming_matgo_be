@@ -46,12 +46,6 @@ public class GameState implements Serializable {
     private GamePhase phase = GamePhase.IN_PROGRESS;
     private ChoiceInfo choiceInfo; // phase가 await류일때만 의미 있다.
 
-
-
-    public GameState(Long roomId) {
-        this.roomId = roomId;
-    }
-
     public int getPlayerNumber(long userId) {
         if (Objects.equals(this.player1Id, userId)) {
             return 1;
