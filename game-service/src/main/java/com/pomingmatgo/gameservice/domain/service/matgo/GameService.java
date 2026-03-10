@@ -19,6 +19,8 @@ import java.util.*;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
+import static com.pomingmatgo.gameservice.domain.Player.PLAYER_1;
+import static com.pomingmatgo.gameservice.domain.Player.PLAYER_2;
 import static com.pomingmatgo.gameservice.global.exception.WebSocketErrorCode.*;
 
 
@@ -30,9 +32,11 @@ public class GameService {
     private final AcquiredCardRepository acquiredCardRepository;
     private final ScoreCalculator scoreCalculator;
 
-    public Mono<Void> setGameInProgress(GameState gameState) {
-        return gameStateRepository.save(gameState).then();
+    public Mono<GameState> setGameInProgress(GameState gameState) {
+        return gameStateRepository.save(gameState)
+                .thenReturn(gameState);
     }
+
     public Mono<GameState> calculateAndApplyScores(long roomId, GameState gameState) {
         Mono<List<Card>> player1Card = acquiredCardRepository.getAllCards(roomId, 1);
         Mono<List<Card>> player2Card = acquiredCardRepository.getAllCards(roomId, 2);
@@ -48,7 +52,7 @@ public class GameService {
                             .player1Score(player1Score)
                             .player2Score(player2Score)
                             .build();
-                    return Mono.just(newState);
+                    return gameStateRepository.save(newState).thenReturn(newState);
                 });
     }
 
@@ -56,7 +60,7 @@ public class GameService {
         return acquiredCardRepository.addCards(roomId, player.getNumber(), acquiredCards).then();
     }
 
-    public Mono<Void> loseCard(long roomId, Player player,Card lostCard) {
+    public Mono<Void> loseCard(long roomId, Player player, Card lostCard) {
         return acquiredCardRepository.removeCard(roomId, player.getNumber(), lostCard).then();
     }
 
@@ -309,5 +313,20 @@ public class GameService {
         return Mono.just(newGameState);
     }
 
-    private static final int MIN_GO_STOP_SCORE = 7;
+    public Mono<GameState> executeGoStop(GameState gameState, Player player) {
+
+        GameState newState = switch (player) {
+            case PLAYER_1 -> gameState.toBuilder()
+                    .player1Go(gameState.getPlayer1Go() + 1)
+                    .player1GoScore(gameState.getPlayer1Score())
+                    .build();
+            case PLAYER_2 -> gameState.toBuilder()
+                    .player2Go(gameState.getPlayer2Go() + 1)
+                    .player2GoScore(gameState.getPlayer2Score())
+                    .build();
+            default -> throw new WebSocketBusinessException(INVALID_PLAYER);
+        };
+
+        return Mono.just(newState);
+    }
 }

@@ -88,3 +88,4 @@ public class GameState implements Serializable {
         return score >=  MIN_GO_STOP_SCORE;
     }
 }
+

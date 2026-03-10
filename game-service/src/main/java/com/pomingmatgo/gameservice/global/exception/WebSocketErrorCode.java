@@ -26,7 +26,10 @@ public enum WebSocketErrorCode {
     NOT_YOUR_TURN("턴이 아닙니다."),
 
     //다시 시도
-    TRY_AGAIN("다시 시도해주세요");
+    TRY_AGAIN("다시 시도해주세요"),
+
+    //유요하지 않은 사용자
+    INVALID_PLAYER("유효하지 않은 플레이어입니다.");
     private final String message;
 
     WebSocketErrorCode(String message) {

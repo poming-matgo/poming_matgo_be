@@ -1,6 +1,8 @@
 package com.pomingmatgo.gameservice.api.handler.websocket;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.pomingmatgo.gameservice.api.handler.event.RequestEvent;
+import com.pomingmatgo.gameservice.api.request.websocket.GoStopReq;
 import com.pomingmatgo.gameservice.api.request.websocket.NormalSubmitReq;
 import com.pomingmatgo.gameservice.api.response.websocket.GameMessageSender;
 import com.pomingmatgo.gameservice.api.response.websocket.ScoreInfoRes;
@@ -23,10 +25,12 @@ public class WsGameHandler {
 
     private final GamePlayService gamePlayService;
     private final GameMessageSender gameMessageSender;
+    private final ObjectMapper objectMapper;
 
     private enum GameEventType {
         NORMAL_SUBMIT,
-        FLOOR_SELECT;
+        FLOOR_SELECT,
+        GO_STOP_CHOICE;
 
         public static GameEventType from(String subType) {
             try {
@@ -37,6 +41,11 @@ public class WsGameHandler {
         }
     }
 
+    private <T> RequestEvent<T> convertData(RequestEvent<?> event, Class<T> targetClass) {
+        T typedData = objectMapper.convertValue(event.getData(), targetClass);
+        return event.withData(typedData);
+    }
+
     public Mono<Void> handleGameEvent(RequestEvent<?> event, GameState gameState, Player player) {
         if (!player.equals(gameState.getCurrentPlayer())) {
             return Mono.error(new WebSocketBusinessException(NOT_YOUR_TURN));
@@ -44,12 +53,10 @@ public class WsGameHandler {
 
         GameEventType eventType = GameEventType.from(event.getEventType().getSubType());
 
-        @SuppressWarnings("unchecked")
-        RequestEvent<NormalSubmitReq> submitEvent = (RequestEvent<NormalSubmitReq>) event;
-
         return switch (eventType) {
-            case NORMAL_SUBMIT -> handleNormalSubmit(submitEvent, gameState, player);
-            case FLOOR_SELECT -> handleFloorSelect(submitEvent, gameState, player);
+            case NORMAL_SUBMIT -> handleNormalSubmit(convertData(event, NormalSubmitReq.class), gameState, player);
+            case FLOOR_SELECT -> handleFloorSelect(convertData(event, NormalSubmitReq.class), gameState, player);
+            case GO_STOP_CHOICE -> handleGoStopChoice(convertData(event, GoStopReq.class), gameState, player);
         };
     }
 
@@ -98,6 +105,9 @@ public class WsGameHandler {
                 });
     }
 
+    private Mono<Void> handleGoStopChoice(RequestEvent<GoStopReq> event, GameState gameState, Player player) {
+        return gamePlayService.executeGoStop(gameState, player, event).then();
+    }
 
     private Mono<Void> broadcastTurnResult(long roomId, Player player, GameState gameState, ProcessCardResult result) {
         Mono<Void> sendMoveCards = Flux.fromIterable(result.getMoveCards())

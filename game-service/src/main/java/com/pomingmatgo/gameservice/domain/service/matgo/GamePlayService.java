@@ -1,6 +1,7 @@
 package com.pomingmatgo.gameservice.domain.service.matgo;
 
 import com.pomingmatgo.gameservice.api.handler.event.RequestEvent;
+import com.pomingmatgo.gameservice.api.request.websocket.GoStopReq;
 import com.pomingmatgo.gameservice.api.request.websocket.NormalSubmitReq;
 import com.pomingmatgo.gameservice.domain.GameState;
 import com.pomingmatgo.gameservice.domain.Player;
@@ -58,8 +59,7 @@ public class GamePlayService {
 
     public Mono<GameState> proceedToNextTurn(GameState gameState) {
         return gameService.setNextTurn(gameState)
-                .flatMap(nextState -> gameService.setGameInProgress(nextState)
-                        .thenReturn(nextState));
+                .flatMap(gameService::setGameInProgress);
     }
 
     private Mono<Void> applyTurnEffects(long roomId, GameState gameState, ProcessCardResult result) {
@@ -74,5 +74,12 @@ public class GamePlayService {
 
     public boolean canGoStop(GameState gameState, Player player) {
         return gameState.canGoStop(player);
+    }
+
+    public Mono<GameState> executeGoStop(GameState gameState, Player player, RequestEvent<GoStopReq> event) {
+        boolean go = event.getData().isGo();
+
+        return go ? gameService.executeGoStop(gameState, player)
+                .flatMap(gameService::setGameInProgress) : Mono.empty();
     }
 }
