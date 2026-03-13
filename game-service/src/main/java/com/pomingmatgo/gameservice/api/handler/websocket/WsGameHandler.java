@@ -129,7 +129,7 @@ public class WsGameHandler {
                 .then(sendScoreInfo(gameState))
                 .then(Mono.defer(() -> {
                     if (gamePlayService.canGoStop(gameState, player)) {
-                        return gameMessageSender.sendGoStopChoiceMessage(roomId, player);
+                        return gameMessageSender.sendGoStopChoiceMessage(gameState, player);
                     } else {
                         return gamePlayService.proceedToNextTurn(gameState)
                                 .flatMap(gameMessageSender::sendTurnInfo);

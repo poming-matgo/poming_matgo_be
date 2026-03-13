@@ -17,6 +17,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
 
+import static com.pomingmatgo.gameservice.domain.Player.PLAYER_1;
 import static com.pomingmatgo.gameservice.domain.Player.PLAYER_NOTHING;
 
 @Component
@@ -100,11 +101,13 @@ public class GameMessageSender {
         );
     }
 
-    public Mono<Void> sendGoStopChoiceMessage(long roomId, Player player) {
+    public Mono<Void> sendGoStopChoiceMessage(GameState gameState, Player player) {
+        long roomId = gameState.getRoomId();
+        int prevGoNum = player == PLAYER_1 ? gameState.getPlayer1Go() : gameState.getPlayer2Go();
         WebSocketSession session = sessionManager.getSession(roomId, player.getNumber());
         return messageSender.sendMessageToSession(
                 session,
-                WebSocketResDto.of(player, "GO_STOP_CHOICE", "고/스톱 선택", null)
+                WebSocketResDto.of(player, "GO_STOP_CHOICE", "고/스톱 선택", prevGoNum+1)
         );
     }
 }
