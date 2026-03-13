@@ -85,7 +85,8 @@ public class GameState implements Serializable {
 
     public boolean canGoStop(Player player) {
         int score = player.getNumber() == 1 ? player1Score : player2Score;
-        return score >=  MIN_GO_STOP_SCORE;
+        int prevGoScore = player.getNumber() == 1 ? player1GoScore : player2GoScore;
+        return score >=  MIN_GO_STOP_SCORE && score > prevGoScore;
     }
 }
 
