@@ -88,5 +88,10 @@ public class GameState implements Serializable {
         int prevGoScore = player.getNumber() == 1 ? player1GoScore : player2GoScore;
         return score >=  MIN_GO_STOP_SCORE && score > prevGoScore;
     }
+
+    @JsonIgnore
+    public boolean isPlaying(){
+        return this.phase == GamePhase.IN_PROGRESS;
+    }
 }
 

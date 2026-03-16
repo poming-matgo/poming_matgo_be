@@ -69,7 +69,6 @@ public class GameMessageSender {
                 WebSocketResDto.of(player, "CHOOSE_FLOOR_CARD", "바닥 카드 선택", card));
     }
 
-    //뺏는것과 빼앗는것 구분 필요
     public Mono<Void> sendMovingCardMessage(long roomId, Player player, Player otherPlayer, Card card) {
         WebSocketSession session = sessionManager.getSession(roomId, player.getNumber());
         WebSocketSession otherSession = sessionManager.getSession(roomId, otherPlayer.getNumber());
@@ -108,6 +107,18 @@ public class GameMessageSender {
         return messageSender.sendMessageToSession(
                 session,
                 WebSocketResDto.of(player, "GO_STOP_CHOICE", "고/스톱 선택", prevGoNum+1)
+        );
+    }
+
+    public Mono<Void> sendGoStopResultMessage(GameState gameState, Player player) {
+        long roomId = gameState.getRoomId();
+        boolean isGo = gameState.isPlaying();
+        long goNum = player == PLAYER_1 ? gameState.getPlayer1Go() : gameState.getPlayer2Go();
+        WebSocketSession session = sessionManager.getSession(roomId, player.getNumber());
+        String choice = isGo ? goNum + " GO" : "STOP";
+        return messageSender.sendMessageToSession(
+                session,
+                WebSocketResDto.of(player, "GO_STOP_RESULT", "고/스톱 결과", choice)
         );
     }
 }
