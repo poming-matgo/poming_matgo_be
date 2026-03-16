@@ -107,10 +107,10 @@ public class WsGameHandler {
 
     private Mono<Void> handleGoStopChoice(RequestEvent<GoStopReq> event, GameState gameState, Player player) {
         return gamePlayService.executeGoStop(gameState, player, event)
-                .flatMap(gs -> gameMessageSender.sendGoStopResultMessage(gs, player).thenReturn(gs))
                 .flatMap(gs -> {
                     if (gs.isPlaying()) {
-                        return gameMessageSender.sendTurnInfo(gs);
+                        return  gameMessageSender.sendGoResultMessage(gs, player)
+                                .then(gameMessageSender.sendTurnInfo(gs));
                     } else {
                         return Mono.empty();
                     }

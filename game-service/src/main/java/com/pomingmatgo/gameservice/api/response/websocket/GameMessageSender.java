@@ -110,15 +110,13 @@ public class GameMessageSender {
         );
     }
 
-    public Mono<Void> sendGoStopResultMessage(GameState gameState, Player player) {
+    public Mono<Void> sendGoResultMessage(GameState gameState, Player player) {
         long roomId = gameState.getRoomId();
-        boolean isGo = gameState.isPlaying();
         long goNum = player == PLAYER_1 ? gameState.getPlayer1Go() : gameState.getPlayer2Go();
         WebSocketSession session = sessionManager.getSession(roomId, player.getNumber());
-        String choice = isGo ? goNum + " GO" : "STOP";
         return messageSender.sendMessageToSession(
                 session,
-                WebSocketResDto.of(player, "GO_STOP_RESULT", "고/스톱 결과", choice)
+                WebSocketResDto.of(player, "GO_RESULT", "고 횟수", goNum)
         );
     }
 }
