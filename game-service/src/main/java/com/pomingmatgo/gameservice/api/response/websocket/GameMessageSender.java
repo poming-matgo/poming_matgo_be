@@ -89,7 +89,6 @@ public class GameMessageSender {
             );
         }
 
-        // NONE이거나 처리할 게 없으면 빈 Mono 반환
         return Mono.empty();
     }
 
@@ -103,19 +102,25 @@ public class GameMessageSender {
     public Mono<Void> sendGoStopChoiceMessage(GameState gameState, Player player) {
         long roomId = gameState.getRoomId();
         int prevGoNum = player == PLAYER_1 ? gameState.getPlayer1Go() : gameState.getPlayer2Go();
+        Player otherPlayer = gameState.getOtherPlayer();
         WebSocketSession session = sessionManager.getSession(roomId, player.getNumber());
+        WebSocketSession otherSession = sessionManager.getSession(roomId, otherPlayer.getNumber());
         return messageSender.sendMessageToSession(
                 session,
                 WebSocketResDto.of(player, "GO_STOP_CHOICE", "고/스톱 선택", prevGoNum+1)
+        ).then(
+                messageSender.sendMessageToSession(
+                        otherSession,
+                        WebSocketResDto.of(otherPlayer, "OPPONENT_GO_STOP_CHOICE", "상대방이 고/스톱을 선택합니다.", null)
+                )
         );
     }
 
     public Mono<Void> sendGoResultMessage(GameState gameState, Player player) {
         long roomId = gameState.getRoomId();
         long goNum = player == PLAYER_1 ? gameState.getPlayer1Go() : gameState.getPlayer2Go();
-        WebSocketSession session = sessionManager.getSession(roomId, player.getNumber());
-        return messageSender.sendMessageToSession(
-                session,
+        return messageSender.sendMessageToAllUser(
+                roomId,
                 WebSocketResDto.of(player, "GO_RESULT", "고 횟수", goNum)
         );
     }
