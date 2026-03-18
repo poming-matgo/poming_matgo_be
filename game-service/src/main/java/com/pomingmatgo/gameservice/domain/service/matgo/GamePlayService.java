@@ -80,6 +80,6 @@ public class GamePlayService {
         boolean go = event.getData().isGo();
 
         return go ? gameService.executeGoStop(gameState, player)
-                .flatMap(gameService::setGameInProgress) : Mono.empty();
+                .flatMap(this::proceedToNextTurn) : Mono.empty();
     }
 }
