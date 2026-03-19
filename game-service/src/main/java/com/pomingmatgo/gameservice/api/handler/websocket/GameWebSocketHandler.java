@@ -73,7 +73,7 @@ public class GameWebSocketHandler implements WebSocketHandler {
 
     private Mono<Void> processEvent(RequestEvent<?> event, WebSocketSession session) {
         if ("CONNECT".equals(event.getEventType().getSubType())) {
-            return handleJoinRoom(event, session);
+            return handleJoinRoom((RequestEvent<JoinRoomReq>) event, session);
         }
 
         return sessionManager.getPlayerContext(session)
@@ -82,33 +82,25 @@ public class GameWebSocketHandler implements WebSocketHandler {
                         .flatMap(gameState -> routeEvent(event, gameState, Player.fromNumber(context.playerNum()))));
     }
 
-    private Mono<Void> handleJoinRoom(RequestEvent<?> event, WebSocketSession session) {
-        Mono<Void> preconditionCheck = sessionManager.getPlayerContext(session)
-                .flatMap(playerContext ->
-                        Mono.error(new WebSocketBusinessException(ALREADY_JOIN))
-                )
-                .then();
+    private Mono<Void> handleJoinRoom(RequestEvent<JoinRoomReq> event, WebSocketSession session) {
+        return sessionManager.getPlayerContext(session)
+                .hasElement()
+                .flatMap(isJoined -> isJoined
+                        ? Mono.error(new WebSocketBusinessException(ALREADY_JOIN))
+                        : processJoinRoomLogic(event.getData(), session));
+    }
 
-        Mono<Void> joinRoomLogic = Mono.defer(() -> {
-            JoinRoomReq payload = (JoinRoomReq) event.getData();
-            long userId = payload.getUserId();
-            long roomId = payload.getRoomId();
+    private Mono<Void> processJoinRoomLogic(JoinRoomReq payload, WebSocketSession session) {
+        long userId = payload.getUserId();
+        long roomId = payload.getRoomId();
 
-            return roomService.getGameState(roomId)
-                    .switchIfEmpty(Mono.error(new WebSocketBusinessException(NOT_EXISTED_ROOM)))
-                    .flatMap(gameState -> determinePlayerNum(userId, gameState))
-                    .flatMap(player ->
-                            sessionManager.addPlayer(roomId, player, userId, session)
-                                    .thenReturn(player)
-                    )
-                    .flatMap(player ->
-                            messageSender.sendMessageToAllUser(roomId, WebSocketResDto.of(player, "CONNECT", "접속했습니다."))
-                    );
-        });
-
-        return preconditionCheck
-                .then(joinRoomLogic)
-                .onErrorResume(error -> handleWebSocketError(session, error));
+        return roomService.getGameState(roomId)
+                .switchIfEmpty(Mono.error(new WebSocketBusinessException(NOT_EXISTED_ROOM)))
+                .flatMap(gameState -> Mono.fromCallable(() -> Player.fromNumber(gameState.getPlayerNumber(userId))))
+                .flatMap(player -> sessionManager.addPlayer(roomId, player, userId, session).thenReturn(player))
+                .flatMap(player -> messageSender.sendMessageToAllUser(
+                        roomId, WebSocketResDto.of(player, "CONNECT", "접속했습니다."))
+                );
     }
 
     private Mono<Void> handleWebSocketError(WebSocketSession session, Throwable error) {
@@ -130,12 +122,6 @@ public class GameWebSocketHandler implements WebSocketHandler {
         return Mono.fromCallable(() -> objectMapper.writeValueAsString(dto))
                 .map(session::textMessage)
                 .flatMap(message -> session.send(Mono.just(message)));
-    }
-
-
-    private Mono<Player> determinePlayerNum(long userId, GameState gameState) {
-        return Mono.fromCallable(() -> gameState.getPlayerNumber(userId))
-                .map(Player::fromNumber);
     }
 
     private Mono<Void> routeEvent(RequestEvent<?> event, GameState gameState, Player player) {
