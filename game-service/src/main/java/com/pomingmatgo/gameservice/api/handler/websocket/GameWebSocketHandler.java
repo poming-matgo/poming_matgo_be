@@ -1,6 +1,5 @@
 package com.pomingmatgo.gameservice.api.handler.websocket;
 
-import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.JavaType;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.pomingmatgo.gameservice.api.handler.event.RequestEvent;
@@ -14,6 +13,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.pomingmatgo.gameservice.global.MessageSender;
 import com.pomingmatgo.gameservice.global.WebSocketResDto;
 import com.pomingmatgo.gameservice.global.exception.WebSocketBusinessException;
+import com.pomingmatgo.gameservice.global.exception.WebSocketErrorCode;
 import com.pomingmatgo.gameservice.global.exception.dto.WebSocketErrorResDto;
 import com.pomingmatgo.gameservice.global.session.SessionManager;
 import lombok.RequiredArgsConstructor;
@@ -23,8 +23,6 @@ import org.springframework.web.reactive.socket.WebSocketHandler;
 import org.springframework.web.reactive.socket.WebSocketMessage;
 import org.springframework.web.reactive.socket.WebSocketSession;
 import reactor.core.publisher.Mono;
-
-import java.util.HashMap;
 import java.util.Map;
 
 import static com.pomingmatgo.gameservice.global.exception.WebSocketErrorCode.*;
@@ -104,22 +102,21 @@ public class GameWebSocketHandler implements WebSocketHandler {
     }
 
     private Mono<Void> handleWebSocketError(WebSocketSession session, Throwable error) {
-        WebSocketErrorResDto dto = (error instanceof WebSocketBusinessException businessException)
-                ? new WebSocketErrorResDto(businessException.getWebsocketErrorCode())
-                : new WebSocketErrorResDto(SYSTEM_ERROR);
+        boolean isSystemError = true;
+        WebSocketErrorCode errorCode = SYSTEM_ERROR;
 
-        if (error instanceof WebSocketBusinessException) {
-            WebSocketBusinessException wbe = (WebSocketBusinessException) error;
-            if(wbe.getWebsocketErrorCode() == SYSTEM_ERROR) {
-                log.error("WebSocket system error occurred in session [{}].", session.getId(), error);
-            }
+        if (error instanceof WebSocketBusinessException wbe) {
+            errorCode = wbe.getWebsocketErrorCode();
+            isSystemError = (errorCode == SYSTEM_ERROR);
         }
-        else {
+
+        if (isSystemError) {
             log.error("WebSocket system error occurred in session [{}].", session.getId(), error);
         }
 
+        WebSocketErrorResDto errorDto = new WebSocketErrorResDto(errorCode);
 
-        return Mono.fromCallable(() -> objectMapper.writeValueAsString(dto))
+        return Mono.fromCallable(() -> objectMapper.writeValueAsString(errorDto))
                 .map(session::textMessage)
                 .flatMap(message -> session.send(Mono.just(message)));
     }
