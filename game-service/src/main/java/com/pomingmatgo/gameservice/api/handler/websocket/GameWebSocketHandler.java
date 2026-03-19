@@ -1,6 +1,8 @@
 package com.pomingmatgo.gameservice.api.handler.websocket;
 
 import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.JavaType;
+import com.fasterxml.jackson.databind.JsonNode;
 import com.pomingmatgo.gameservice.api.handler.event.RequestEvent;
 import com.pomingmatgo.gameservice.api.request.websocket.JoinRoomReq;
 import com.pomingmatgo.gameservice.api.request.websocket.LeadSelectionReq;
@@ -40,12 +42,12 @@ public class GameWebSocketHandler implements WebSocketHandler {
     private final WsGameHandler wsGameHandler;
     private final MessageSender messageSender;
 
-    private static final Map<String, Class<?>> typeMappings = new HashMap<>() {{
-        put("LEADER_SELECTION", LeadSelectionReq.class);
-        put("NORMAL_SUBMIT", NormalSubmitReq.class);
-        put("FLOOR_SELECT", NormalSubmitReq.class);
-        put("CONNECT", JoinRoomReq.class);
-    }};
+    private static final Map<String, Class<?>> TYPE_MAPPINGS = Map.of(
+            "LEADER_SELECTION", LeadSelectionReq.class,
+            "NORMAL_SUBMIT", NormalSubmitReq.class,
+            "FLOOR_SELECT", NormalSubmitReq.class,
+            "CONNECT", JoinRoomReq.class
+    );
 
 
     @Override
@@ -56,13 +58,17 @@ public class GameWebSocketHandler implements WebSocketHandler {
     }
 
     private Mono<Void> handleMessage(WebSocketMessage message, WebSocketSession session) {
-        return Mono.fromCallable(() -> objectMapper.readValue(message.getPayloadAsText(),
-                        new TypeReference<RequestEvent<Object>>() {}))
-                .flatMap(event -> {
-                    Class<?> targetType = typeMappings.getOrDefault(event.getEventType().getSubType(), Object.class);
-                    Object typedData = objectMapper.convertValue(event.getData(), targetType);
-                    return processEvent(event.withData(typedData), session);
-                });
+        return Mono.fromCallable(() -> {
+                    JsonNode rootNode = objectMapper.readTree(message.getPayloadAsText());
+                    String subType = rootNode.path("eventType").path("subType").asText();
+
+                    Class<?> targetType = TYPE_MAPPINGS.getOrDefault(subType, Object.class);
+                    JavaType type = objectMapper.getTypeFactory().constructParametricType(RequestEvent.class, targetType);
+
+                    return (RequestEvent<?>) objectMapper.convertValue(rootNode, type);
+                })
+                .flatMap(event -> processEvent(event, session))
+                .onErrorResume(error -> handleWebSocketError(session, error));
     }
 
     private Mono<Void> processEvent(RequestEvent<?> event, WebSocketSession session) {
