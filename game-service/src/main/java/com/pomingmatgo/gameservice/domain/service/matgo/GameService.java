@@ -19,8 +19,6 @@ import java.util.*;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
-import static com.pomingmatgo.gameservice.domain.Player.PLAYER_1;
-import static com.pomingmatgo.gameservice.domain.Player.PLAYER_2;
 import static com.pomingmatgo.gameservice.global.exception.WebSocketErrorCode.*;
 
 
@@ -70,7 +68,7 @@ public class GameService {
 
 
     public Mono<Card> submitCardEvent(long roomId, Player player, RequestEvent<NormalSubmitReq> event) {
-        int cardIndex = event.getData().getCardIndex();
+        int cardIndex = event.getData().cardIndex();
         return installedCardRepository.getPlayerCards(roomId, player)
                 .flatMap(playerCards -> {
                     if (cardIndex < 0 || cardIndex >= playerCards.size()) {
@@ -221,7 +219,7 @@ public class GameService {
 
 
     public Mono<ProcessCardResult> selectFloorCard(GameState gameState, Player player, RequestEvent<NormalSubmitReq> event) {
-        int cardIndex = event.getData().getCardIndex();
+        int cardIndex = event.getData().cardIndex();
         validateFloorCardSelection(gameState, player, cardIndex);
 
         ChoiceInfo choiceInfo = gameState.getChoiceInfo();

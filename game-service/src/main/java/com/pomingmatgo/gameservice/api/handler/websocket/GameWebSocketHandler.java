@@ -89,8 +89,8 @@ public class GameWebSocketHandler implements WebSocketHandler {
     }
 
     private Mono<Void> processJoinRoomLogic(JoinRoomReq payload, WebSocketSession session) {
-        long userId = payload.getUserId();
-        long roomId = payload.getRoomId();
+        long userId = payload.userId();
+        long roomId = payload.roomId();
 
         return roomService.getGameState(roomId)
                 .switchIfEmpty(Mono.error(new WebSocketBusinessException(NOT_EXISTED_ROOM)))

@@ -77,7 +77,7 @@ public class GamePlayService {
     }
 
     public Mono<GameState> executeGoStop(GameState gameState, Player player, RequestEvent<GoStopReq> event) {
-        boolean go = event.getData().isGo();
+        boolean go = event.getData().go();
 
         return go ? gameService.executeGoStop(gameState, player)
                 .flatMap(this::proceedToNextTurn) : Mono.empty();

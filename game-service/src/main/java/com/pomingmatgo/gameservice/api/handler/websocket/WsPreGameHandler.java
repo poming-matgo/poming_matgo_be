@@ -4,7 +4,6 @@ import com.pomingmatgo.gameservice.api.handler.event.RequestEvent;
 import com.pomingmatgo.gameservice.api.request.websocket.LeadSelectionReq;
 import com.pomingmatgo.gameservice.api.response.websocket.AnnounceRoundRes;
 import com.pomingmatgo.gameservice.api.response.websocket.LeadSelectionRes;
-import com.pomingmatgo.gameservice.domain.GamePhase;
 import com.pomingmatgo.gameservice.domain.GameState;
 import com.pomingmatgo.gameservice.domain.InstalledCard;
 import com.pomingmatgo.gameservice.domain.Player;
@@ -57,7 +56,7 @@ public class WsPreGameHandler {
     private Mono<Void> handleLeaderSelectionEvent(RequestEvent<LeadSelectionReq> event, GameState gameState, Player player) {
         long roomId = gameState.getRoomId();
 
-        int cardIndex = event.getData().getCardIndex();
+        int cardIndex = event.getData().cardIndex();
         return preGameService.selectCard(cardIndex, gameState, player)
                 .then(sendLeaderSelectionMessage(roomId, player, cardIndex))
                 .then(preGameService.isAllPlayerCardSelected(roomId))
