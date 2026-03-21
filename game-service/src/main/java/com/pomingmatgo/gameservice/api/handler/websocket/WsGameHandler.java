@@ -1,7 +1,7 @@
 package com.pomingmatgo.gameservice.api.handler.websocket;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
 import com.pomingmatgo.gameservice.api.handler.event.RequestEvent;
+import com.pomingmatgo.gameservice.api.handler.event.category.SubCategory;
 import com.pomingmatgo.gameservice.api.request.websocket.GoStopReq;
 import com.pomingmatgo.gameservice.api.request.websocket.NormalSubmitReq;
 import com.pomingmatgo.gameservice.api.response.websocket.GameMessageSender;
@@ -25,38 +25,19 @@ public class WsGameHandler {
 
     private final GamePlayService gamePlayService;
     private final GameMessageSender gameMessageSender;
-    private final ObjectMapper objectMapper;
-
-    private enum GameEventType {
-        NORMAL_SUBMIT,
-        FLOOR_SELECT,
-        GO_STOP_CHOICE;
-
-        public static GameEventType from(String subType) {
-            try {
-                return valueOf(subType);
-            } catch (IllegalArgumentException e) {
-                throw new IllegalArgumentException("Unsupported event type: " + subType);
-            }
-        }
-    }
-
-    private <T> RequestEvent<T> convertData(RequestEvent<?> event, Class<T> targetClass) {
-        T typedData = objectMapper.convertValue(event.getData(), targetClass);
-        return event.withData(typedData);
-    }
 
     public Mono<Void> handleGameEvent(RequestEvent<?> event, GameState gameState, Player player) {
         if (!player.equals(gameState.getCurrentPlayer())) {
             return Mono.error(new WebSocketBusinessException(NOT_YOUR_TURN));
         }
 
-        GameEventType eventType = GameEventType.from(event.getEventType().getSubType());
+        SubCategory eventType = SubCategory.from(event.getEventType().getSubType());
 
         return switch (eventType) {
-            case NORMAL_SUBMIT -> handleNormalSubmit(convertData(event, NormalSubmitReq.class), gameState, player);
-            case FLOOR_SELECT -> handleFloorSelect(convertData(event, NormalSubmitReq.class), gameState, player);
-            case GO_STOP_CHOICE -> handleGoStopChoice(convertData(event, GoStopReq.class), gameState, player);
+            case NORMAL_SUBMIT -> handleNormalSubmit((RequestEvent<NormalSubmitReq>)event, gameState, player);
+            case FLOOR_SELECT -> handleFloorSelect((RequestEvent<NormalSubmitReq>)event, gameState, player);
+            case GO_STOP_CHOICE -> handleGoStopChoice((RequestEvent<GoStopReq>)event, gameState, player);
+            default -> Mono.error(new IllegalArgumentException("Invalid GAME event type"));
         };
     }
 

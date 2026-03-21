@@ -3,9 +3,9 @@ package com.pomingmatgo.gameservice.api.handler.websocket;
 import com.fasterxml.jackson.databind.JavaType;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.pomingmatgo.gameservice.api.handler.event.RequestEvent;
+import com.pomingmatgo.gameservice.api.handler.event.category.EventCategory;
+import com.pomingmatgo.gameservice.api.handler.event.category.SubCategory;
 import com.pomingmatgo.gameservice.api.request.websocket.JoinRoomReq;
-import com.pomingmatgo.gameservice.api.request.websocket.LeadSelectionReq;
-import com.pomingmatgo.gameservice.api.request.websocket.NormalSubmitReq;
 import com.pomingmatgo.gameservice.domain.GameState;
 import com.pomingmatgo.gameservice.domain.Player;
 import com.pomingmatgo.gameservice.domain.service.matgo.RoomService;
@@ -23,7 +23,6 @@ import org.springframework.web.reactive.socket.WebSocketHandler;
 import org.springframework.web.reactive.socket.WebSocketMessage;
 import org.springframework.web.reactive.socket.WebSocketSession;
 import reactor.core.publisher.Mono;
-import java.util.Map;
 
 import static com.pomingmatgo.gameservice.global.exception.WebSocketErrorCode.*;
 
@@ -40,14 +39,6 @@ public class GameWebSocketHandler implements WebSocketHandler {
     private final WsGameHandler wsGameHandler;
     private final MessageSender messageSender;
 
-    private static final Map<String, Class<?>> TYPE_MAPPINGS = Map.of(
-            "LEADER_SELECTION", LeadSelectionReq.class,
-            "NORMAL_SUBMIT", NormalSubmitReq.class,
-            "FLOOR_SELECT", NormalSubmitReq.class,
-            "CONNECT", JoinRoomReq.class
-    );
-
-
     @Override
     public Mono<Void> handle(WebSocketSession session) {
         return session.receive()
@@ -58,10 +49,10 @@ public class GameWebSocketHandler implements WebSocketHandler {
     private Mono<Void> handleMessage(WebSocketMessage message, WebSocketSession session) {
         return Mono.fromCallable(() -> {
                     JsonNode rootNode = objectMapper.readTree(message.getPayloadAsText());
-                    String subType = rootNode.path("eventType").path("subType").asText();
+                    String subTypeStr = rootNode.path("eventType").path("subType").asText();
 
-                    Class<?> targetType = TYPE_MAPPINGS.getOrDefault(subType, Object.class);
-                    JavaType type = objectMapper.getTypeFactory().constructParametricType(RequestEvent.class, targetType);
+                    SubCategory subType = SubCategory.from(subTypeStr);
+                    JavaType type = objectMapper.getTypeFactory().constructParametricType(RequestEvent.class, subType.getPayloadClass());
 
                     return (RequestEvent<?>) objectMapper.convertValue(rootNode, type);
                 })
@@ -70,7 +61,7 @@ public class GameWebSocketHandler implements WebSocketHandler {
     }
 
     private Mono<Void> processEvent(RequestEvent<?> event, WebSocketSession session) {
-        if ("CONNECT".equals(event.getEventType().getSubType())) {
+        if (SubCategory.CONNECT.name().equals(event.getEventType().getSubType())) {
             return handleJoinRoom((RequestEvent<JoinRoomReq>) event, session);
         }
 
@@ -122,11 +113,12 @@ public class GameWebSocketHandler implements WebSocketHandler {
     }
 
     private Mono<Void> routeEvent(RequestEvent<?> event, GameState gameState, Player player) {
-        String eventType = event.getEventType().getType();
+        EventCategory eventType = EventCategory.valueOf(event.getEventType().getType());
+
         return switch (eventType) {
-            case "ROOM" -> wsRoomHandler.handleRoomEvent(event, gameState, player);
-            case "PREGAME" -> wsPreGameHandler.handlePreGameEvent(event, gameState, player);
-            case "GAME" -> wsGameHandler.handleGameEvent(event, gameState, player);
+            case ROOM -> wsRoomHandler.handleRoomEvent(event, gameState, player);
+            case PREGAME -> wsPreGameHandler.handlePreGameEvent(event, gameState, player);
+            case GAME -> wsGameHandler.handleGameEvent(event, gameState, player);
             default -> Mono.empty();
         };
     }

@@ -1,6 +1,7 @@
 package com.pomingmatgo.gameservice.api.handler.websocket;
 
 import com.pomingmatgo.gameservice.api.handler.event.RequestEvent;
+import com.pomingmatgo.gameservice.api.handler.event.category.SubCategory;
 import com.pomingmatgo.gameservice.domain.GameState;
 import com.pomingmatgo.gameservice.domain.Player;
 import com.pomingmatgo.gameservice.domain.service.matgo.PreGameService;
@@ -19,21 +20,15 @@ public class WsRoomHandler {
     private final MessageSender messageSender;
     private final RoomService roomService;
     private final PreGameService preGameService;
-    private enum RoomEventType {
-        READY, UNREADY
-    }
 
     public Mono<Void> handleRoomEvent(RequestEvent<?> event, GameState gameState, Player player) {
-        RoomEventType eventType;
-        try {
-            eventType = RoomEventType.valueOf(event.getEventType().getSubType());
-        } catch (IllegalArgumentException e) {
-            return Mono.error(new IllegalArgumentException("Unsupported event type: " + event.getEventType().getSubType()));
-        }
+        SubCategory eventType = SubCategory.from(event.getEventType().getSubType());
 
         return switch (eventType) {
             case READY -> handleReadyEvent(gameState, player);
             case UNREADY -> handleUnreadyEvent(gameState, player);
+            default -> Mono.error(new IllegalArgumentException("Invalid GAME event type"));
+
         };
     }
 
