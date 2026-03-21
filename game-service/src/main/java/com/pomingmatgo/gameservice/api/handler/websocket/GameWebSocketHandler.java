@@ -62,7 +62,7 @@ public class GameWebSocketHandler implements WebSocketHandler {
 
     private Mono<Void> processEvent(RequestEvent<?> event, WebSocketSession session) {
         if (SubCategory.CONNECT.name().equals(event.getEventType().getSubType())) {
-            return handleJoinRoom((RequestEvent<JoinRoomReq>) event, session);
+            return handleJoinRoom(event.as(), session);
         }
 
         return sessionManager.getPlayerContext(session)

@@ -42,7 +42,7 @@ public class WsPreGameHandler {
         SubCategory eventType = SubCategory.from(event.getEventType().getSubType());
 
         return switch (eventType) {
-            case LEADER_SELECTION -> handleLeaderSelectionEvent((RequestEvent<LeadSelectionReq>)event, gameState, player);
+            case LEADER_SELECTION -> handleLeaderSelectionEvent(event.as(), gameState, player);
             default -> Mono.error(new IllegalArgumentException("Invalid GAME event type"));
         };
     }

@@ -10,10 +10,8 @@ public class RequestEvent<T> {
     private EventType eventType;
     private T data;
 
-    public <U> RequestEvent<U> withData(U newData) {
-        RequestEvent<U> newEvent = new RequestEvent<>();
-        newEvent.setEventType(this.eventType);
-        newEvent.setData(newData);
-        return newEvent;
+    @SuppressWarnings("unchecked")
+    public <U> RequestEvent<U> as() {
+        return (RequestEvent<U>) this;
     }
 }

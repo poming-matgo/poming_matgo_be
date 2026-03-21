@@ -34,9 +34,9 @@ public class WsGameHandler {
         SubCategory eventType = SubCategory.from(event.getEventType().getSubType());
 
         return switch (eventType) {
-            case NORMAL_SUBMIT -> handleNormalSubmit((RequestEvent<NormalSubmitReq>)event, gameState, player);
-            case FLOOR_SELECT -> handleFloorSelect((RequestEvent<NormalSubmitReq>)event, gameState, player);
-            case GO_STOP_CHOICE -> handleGoStopChoice((RequestEvent<GoStopReq>)event, gameState, player);
+            case NORMAL_SUBMIT -> handleNormalSubmit(event.as(), gameState, player);
+            case FLOOR_SELECT -> handleFloorSelect(event.as(), gameState, player);
+            case GO_STOP_CHOICE -> handleGoStopChoice(event.as(), gameState, player);
             default -> Mono.error(new IllegalArgumentException("Invalid GAME event type"));
         };
     }
