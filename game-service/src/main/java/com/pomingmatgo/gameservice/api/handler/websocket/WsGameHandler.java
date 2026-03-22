@@ -57,7 +57,7 @@ public class WsGameHandler {
 
                     Mono<Void> handleResult;
                     if (ctx.isChoiceRequired()) {
-                        handleResult = gameMessageSender.sendChooseFloorCardMessage(roomId, player, ctx.cardResult().getAcquiredCards());
+                        handleResult = gameMessageSender.sendChooseFloorCardMessage(roomId, player, ctx.cardResult().getSelectableCards());
                     } else {
                         handleResult = broadcastTurnResult(roomId, player, ctx.updatedGameState(), ctx.cardResult());
                     }
@@ -75,7 +75,7 @@ public class WsGameHandler {
         return gamePlayService.executeFloorSelection(roomId, gameState, player, event)
                 .flatMap(ctx -> {
                     if (ctx.isChoiceRequired()) {
-                        return gameMessageSender.sendChooseFloorCardMessage(roomId, player, ctx.cardResult().getAcquiredCards());
+                        return gameMessageSender.sendChooseFloorCardMessage(roomId, player, ctx.cardResult().getSelectableCards());
                     }
 
                     Mono<Void> sendAcquired = gameMessageSender.sendAcquiredCardMessage(roomId, player, ctx.cardResult().getAcquiredCards());

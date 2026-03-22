@@ -7,6 +7,7 @@ import lombok.Getter;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import java.util.Optional;
 
 @Getter
 @Builder(toBuilder = true)
@@ -18,6 +19,9 @@ public class ProcessCardResult {
     @Builder.Default
     private final List<SpecialEvent> specialEvents = new ArrayList<>();
 
+    @Builder.Default
+    private final List<Card> selectableCards = new ArrayList<>();
+
     private final boolean choiceRequired;
 
     private final boolean claimOpponentPi;
@@ -27,6 +31,7 @@ public class ProcessCardResult {
 
     public ProcessCardResult merge(ProcessCardResult other) {
         if (other == null) return this;
+        if (other.isChoiceRequired()) return other; // 선택이 필요한 결과가 있다면 병합이 의미없음
 
         List<Card> mergedAcquired = new ArrayList<>(this.acquiredCards);
         mergedAcquired.addAll(other.getAcquiredCards() != null ? other.getAcquiredCards() : Collections.emptyList());
@@ -56,13 +61,15 @@ public class ProcessCardResult {
     }
 
     public static ProcessCardResult choicePending(List<Card> cards) {
+        List<Card> safeCards = Optional.ofNullable(cards).orElseGet(ArrayList::new);
+
         return ProcessCardResult.builder()
-                .acquiredCards(cards != null ? cards : new ArrayList<>())
+                .selectableCards(new ArrayList<>(safeCards))
+                .acquiredCards(new ArrayList<>(safeCards))
                 .choiceRequired(true)
                 .claimOpponentPi(false)
                 .build();
     }
-
     public static ProcessCardResult claimOpponentPi(List<Card> cards, Card _moveCard) {
         return ProcessCardResult.builder()
                 .acquiredCards(cards != null ? cards : new ArrayList<>())
