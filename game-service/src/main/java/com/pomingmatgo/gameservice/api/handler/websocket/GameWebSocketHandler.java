@@ -85,7 +85,7 @@ public class GameWebSocketHandler implements WebSocketHandler {
 
         return roomService.getGameState(roomId)
                 .switchIfEmpty(Mono.error(new WebSocketBusinessException(NOT_EXISTED_ROOM)))
-                .flatMap(gameState -> Mono.fromCallable(() -> Player.fromNumber(gameState.getPlayerNumber(userId))))
+                .flatMap(gameState -> Mono.fromCallable(() -> gameState.getPlayerType(userId)))
                 .flatMap(player -> sessionManager.addPlayer(roomId, player, userId, session).thenReturn(player))
                 .flatMap(player -> messageSender.sendMessageToAllUser(
                         roomId, WebSocketResDto.of(player, "CONNECT", "접속했습니다."))

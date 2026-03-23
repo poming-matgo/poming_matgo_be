@@ -46,12 +46,12 @@ public class GameState implements Serializable {
     private GamePhase phase = GamePhase.IN_PROGRESS;
     private ChoiceInfo choiceInfo; // phase가 await류일때만 의미 있다.
 
-    public int getPlayerNumber(long userId) {
+    public Player getPlayerType(long userId) {
         if (Objects.equals(this.player1Id, userId)) {
-            return 1;
+            return Player.PLAYER_1;
         }
         if (Objects.equals(this.player2Id, userId)) {
-            return 2;
+            return Player.PLAYER_2;
         }
         throw new WebSocketBusinessException(WebSocketErrorCode.NOT_IN_ROOM);
     }
@@ -75,23 +75,22 @@ public class GameState implements Serializable {
 
     @JsonIgnore
     public Player getCurrentPlayer() {
-        return this.getLeadingPlayer()==this.getCurrentTurn() ? PLAYER_1 : PLAYER_2;
+        return this.getLeadingPlayer() == this.getCurrentTurn() ? PLAYER_1 : PLAYER_2;
     }
 
     @JsonIgnore
     public Player getOtherPlayer() {
-        return this.getLeadingPlayer()==this.getCurrentTurn() ? PLAYER_2 : PLAYER_1;
+        return this.getLeadingPlayer() == this.getCurrentTurn() ? PLAYER_2 : PLAYER_1;
     }
 
     public boolean canGoStop(Player player) {
         int score = player.getNumber() == 1 ? player1Score : player2Score;
         int prevGoScore = player.getNumber() == 1 ? player1GoScore : player2GoScore;
-        return score >=  MIN_GO_STOP_SCORE && score > prevGoScore;
+        return score >= MIN_GO_STOP_SCORE && score > prevGoScore;
     }
 
     @JsonIgnore
-    public boolean isPlaying(){
+    public boolean isPlaying() {
         return this.phase == GamePhase.IN_PROGRESS;
     }
 }
-
