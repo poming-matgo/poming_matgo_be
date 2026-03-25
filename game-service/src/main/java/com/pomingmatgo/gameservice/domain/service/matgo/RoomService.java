@@ -1,8 +1,8 @@
 package com.pomingmatgo.gameservice.domain.service.matgo;
 
-import com.pomingmatgo.gameservice.domain.GamePhase;
 import com.pomingmatgo.gameservice.domain.GameState;
 import com.pomingmatgo.gameservice.domain.Player;
+import com.pomingmatgo.gameservice.domain.PlayerState;
 import com.pomingmatgo.gameservice.domain.repository.GameStateRepository;
 import com.pomingmatgo.gameservice.global.exception.BusinessException;
 import com.pomingmatgo.gameservice.global.exception.ErrorCode;
@@ -14,7 +14,6 @@ import org.springframework.stereotype.Service;
 import reactor.core.publisher.Mono;
 
 import static com.pomingmatgo.gameservice.domain.GamePhase.DETERMINING_STARTING_PLAYER;
-import static com.pomingmatgo.gameservice.domain.GamePhase.NONE;
 
 
 @Service
@@ -38,13 +37,9 @@ public class RoomService {
                 .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.NOT_EXISTED_ROOM)))
                 .filter(gameState -> isUserInRoom(gameState, userId))
                 .flatMap(gameState -> {
-                    GameState.GameStateBuilder builder = gameState.toBuilder();
-                    if(gameState.getPlayer1Id() == userId) {
-                        builder.player1Id(null).player1Ready(false);
-                    } else {
-                        builder.player2Id(null).player2Ready(false);
-                    }
-                    GameState newState = builder.build();
+                    Player player = gameState.getPlayerType(userId);
+
+                    GameState newState = gameState.updatePlayerState(player, new PlayerState());
                     return gameStateRepository.save(newState);
                 })
                 .then();
@@ -73,13 +68,16 @@ public class RoomService {
     }
 
     private Mono<Void> saveWithUserId(GameState gameState, long userId) {
-        GameState.GameStateBuilder builder = gameState.toBuilder();
-        if (gameState.getPlayer1Id() == null) {
-            builder.player1Id(userId);
-        } else if (gameState.getPlayer2Id() == null) {
-            builder.player2Id(userId);
+        Player player;
+        if (gameState.getPlayer1().getUserId() == null) {
+            player = Player.PLAYER_1;
+        } else if (gameState.getPlayer2().getUserId() == null) {
+            player = Player.PLAYER_2;
+        } else {
+            return Mono.error(new WebSocketBusinessException(WebSocketErrorCode.FULL_ROOM));
         }
-        GameState newState = builder.build();
+
+        GameState newState = gameState.updatePlayerState(player, ps -> ps.toBuilder().userId(userId).build());
         return gameStateRepository.save(newState).then();
     }
 

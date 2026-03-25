@@ -47,8 +47,12 @@ public class GameService {
                     int player2Score = scoreCalculator.calculateTotalScore(player2Cards);
 
                     GameState newState = gameState.toBuilder()
-                            .player1Score(player1Score)
-                            .player2Score(player2Score)
+                            .player1(gameState.getPlayer1().toBuilder()
+                                    .score(player1Score)
+                                    .build())
+                            .player2(gameState.getPlayer2().toBuilder()
+                                    .score(player2Score)
+                                    .build())
                             .build();
                     return gameStateRepository.save(newState).thenReturn(newState);
                 });
@@ -312,19 +316,11 @@ public class GameService {
     }
 
     public Mono<GameState> executeGoStop(GameState gameState, Player player) {
-
-        GameState newState = switch (player) {
-            case PLAYER_1 -> gameState.toBuilder()
-                    .player1Go(gameState.getPlayer1Go() + 1)
-                    .player1GoScore(gameState.getPlayer1Score())
-                    .build();
-            case PLAYER_2 -> gameState.toBuilder()
-                    .player2Go(gameState.getPlayer2Go() + 1)
-                    .player2GoScore(gameState.getPlayer2Score())
-                    .build();
-            default -> throw new WebSocketBusinessException(INVALID_PLAYER);
-        };
-
+        GameState newState = gameState.updatePlayerState(player, ps -> ps.toBuilder()
+                .go(ps.getGo() + 1)
+                .goScore(ps.getScore())
+                .build()
+        );
         return Mono.just(newState);
     }
 }

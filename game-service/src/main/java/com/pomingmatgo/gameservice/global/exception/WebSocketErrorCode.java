@@ -14,6 +14,7 @@ public enum WebSocketErrorCode {
     //비즈니스 에러
     NOT_EXISTED_ROOM( "존재하지 않는 방입니다."),
     NOT_IN_ROOM("방에 입장하지 않았습니다."),
+    FULL_ROOM("방이 꽉 찼습니다."),
 
     //선두 플레이어 선택
     ALREADY_SELECTED_CARD("이미 선택된 카드입니다."),
