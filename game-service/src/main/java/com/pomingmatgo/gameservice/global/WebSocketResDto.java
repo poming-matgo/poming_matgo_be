@@ -5,9 +5,9 @@ import lombok.Getter;
 
 @Getter
 public class WebSocketResDto<T> {
-    private Player player;
-    private String status;
-    private String message;
+    private final Player player;
+    private final String status;
+    private final String message;
     private T data;
 
     public WebSocketResDto(Player player, String status, String message) {

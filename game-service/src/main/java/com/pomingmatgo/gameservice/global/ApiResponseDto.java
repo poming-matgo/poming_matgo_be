@@ -4,8 +4,8 @@ import lombok.Getter;
 
 @Getter
 public class ApiResponseDto<T> {
-    private int status;
-    private String message;
+    private final int status;
+    private final String message;
     private T data;
 
     public ApiResponseDto(int status, String message) {
