@@ -26,14 +26,11 @@ public class InstalledCardRepository {
     private static final String HIDDEN_CARD_KEY_FORMAT = "game:%d:cards:hidden";
 
     private String getKeyPrefixForPlayer(Player player, long roomId) {
-        switch (player) {
-            case PLAYER_1:
-                return String.format(PLAYER1_CARD_KEY_FORMAT, roomId);
-            case PLAYER_2:
-                return String.format(PLAYER2_CARD_KEY_FORMAT, roomId);
-            default:
-                throw new WebSocketBusinessException(SYSTEM_ERROR);
-        }
+        return switch (player) {
+            case PLAYER_1 -> String.format(PLAYER1_CARD_KEY_FORMAT, roomId);
+            case PLAYER_2 -> String.format(PLAYER2_CARD_KEY_FORMAT, roomId);
+            default -> throw new WebSocketBusinessException(SYSTEM_ERROR);
+        };
     }
 
     private String generateRevealedCardKey(long roomId, long month) {
