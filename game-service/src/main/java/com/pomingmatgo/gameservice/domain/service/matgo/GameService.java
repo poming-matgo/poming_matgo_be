@@ -268,11 +268,6 @@ public class GameService {
         }
     }
 
-    private Mono<ProcessCardResult> processSimpleAcquisition(Card card1, Card card2) {
-        List<Card> acquiredCards = List.of(card1, card2);
-        return Mono.just(ProcessCardResult.immediate(acquiredCards));
-    }
-
     private Mono<ProcessCardResult> finalizeTurn(GameState gameState, List<Card> prevCards, List<Card> newCards) {
         List<Card> nonNullPrevCards = Optional.ofNullable(prevCards).orElse(Collections.emptyList());
         List<Card> finalAcquiredCards = new ArrayList<>(nonNullPrevCards);

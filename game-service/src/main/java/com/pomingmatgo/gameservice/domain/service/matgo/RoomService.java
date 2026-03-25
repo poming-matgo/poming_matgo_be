@@ -59,10 +59,6 @@ public class RoomService {
         return gameState.getPlayer1Id() != null && gameState.getPlayer2Id() != null;
     }
 
-    private boolean isUserInRoom(GameState gameState, Long userId) {
-        return userId.equals(gameState.getPlayer1Id()) || userId.equals(gameState.getPlayer2Id());
-    }
-
     public Mono<GameState> getGameState(Long roomId) {
         return gameStateRepository.findById(roomId);
     }
