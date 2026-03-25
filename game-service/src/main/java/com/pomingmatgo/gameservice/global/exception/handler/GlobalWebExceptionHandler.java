@@ -39,8 +39,7 @@ public class GlobalWebExceptionHandler implements ErrorWebExceptionHandler {
         serverWebExchange.getResponse().getHeaders()
                 .setContentType(MediaType.APPLICATION_JSON);
 
-        if (throwable instanceof BusinessException) {
-            BusinessException ex = (BusinessException) throwable;
+        if (throwable instanceof BusinessException ex) {
             errorResponse = new ErrorResponseDto(ex.getErrorCode());
             serverWebExchange.getResponse()
                     .setStatusCode(HttpStatus.valueOf(ex.getErrorCode().getStatusCode()));
