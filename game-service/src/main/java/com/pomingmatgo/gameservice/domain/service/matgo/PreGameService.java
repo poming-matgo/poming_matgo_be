@@ -1,7 +1,5 @@
 package com.pomingmatgo.gameservice.domain.service.matgo;
 
-import com.pomingmatgo.gameservice.api.handler.event.RequestEvent;
-import com.pomingmatgo.gameservice.api.request.websocket.LeadSelectionReq;
 import com.pomingmatgo.gameservice.api.response.websocket.LeadSelectionRes;
 import com.pomingmatgo.gameservice.domain.*;
 import com.pomingmatgo.gameservice.domain.card.Card;

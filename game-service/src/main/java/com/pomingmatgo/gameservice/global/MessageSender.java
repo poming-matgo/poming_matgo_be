@@ -1,7 +1,6 @@
 package com.pomingmatgo.gameservice.global;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.pomingmatgo.gameservice.global.session.RoomSessionData;
 import com.pomingmatgo.gameservice.global.session.SessionManager;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
