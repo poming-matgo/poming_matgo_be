@@ -46,14 +46,8 @@ public class GameService {
                     int player1Score = scoreCalculator.calculateTotalScore(player1Cards);
                     int player2Score = scoreCalculator.calculateTotalScore(player2Cards);
 
-                    GameState newState = gameState.toBuilder()
-                            .player1(gameState.getPlayer1().toBuilder()
-                                    .score(player1Score)
-                                    .build())
-                            .player2(gameState.getPlayer2().toBuilder()
-                                    .score(player2Score)
-                                    .build())
-                            .build();
+                    GameState newState = gameState.updatePlayerState(Player.PLAYER_1, ps -> ps.toBuilder().score(player1Score).build())
+                            .updatePlayerState(Player.PLAYER_2, ps -> ps.toBuilder().score(player2Score).build());
                     return gameStateRepository.save(newState).thenReturn(newState);
                 });
     }
