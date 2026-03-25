@@ -16,8 +16,6 @@ import reactor.core.publisher.Mono;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
-
-import static com.pomingmatgo.gameservice.domain.Player.PLAYER_1;
 import static com.pomingmatgo.gameservice.domain.Player.PLAYER_NOTHING;
 
 @Component
@@ -101,13 +99,13 @@ public class GameMessageSender {
 
     public Mono<Void> sendGoStopChoiceMessage(GameState gameState, Player player) {
         long roomId = gameState.getRoomId();
-        int prevGoNum = player == PLAYER_1 ? gameState.getPlayer1Go() : gameState.getPlayer2Go();
         Player otherPlayer = gameState.getOtherPlayer();
+        int nextGoNum = gameState.getPlayerState(player).getGo() + 1;
         WebSocketSession session = sessionManager.getSession(roomId, player.getNumber());
         WebSocketSession otherSession = sessionManager.getSession(roomId, otherPlayer.getNumber());
         return messageSender.sendMessageToSession(
                 session,
-                WebSocketResDto.of(player, "GO_STOP_CHOICE", "고/스톱 선택", prevGoNum+1)
+                WebSocketResDto.of(player, "GO_STOP_CHOICE", "고/스톱 선택", nextGoNum)
         ).then(
                 messageSender.sendMessageToSession(
                         otherSession,
@@ -118,7 +116,7 @@ public class GameMessageSender {
 
     public Mono<Void> sendGoResultMessage(GameState gameState, Player player) {
         long roomId = gameState.getRoomId();
-        long goNum = player == PLAYER_1 ? gameState.getPlayer1Go() : gameState.getPlayer2Go();
+        long goNum = gameState.getPlayerState(player).getGo();
         return messageSender.sendMessageToAllUser(
                 roomId,
                 WebSocketResDto.of(player, "GO_RESULT", "고 횟수", goNum)

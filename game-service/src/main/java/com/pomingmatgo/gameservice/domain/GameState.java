@@ -35,45 +35,9 @@ public class GameState implements Serializable {
     private int currentTurn;
     private int round;
 
-    @JsonIgnore
-    @Deprecated
-    public Long getPlayer1Id() { return player1.getUserId(); }
-
-    @JsonIgnore
-    @Deprecated
-    public int getPlayer1Score() { return player1.getScore(); }
-
-    @JsonIgnore
-    @Deprecated
-    public boolean isPlayer1Ready() { return player1.isReady(); }
-
-    @JsonIgnore
-    @Deprecated
-    public int getPlayer1Go() { return player1.getGo(); }
-
-    @JsonIgnore
-    @Deprecated
-    public int getPlayer1GoScore() { return player1.getGoScore(); }
-
-    @JsonIgnore
-    @Deprecated
-    public Long getPlayer2Id() { return player2.getUserId(); }
-
-    @JsonIgnore
-    @Deprecated
-    public int getPlayer2Score() { return player2.getScore(); }
-
-    @JsonIgnore
-    @Deprecated
-    public boolean isPlayer2Ready() { return player2.isReady(); }
-
-    @JsonIgnore
-    @Deprecated
-    public int getPlayer2Go() { return player2.getGo(); }
-
-    @JsonIgnore
-    @Deprecated
-    public int getPlayer2GoScore() { return player2.getGoScore(); }
+    public PlayerState getPlayerState(Player player) {
+        return player == Player.PLAYER_1 ? this.player1 : this.player2;
+    }
 
     public GameState updatePlayerState(Player player, PlayerState newState) {
         if (player == Player.PLAYER_1) {
