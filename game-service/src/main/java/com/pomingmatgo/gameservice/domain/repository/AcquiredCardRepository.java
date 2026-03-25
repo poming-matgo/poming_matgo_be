@@ -23,11 +23,6 @@ public class AcquiredCardRepository {
         return String.format(KEY_FORMAT, roomId, playerId);
     }
 
-    public Mono<Long> addCard(long roomId, long playerId, Card card) {
-        if(card == null) return Mono.just(0L);
-        return redisOps.opsForSet().add(generateKey(roomId, playerId), card.name());
-    }
-
     public Mono<Long> addCards(long roomId, long playerId, List<Card> cards) {
         if (cards == null || cards.isEmpty()) {
             return Mono.just(0L);

@@ -15,18 +15,6 @@ public class RoomSessionData {
     private Long player2Id;
     private WebSocketSession player2Session;
 
-    public Long getUserIdByPlayerNum(int playerNum) {
-        if (playerNum == 1) return player1Id;
-        if (playerNum == 2) return player2Id;
-        return null;
-    }
-
-    public Integer getPlayerNumByUserId(long userId) {
-        if (userId == player1Id) return 1;
-        if (userId == player2Id) return 2;
-        return null;
-    }
-
     public void addPlayer(Player player, long userId, WebSocketSession session) {
         if (player == Player.PLAYER_1) {
             this.player1Id = userId;

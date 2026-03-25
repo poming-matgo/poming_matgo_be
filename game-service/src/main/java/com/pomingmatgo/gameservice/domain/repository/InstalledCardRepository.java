@@ -74,10 +74,10 @@ public class InstalledCardRepository {
     }
 
     public Mono<Boolean> deletePlayerCards(long roomId, Player player) {
-        return deleteAllPlayerCard(roomId, getKeyPrefixForPlayer(player, roomId));
+        return deleteAllPlayerCard(getKeyPrefixForPlayer(player, roomId));
     }
 
-    private Mono<Boolean> deleteAllPlayerCard(long roomId, String redisKey) {
+    private Mono<Boolean> deleteAllPlayerCard(String redisKey) {
         return redisOps.delete(redisKey)
                 .thenReturn(true);
     }
@@ -116,7 +116,7 @@ public class InstalledCardRepository {
                 .map(Card::valueOf);
     }
 
-    private Mono<List<Card>> getCards(long roomId, String redisKey) {
+    private Mono<List<Card>> getCards(String redisKey) {
         return redisOps.opsForList()
                 .range(redisKey, 0, -1)
                 .map(Card::valueOf)
@@ -124,7 +124,7 @@ public class InstalledCardRepository {
     }
 
     public Mono<List<Card>> getPlayerCards(Long roomId, Player player) {
-        return getCards(roomId, getKeyPrefixForPlayer(player, roomId));
+        return getCards(getKeyPrefixForPlayer(player, roomId));
     }
 
     public Mono<Void> updatePlayerCards(long roomId, Player player, List<Card> cards) {
