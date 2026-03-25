@@ -46,8 +46,7 @@ public class RoomService {
     }
 
     private boolean isUserInRoom(GameState gameState, long userId) {
-        return (gameState.getPlayer1Id() != null && gameState.getPlayer1Id() == userId) ||
-                (gameState.getPlayer2Id() != null && gameState.getPlayer2Id() == userId);
+        return gameState.hasUser(userId);
     }
 
     public Mono<Void> deleteRoom(long roomId) {
@@ -56,7 +55,7 @@ public class RoomService {
     }
 
     private boolean isRoomFull(GameState gameState) {
-        return gameState.getPlayer1Id() != null && gameState.getPlayer2Id() != null;
+        return gameState.isRoomFull();
     }
 
     public Mono<GameState> getGameState(Long roomId) {
@@ -64,16 +63,10 @@ public class RoomService {
     }
 
     private Mono<Void> saveWithUserId(GameState gameState, long userId) {
-        Player player;
-        if (gameState.getPlayer1().getUserId() == null) {
-            player = Player.PLAYER_1;
-        } else if (gameState.getPlayer2().getUserId() == null) {
-            player = Player.PLAYER_2;
-        } else {
+        if (!gameState.canJoin()) {
             return Mono.error(new WebSocketBusinessException(WebSocketErrorCode.FULL_ROOM));
         }
-
-        GameState newState = gameState.updatePlayerState(player, ps -> ps.toBuilder().userId(userId).build());
+        GameState newState = gameState.join(userId);
         return gameStateRepository.save(newState).then();
     }
 
@@ -108,7 +101,7 @@ public class RoomService {
 
 
     public boolean checkAllPlayersReady(GameState gs) {
-        return gs.isPlayer1Ready() && gs.isPlayer2Ready();
+        return gs.allPlayersReady();
     }
 
     public Mono<GameState> startGame(GameState gameState) {

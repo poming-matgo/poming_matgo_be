@@ -140,4 +140,33 @@ public class GameState implements Serializable {
     public boolean isPlaying() {
         return this.phase == GamePhase.IN_PROGRESS;
     }
+
+    public boolean hasUser(long userId) {
+        return Objects.equals(this.player1.getUserId(), userId) ||
+                Objects.equals(this.player2.getUserId(), userId);
+    }
+
+    @JsonIgnore
+    public boolean isRoomFull() {
+        return this.player1.getUserId() != null && this.player2.getUserId() != null;
+    }
+
+    public boolean canJoin() {
+        return this.player1.getUserId() == null || this.player2.getUserId() == null;
+    }
+
+    public GameState join(long userId) {
+        if (this.player1.getUserId() == null) {
+            return this.updatePlayerState(Player.PLAYER_1, ps -> ps.toBuilder().userId(userId).build());
+        }
+        if (this.player2.getUserId() == null) {
+            return this.updatePlayerState(Player.PLAYER_2, ps -> ps.toBuilder().userId(userId).build());
+        }
+
+        throw new WebSocketBusinessException(WebSocketErrorCode.FULL_ROOM);
+    }
+
+    public boolean allPlayersReady() {
+        return this.player1.isReady() && this.player2.isReady();
+    }
 }
