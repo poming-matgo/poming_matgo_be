@@ -18,12 +18,16 @@ import com.pomingmatgo.gameservice.global.exception.dto.WebSocketErrorResDto;
 import com.pomingmatgo.gameservice.global.session.SessionManager;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.redisson.api.RedissonReactiveClient;
 import org.springframework.stereotype.Component;
 import org.springframework.web.reactive.socket.WebSocketHandler;
 import org.springframework.web.reactive.socket.WebSocketMessage;
 import org.springframework.web.reactive.socket.WebSocketSession;
 import reactor.core.publisher.Mono;
 
+import java.time.Duration;
+
+import static com.pomingmatgo.gameservice.domain.GamePhase.IN_PROGRESS;
 import static com.pomingmatgo.gameservice.global.exception.WebSocketErrorCode.*;
 
 
@@ -38,16 +42,18 @@ public class GameWebSocketHandler implements WebSocketHandler {
     private final WsPreGameHandler wsPreGameHandler;
     private final WsGameHandler wsGameHandler;
     private final MessageSender messageSender;
+    private final RedissonReactiveClient redissonReactiveClient;
 
     @Override
     public Mono<Void> handle(WebSocketSession session) {
         return session.receive()
                 .flatMap(message -> {
-                    long exactArrivalTime = System.currentTimeMillis();
-                    return handleMessage(message, session, exactArrivalTime);
+                    long arrivalTime = System.currentTimeMillis();
+                    return handleMessage(message, session, arrivalTime);
                 })
                 .then();
     }
+
     private Mono<Void> handleMessage(WebSocketMessage message, WebSocketSession session, long arrivalTime) {
         return Mono.fromCallable(() -> {
                     JsonNode rootNode = objectMapper.readTree(message.getPayloadAsText());
@@ -67,13 +73,42 @@ public class GameWebSocketHandler implements WebSocketHandler {
 
     private Mono<Void> processEvent(RequestEvent<?> event, WebSocketSession session) {
         if (SubCategory.CONNECT.name().equals(event.getEventType().getSubType())) {
-            return handleJoinRoom(event.as(), session);
+            return handleJoinRoom((RequestEvent<JoinRoomReq>) event, session);
         }
 
         return sessionManager.getPlayerContext(session)
-                .flatMap(context -> roomService.getGameState(context.roomId())
-                        .switchIfEmpty(Mono.error(new WebSocketBusinessException(NOT_IN_ROOM)))
-                        .flatMap(gameState -> routeEvent(event, gameState, Player.fromNumber(context.playerNum()))));
+                .switchIfEmpty(Mono.error(new WebSocketBusinessException(NOT_IN_ROOM)))
+                .flatMap(context -> {
+                    long roomId = context.roomId();
+                    Player player = Player.fromNumber(context.playerNum());
+
+                    return roomService.getGameState(roomId)
+                            .switchIfEmpty(Mono.error(new WebSocketBusinessException(NOT_EXISTED_ROOM)))
+                            .flatMap(gameState -> {
+                                if (isGameAction(event, gameState, player)) {
+                                    String flagKey = "IN_FLIGHT:ROOM:" + roomId;
+
+                                    return redissonReactiveClient.getBucket(flagKey)
+                                            .set(event.getArrivalTime(), Duration.ofSeconds(3))
+                                            .then(routeEvent(event, gameState, player));
+                                }
+
+                                return routeEvent(event, gameState, player);
+                            });
+                });
+    }
+
+    private boolean isGameAction(RequestEvent<?> event, GameState gameState, Player player) {
+        SubCategory eventType = SubCategory.from(event.getEventType().getSubType());
+
+        boolean cond1 =  eventType == SubCategory.NORMAL_SUBMIT ||
+               eventType == SubCategory.FLOOR_SELECT ||
+               eventType == SubCategory.GO_STOP_CHOICE;
+
+        boolean cond2 = gameState.getPhase() == IN_PROGRESS &&
+                player.equals(gameState.getCurrentPlayer());
+
+        return cond1 && cond2;
     }
 
     private Mono<Void> handleJoinRoom(RequestEvent<JoinRoomReq> event, WebSocketSession session) {
