@@ -42,11 +42,13 @@ public class GameWebSocketHandler implements WebSocketHandler {
     @Override
     public Mono<Void> handle(WebSocketSession session) {
         return session.receive()
-                .flatMap(message -> handleMessage(message, session))
+                .flatMap(message -> {
+                    long exactArrivalTime = System.currentTimeMillis();
+                    return handleMessage(message, session, exactArrivalTime);
+                })
                 .then();
     }
-
-    private Mono<Void> handleMessage(WebSocketMessage message, WebSocketSession session) {
+    private Mono<Void> handleMessage(WebSocketMessage message, WebSocketSession session, long arrivalTime) {
         return Mono.fromCallable(() -> {
                     JsonNode rootNode = objectMapper.readTree(message.getPayloadAsText());
                     String subTypeStr = rootNode.path("eventType").path("subType").asText();
@@ -54,7 +56,10 @@ public class GameWebSocketHandler implements WebSocketHandler {
                     SubCategory subType = SubCategory.from(subTypeStr);
                     JavaType type = objectMapper.getTypeFactory().constructParametricType(RequestEvent.class, subType.getPayloadClass());
 
-                    return (RequestEvent<?>) objectMapper.convertValue(rootNode, type);
+                    RequestEvent<?> event = objectMapper.convertValue(rootNode, type);
+
+                    event.setArrivalTime(arrivalTime);
+                    return event;
                 })
                 .flatMap(event -> processEvent(event, session))
                 .onErrorResume(error -> handleWebSocketError(session, error));
