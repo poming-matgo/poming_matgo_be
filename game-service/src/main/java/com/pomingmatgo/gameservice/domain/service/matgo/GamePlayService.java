@@ -16,7 +16,7 @@ import reactor.core.publisher.Mono;
 public class GamePlayService {
     private final GameService gameService;
 
-    @GameLock(key = "'game:' + #roomId")
+    @GameLock(key = "'game:' + #roomId + ':' + #gameState.round + ':' + #gameState.turn")
     public Mono<TurnExecutionResult> executeNormalSubmit(long roomId, GameState gameState, Player player, RequestEvent<NormalSubmitReq> event) {
         Mono<Card> submittedCardMono = gameService.submitCardEvent(roomId, player, event);
         Mono<Card> topCardMono = gameService.getTopCard(roomId);
@@ -33,7 +33,7 @@ public class GamePlayService {
                 });
     }
 
-    @GameLock(key = "'game:' + #roomId")
+    @GameLock(key = "'game:' + #roomId + ':' + #gameState.round + ':' + #gameState.turn")
     public Mono<FloorSelectionResult> executeFloorSelection(long roomId, GameState gameState, Player player, RequestEvent<NormalSubmitReq> event) {
         return gameService.selectFloorCard(gameState, player, event)
                 .flatMap(result -> {
