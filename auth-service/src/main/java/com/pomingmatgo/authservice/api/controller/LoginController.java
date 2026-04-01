@@ -3,7 +3,6 @@ package com.pomingmatgo.authservice.api.controller;
 import com.pomingmatgo.authservice.api.request.LoginInfo;
 import com.pomingmatgo.authservice.api.response.AuthCodeResponse;
 import com.pomingmatgo.authservice.domain.service.login.service.LoginService;
-import com.pomingmatgo.authservice.domain.service.login.service.SocialLoginService;
 import com.pomingmatgo.authservice.global.ApiResponseDto;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
