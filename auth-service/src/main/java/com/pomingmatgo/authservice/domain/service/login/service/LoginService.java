@@ -2,6 +2,8 @@ package com.pomingmatgo.authservice.domain.service.login.service;
 
 import com.pomingmatgo.authservice.api.request.LoginInfo;
 import com.pomingmatgo.authservice.api.response.AuthCodeResponse;
+import com.pomingmatgo.authservice.global.exception.BusinessException;
+import com.pomingmatgo.authservice.global.exception.ErrorCode;
 import com.pomingmatgo.authservice.global.security.PKCEUtil;
 import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.annotation.Value;
@@ -42,6 +44,10 @@ public class LoginService {
         Authentication authResult = authenticationProvider.authenticate(authentication);
 
         RegisteredClient registeredClient = registeredClientRepository.findByClientId("react");
+        if (registeredClient == null) {
+            throw new BusinessException(ErrorCode.CLIENT_NOT_FOUND);
+        }
+
 
         String authorizationCode = UUID.randomUUID().toString();
         String codeChallenge = PKCEUtil.generateCodeChallenge(loginInfo.getCodeVerifier());
