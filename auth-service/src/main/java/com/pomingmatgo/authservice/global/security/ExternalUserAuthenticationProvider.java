@@ -15,6 +15,8 @@ import org.springframework.web.client.RestTemplate;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 import java.util.Collections;
+import java.util.HashMap;
+import java.util.Map;
 
 
 @Component
@@ -30,14 +32,14 @@ public class ExternalUserAuthenticationProvider implements AuthenticationProvide
 
         // 외부 User 서버로 인증 요청
         // todo: userRepository로 책임 분리
-        String url = String.format(
-                userServiceAddress+"/login-process?identifier=%s&password=%s",
-                URLEncoder.encode(identifier, StandardCharsets.UTF_8),
-                URLEncoder.encode(password, StandardCharsets.UTF_8)
-        );
+        String url = userServiceAddress + "/login-process";
+
+        Map<String, String> requestBody = new HashMap<>();
+        requestBody.put("identifier", identifier);
+        requestBody.put("password", password);
 
         try {
-            User user = restTemplate.getForObject(url, User.class);
+            User user = restTemplate.postForObject(url, requestBody, User.class);
             if (user != null)
                 return new UsernamePasswordAuthenticationToken(user.getId(), null, Collections.emptyList());
             else
