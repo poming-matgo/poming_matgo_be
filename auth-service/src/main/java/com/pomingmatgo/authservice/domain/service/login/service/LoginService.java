@@ -48,13 +48,16 @@ public class LoginService {
             throw new BusinessException(ErrorCode.CLIENT_NOT_FOUND);
         }
 
+        String redirectUri = registeredClient.getRedirectUris().stream()
+                .findFirst()
+                .orElseThrow(() -> new BusinessException(ErrorCode.REDIRECT_URI_NOT_FOUND));
 
         String authorizationCode = UUID.randomUUID().toString();
         String codeChallenge = PKCEUtil.generateCodeChallenge(loginInfo.getCodeVerifier());
         OAuth2AuthorizationRequest authorizationRequest = OAuth2AuthorizationRequest.authorizationCode()
                 .clientId(registeredClient.getClientId())
                 .authorizationUri(authorizationUri)
-                .redirectUri(registeredClient.getRedirectUris().stream().findFirst().get())
+                .redirectUri(redirectUri)
                 .scopes(registeredClient.getScopes())
                 .state(UUID.randomUUID().toString())
                 .additionalParameters(params -> {

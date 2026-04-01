@@ -9,6 +9,9 @@ public enum ErrorCode {
     //입력 값 에러
     INVALID_FORM_INPUT(400, "폼의 입력 데이터가 유효하지 않습니다."),
 
+    //등록된 Redirect url 없음
+    CLIENT_NOT_FOUND(400, "등록된 Redirect URL이 없습니다."),
+    REDIRECT_URI_NOT_FOUND(400, "등록된 Redirect URL이 없습니다."),
 
     //시스템 예외
     //범용
