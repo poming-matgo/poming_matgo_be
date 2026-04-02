@@ -17,8 +17,8 @@ public class GamePlayService {
     private final GameService gameService;
 
     @GameLock(key = "'game:' + #roomId + ':' + #gameState.round + ':' + #gameState.turn")
-    public Mono<TurnExecutionResult> executeNormalSubmit(long roomId, GameState gameState, Player player, RequestEvent<NormalSubmitReq> event) {
-        Mono<Card> submittedCardMono = gameService.submitCardEvent(roomId, player, event);
+    public Mono<TurnExecutionResult> executeNormalSubmit(long roomId, GameState gameState, Player player, int cardIdx) {
+        Mono<Card> submittedCardMono = gameService.submitCardEvent(roomId, player, cardIdx);
         Mono<Card> topCardMono = gameService.getTopCard(roomId);
 
         return Mono.zip(submittedCardMono, topCardMono)

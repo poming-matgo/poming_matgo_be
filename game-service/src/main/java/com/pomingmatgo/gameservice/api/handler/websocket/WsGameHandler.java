@@ -47,8 +47,9 @@ public class WsGameHandler {
         }
 
         long roomId = gameState.getRoomId();
+        int cardIdx = event.getData().cardIndex();
 
-        return gamePlayService.executeNormalSubmit(roomId, gameState, player, event)
+        return gamePlayService.executeNormalSubmit(roomId, gameState, player, cardIdx)
                 .flatMap(ctx -> {
                     Mono<Void> sendInfos = Mono.when(
                             gameMessageSender.sendSubmitCardInfo(roomId, player, ctx.submittedCard()),

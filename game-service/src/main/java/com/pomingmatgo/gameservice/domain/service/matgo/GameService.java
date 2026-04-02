@@ -66,8 +66,7 @@ public class GameService {
     }
 
 
-    public Mono<Card> submitCardEvent(long roomId, Player player, RequestEvent<NormalSubmitReq> event) {
-        int cardIndex = event.getData().cardIndex();
+    public Mono<Card> submitCardEvent(long roomId, Player player, int cardIndex) {
         return installedCardRepository.getPlayerCards(roomId, player)
                 .flatMap(playerCards -> {
                     if (cardIndex < 0 || cardIndex >= playerCards.size()) {
