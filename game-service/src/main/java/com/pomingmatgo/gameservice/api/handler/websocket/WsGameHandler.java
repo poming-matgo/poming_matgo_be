@@ -5,14 +5,12 @@ import com.pomingmatgo.gameservice.api.handler.event.category.SubCategory;
 import com.pomingmatgo.gameservice.api.request.websocket.GoStopReq;
 import com.pomingmatgo.gameservice.api.request.websocket.NormalSubmitReq;
 import com.pomingmatgo.gameservice.api.response.websocket.GameMessageSender;
-import com.pomingmatgo.gameservice.api.response.websocket.ScoreInfoRes;
 import com.pomingmatgo.gameservice.domain.GameState;
 import com.pomingmatgo.gameservice.domain.Player;
 import com.pomingmatgo.gameservice.domain.service.matgo.*;
 import com.pomingmatgo.gameservice.global.exception.WebSocketBusinessException;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
-import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 
 import static com.pomingmatgo.gameservice.domain.GamePhase.*;
@@ -25,6 +23,7 @@ public class WsGameHandler {
 
     private final GamePlayService gamePlayService;
     private final GameMessageSender gameMessageSender;
+    private final GameNotificationService gameNotificationService;
 
     public Mono<Void> handleGameEvent(RequestEvent<?> event, GameState gameState, Player player) {
         if (!player.equals(gameState.getCurrentPlayer())) {
@@ -60,7 +59,7 @@ public class WsGameHandler {
                     if (ctx.isChoiceRequired()) {
                         handleResult = gameMessageSender.sendChooseFloorCardMessage(roomId, player, ctx.cardResult().getSelectableCards());
                     } else {
-                        handleResult = broadcastTurnResult(roomId, player, ctx.updatedGameState(), ctx.cardResult());
+                        handleResult = gameNotificationService.broadcastTurnResult(roomId, player, ctx.updatedGameState(), ctx.cardResult());
                     }
 
                     return sendInfos.then(handleResult);
@@ -83,7 +82,7 @@ public class WsGameHandler {
                     Mono<GameState> setNextTurn = gamePlayService.proceedToNextTurn(ctx.updatedGameState());
 
                     return sendAcquired.then(setNextTurn)
-                            .flatMap(this::broadcastNextTurnInfo);
+                            .flatMap(gameNotificationService::broadcastNextTurnInfo);
                 });
     }
 
@@ -98,46 +97,5 @@ public class WsGameHandler {
                     }
                 })
                 .then();
-    }
-
-    private Mono<Void> broadcastTurnResult(long roomId, Player player, GameState gameState, ProcessCardResult result) {
-        Mono<Void> sendMoveCards = Flux.fromIterable(result.getMoveCards())
-                .concatMap(card -> gameMessageSender.sendMovingCardMessage(roomId, player, gameState.getOtherPlayer(), card))
-                .then();
-
-        Mono<Void> sendAcquired = Mono.empty();
-        if (!result.getSpecialEvents().contains(SpecialEvent.PPEOK)) {
-            sendAcquired = gameMessageSender.sendAcquiredCardMessage(roomId, player, result.getAcquiredCards());
-        }
-
-        Mono<Void> sendSpecial = Flux.fromIterable(result.getSpecialEvents())
-                .concatMap(event -> gameMessageSender.sendSpecialEventMessageIfNeeded(roomId, player, event))
-                .then();
-
-        return sendMoveCards
-                .then(sendAcquired)
-                .then(sendSpecial)
-                .then(sendScoreInfo(gameState))
-                .then(Mono.defer(() -> {
-                    if (gamePlayService.canGoStop(gameState, player)) {
-                        return gameMessageSender.sendGoStopChoiceMessage(gameState, player);
-                    } else {
-                        return gamePlayService.proceedToNextTurn(gameState)
-                                .flatMap(gameMessageSender::sendTurnInfo);
-                    }
-                }));
-    }
-
-    private Mono<Void> sendScoreInfo(GameState gameState) {
-        ScoreInfoRes scoreInfoRes = ScoreInfoRes.from(gameState);
-        return gameMessageSender.sendScoreInfo(gameState.getRoomId(), scoreInfoRes);
-    }
-
-    private Mono<Void> broadcastNextTurnInfo(GameState nextState) {
-        ScoreInfoRes scoreInfoRes = ScoreInfoRes.from(nextState);
-        return Mono.when(
-                gameMessageSender.sendTurnInfo(nextState),
-                gameMessageSender.sendScoreInfo(nextState.getRoomId(), scoreInfoRes)
-        );
     }
 }
