@@ -299,6 +299,9 @@ public class GameService {
             builder.round(gameState.getRound() + 1); // todo: 마지막 라운드는 향후 처리 예정
         }
 
+        if (gameState.getRound() == 11)
+            builder.phase(GamePhase.END);
+
         GameState newGameState = builder.build();
 
         return Mono.just(newGameState);
@@ -311,5 +314,13 @@ public class GameService {
                 .build()
         );
         return Mono.just(newState);
+    }
+
+    public Mono<GameState> gameOver(GameState gameState, Player winner) {
+        GameState newState = gameState.toBuilder()
+                .phase(GamePhase.END)
+                .build();
+        return gameStateRepository.save(newState)
+                .thenReturn(newState);
     }
 }

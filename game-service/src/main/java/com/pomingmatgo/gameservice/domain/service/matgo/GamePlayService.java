@@ -3,10 +3,10 @@ package com.pomingmatgo.gameservice.domain.service.matgo;
 import com.pomingmatgo.gameservice.api.handler.event.RequestEvent;
 import com.pomingmatgo.gameservice.api.request.websocket.GoStopReq;
 import com.pomingmatgo.gameservice.api.request.websocket.NormalSubmitReq;
+import com.pomingmatgo.gameservice.domain.GamePhase;
 import com.pomingmatgo.gameservice.domain.GameState;
 import com.pomingmatgo.gameservice.domain.Player;
 import com.pomingmatgo.gameservice.domain.card.Card;
-import com.pomingmatgo.gameservice.scheduler.AutoPlayScheduler;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import reactor.core.publisher.Flux;
@@ -61,7 +61,8 @@ public class GamePlayService {
     }
 
     public Mono<GameState> proceedToNextTurn(GameState gameState) {
-        return gameService.setNextTurn(gameState)
+        return Mono.just(gameState)
+                .map(gameState::setNextTurn)
                 .flatMap(gameService::setGameInProgress);
     }
 
@@ -84,5 +85,9 @@ public class GamePlayService {
 
         return go ? gameService.executeGoStop(gameState, player)
                 .flatMap(this::proceedToNextTurn) : Mono.empty();
+    }
+
+    public Mono<GameState> gameOver(GameState gameState, Player winner) {
+        return gameService.gameOver(gameState, winner);
     }
 }

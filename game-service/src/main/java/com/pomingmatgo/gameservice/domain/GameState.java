@@ -140,4 +140,17 @@ public class GameState implements Serializable {
                 .lastTime(System.currentTimeMillis())
                 .build();
     }
+
+    public GameState setNextTurn(GameState gameState) {
+        int nextTurn = (gameState.getCurrentTurn() == 1) ? 2 : 1;
+        int nextRound = gameState.getRound() + (gameState.getCurrentTurn() == 2 ? 1 : 0);
+        GamePhase nextPhase = GamePhase.IN_PROGRESS;
+
+        return gameState.toBuilder()
+                .currentTurn(nextTurn)
+                .round(nextRound)
+                .phase(nextPhase)
+                .choiceInfo(null)
+                .build();
+    }
 }

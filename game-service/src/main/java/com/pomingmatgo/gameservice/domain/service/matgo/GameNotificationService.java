@@ -35,6 +35,11 @@ public class GameNotificationService {
                 .then(sendScoreInfo(gameState))
                 .then(Mono.defer(() -> {
                     if (gamePlayService.canGoStop(gameState, player)) {
+                        if(gameState.getRound() == 10) {
+                            return gamePlayService.gameOver(gameState, player)
+                                    .flatMap(finalState -> gameMessageSender.sendGameOverMessage(finalState, player)
+                                    .thenReturn(finalState));
+                        }
                         return gameMessageSender.sendGoStopChoiceMessage(gameState, player)
                                 .thenReturn(gameState);
 

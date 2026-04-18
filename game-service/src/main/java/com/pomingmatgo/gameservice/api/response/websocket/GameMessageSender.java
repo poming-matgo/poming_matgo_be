@@ -122,4 +122,12 @@ public class GameMessageSender {
                 WebSocketResDto.of(player, "GO_RESULT", "고 횟수", goNum)
         );
     }
+
+    public Mono<Void> sendGameOverMessage(GameState finalState, Player winner) {
+        long roomId = finalState.getRoomId();
+        return messageSender.sendMessageToAllUser(
+                roomId,
+                WebSocketResDto.of(PLAYER_NOTHING, "GAME_OVER", "게임 승리자", winner)
+        );
+    }
 }

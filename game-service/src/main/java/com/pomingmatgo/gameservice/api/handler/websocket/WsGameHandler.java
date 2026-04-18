@@ -90,10 +90,12 @@ public class WsGameHandler {
 
                     return sendInfos.then(handleResult);
                 });
-        return mainProcess
-                .then(redissonReactiveClient.getBucket(flagKey).delete())
-                .onErrorResume(error -> redissonReactiveClient.getBucket(flagKey).delete().then(Mono.error(error)))
-                .then();
+
+        return Mono.usingWhen(
+                Mono.just(flagKey),
+                key -> mainProcess,
+                key -> redissonReactiveClient.getBucket(key).delete()
+        ).then();
     }
 
     private Mono<Void> handleFloorSelect(RequestEvent<NormalSubmitReq> event, GameState gameState, Player player) {
