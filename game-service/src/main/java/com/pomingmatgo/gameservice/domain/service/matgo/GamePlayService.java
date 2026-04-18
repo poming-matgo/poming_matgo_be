@@ -6,6 +6,7 @@ import com.pomingmatgo.gameservice.api.request.websocket.NormalSubmitReq;
 import com.pomingmatgo.gameservice.domain.GameState;
 import com.pomingmatgo.gameservice.domain.Player;
 import com.pomingmatgo.gameservice.domain.card.Card;
+import com.pomingmatgo.gameservice.scheduler.AutoPlayScheduler;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import reactor.core.publisher.Flux;
@@ -16,24 +17,26 @@ import reactor.core.publisher.Mono;
 public class GamePlayService {
     private final GameService gameService;
 
-    @GameLock(key = "'game:' + #roomId + ':' + #gameState.round + ':' + #gameState.turn")
-    public Mono<TurnExecutionResult> executeNormalSubmit(long roomId, GameState gameState, Player player, int cardIdx) {
-        Mono<Card> submittedCardMono = gameService.submitCardEvent(roomId, player, cardIdx);
-        Mono<Card> topCardMono = gameService.getTopCard(roomId);
+    @GameLock(key = "'game:' + #roomId + ':' + #gameState.round + ':' + #gameState.currentTurn")
+    public Mono<TurnExecutionResult> executeNormalSubmit(long roomId, GameState gameState, Player player, int cardIdx, Runnable onLockAcquired) {
+        return Mono.defer(() -> {
+            if (onLockAcquired != null) {
+                onLockAcquired.run();
+            }
+            return Mono.zip(gameService.submitCardEvent(roomId, player, cardIdx), gameService.getTopCard(roomId))
+                    .flatMap(tuple -> {
+                        Card submittedCard = tuple.getT1();
+                        Card topCard = tuple.getT2();
 
-        return Mono.zip(submittedCardMono, topCardMono)
-                .flatMap(tuple -> {
-                    Card submittedCard = tuple.getT1();
-                    Card topCard = tuple.getT2();
-
-                    return gameService.submitCard(gameState, submittedCard, topCard)
-                            .flatMap(processResult -> buildNormalSubmitResult(
-                                    roomId, gameState, submittedCard, topCard, processResult
-                            ));
-                });
+                        return gameService.submitCard(gameState, submittedCard, topCard)
+                                .flatMap(processResult -> buildNormalSubmitResult(
+                                        roomId, gameState, submittedCard, topCard, processResult
+                                ));
+                    });
+        });
     }
 
-    @GameLock(key = "'game:' + #roomId + ':' + #gameState.round + ':' + #gameState.turn")
+    @GameLock(key = "'game:' + #roomId + ':' + #gameState.round + ':' + #gameState.currentTurn")
     public Mono<FloorSelectionResult> executeFloorSelection(long roomId, GameState gameState, Player player, RequestEvent<NormalSubmitReq> event) {
         return gameService.selectFloorCard(gameState, player, event)
                 .flatMap(result -> {

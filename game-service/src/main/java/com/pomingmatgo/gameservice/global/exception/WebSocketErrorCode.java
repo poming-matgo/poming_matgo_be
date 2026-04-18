@@ -29,8 +29,11 @@ public enum WebSocketErrorCode {
     //다시 시도
     TRY_AGAIN("다시 시도해주세요"),
 
-    //유요하지 않은 사용자
-    INVALID_PLAYER("유효하지 않은 플레이어입니다.");
+    //유효하지 않은 사용자
+    INVALID_PLAYER("유효하지 않은 플레이어입니다."),
+
+    //너무 많은 요청
+    TOO_MANY_REQUESTS("너무 많은 요청입니다. 잠시 후 다시 시도해주세요.");
     private final String message;
 
     WebSocketErrorCode(String message) {

@@ -15,7 +15,7 @@ public class GameNotificationService {
     private final GameMessageSender gameMessageSender;
     private final GamePlayService gamePlayService;
 
-    public Mono<Void> broadcastTurnResult(long roomId, Player player, GameState gameState, ProcessCardResult result) {
+    public Mono<GameState> broadcastTurnResult(long roomId, Player player, GameState gameState, ProcessCardResult result) {
         Mono<Void> sendMoveCards = Flux.fromIterable(result.getMoveCards())
                 .concatMap(card -> gameMessageSender.sendMovingCardMessage(roomId, player, gameState.getOtherPlayer(), card))
                 .then();
@@ -35,10 +35,13 @@ public class GameNotificationService {
                 .then(sendScoreInfo(gameState))
                 .then(Mono.defer(() -> {
                     if (gamePlayService.canGoStop(gameState, player)) {
-                        return gameMessageSender.sendGoStopChoiceMessage(gameState, player);
+                        return gameMessageSender.sendGoStopChoiceMessage(gameState, player)
+                                .thenReturn(gameState);
+
                     } else {
                         return gamePlayService.proceedToNextTurn(gameState)
-                                .flatMap(gameMessageSender::sendTurnInfo);
+                                .flatMap(nextState ->gameMessageSender.sendTurnInfo(nextState)
+                                .thenReturn(nextState));
                     }
                 }));
     }

@@ -9,7 +9,10 @@ import com.pomingmatgo.gameservice.domain.GameState;
 import com.pomingmatgo.gameservice.domain.Player;
 import com.pomingmatgo.gameservice.domain.service.matgo.*;
 import com.pomingmatgo.gameservice.global.exception.WebSocketBusinessException;
+import com.pomingmatgo.gameservice.scheduler.AutoPlayScheduler;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.redisson.api.RedissonReactiveClient;
 import org.springframework.stereotype.Component;
 import reactor.core.publisher.Mono;
 
@@ -19,11 +22,14 @@ import static com.pomingmatgo.gameservice.global.exception.WebSocketErrorCode.NO
 
 @Component
 @RequiredArgsConstructor
+@Slf4j
 public class WsGameHandler {
 
     private final GamePlayService gamePlayService;
     private final GameMessageSender gameMessageSender;
     private final GameNotificationService gameNotificationService;
+    private final AutoPlayScheduler autoPlayScheduler;
+    private final RedissonReactiveClient redissonReactiveClient;
 
     public Mono<Void> handleGameEvent(RequestEvent<?> event, GameState gameState, Player player) {
         if (!player.equals(gameState.getCurrentPlayer())) {
@@ -45,25 +51,49 @@ public class WsGameHandler {
             return Mono.error(new WebSocketBusinessException(INVALID_GAME_PHASE));
         }
 
+        long TURN_TIMEOUT_MILLIS = 10000L;
+
         long roomId = gameState.getRoomId();
         int cardIdx = event.getData().cardIndex();
 
-        return gamePlayService.executeNormalSubmit(roomId, gameState, player, cardIdx)
+        String flagKey = "IN_FLIGHT:ROOM:" + roomId;
+
+        Mono<Void> mainProcess =  gamePlayService.executeNormalSubmit(roomId, gameState, player, cardIdx, () -> autoPlayScheduler.cancelAutoPlay(roomId))
                 .flatMap(ctx -> {
                     Mono<Void> sendInfos = Mono.when(
                             gameMessageSender.sendSubmitCardInfo(roomId, player, ctx.submittedCard()),
                             gameMessageSender.sendTopCardInfo(roomId, player, ctx.topCard())
                     );
 
+                    long deadlineMillis = System.currentTimeMillis() + TURN_TIMEOUT_MILLIS;
+
                     Mono<Void> handleResult;
                     if (ctx.isChoiceRequired()) {
                         handleResult = gameMessageSender.sendChooseFloorCardMessage(roomId, player, ctx.cardResult().getSelectableCards());
                     } else {
-                        handleResult = gameNotificationService.broadcastTurnResult(roomId, player, ctx.updatedGameState(), ctx.cardResult());
+                        handleResult = gameNotificationService.broadcastTurnResult(roomId, player, ctx.updatedGameState(), ctx.cardResult())
+                                .doOnNext(nextState -> {
+                                    if (nextState.getPhase() == IN_PROGRESS) {
+                                        log.info("[AutoPlay Schedule] 스케줄링 등록! roomId: {}, 예약된 턴: ({}, {}), 대상 플레이어: {}",
+                                                roomId, nextState.getRound(), nextState.getCurrentTurn(), nextState.getCurrentPlayer());
+                                        autoPlayScheduler.scheduleAutoPlay(
+                                                roomId,
+                                                nextState.getRound(),
+                                                nextState.getCurrentTurn(),
+                                                nextState.getCurrentPlayer(),
+                                                deadlineMillis
+                                        );
+                                    }
+                                })
+                                .then();
                     }
 
                     return sendInfos.then(handleResult);
                 });
+        return mainProcess
+                .then(redissonReactiveClient.getBucket(flagKey).delete())
+                .onErrorResume(error -> redissonReactiveClient.getBucket(flagKey).delete().then(Mono.error(error)))
+                .then();
     }
 
     private Mono<Void> handleFloorSelect(RequestEvent<NormalSubmitReq> event, GameState gameState, Player player) {

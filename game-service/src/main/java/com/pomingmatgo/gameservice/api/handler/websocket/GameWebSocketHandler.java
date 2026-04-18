@@ -89,8 +89,11 @@ public class GameWebSocketHandler implements WebSocketHandler {
                                     String flagKey = "IN_FLIGHT:ROOM:" + roomId;
 
                                     return redissonReactiveClient.getBucket(flagKey)
-                                            .set(event.getArrivalTime(), Duration.ofSeconds(3))
-                                            .then(routeEvent(event, gameState, player));
+                                            .setIfAbsent(event.getArrivalTime(), Duration.ofSeconds(3))
+                                            .flatMap(isSet -> {
+                                                if (!isSet) return Mono.error(new WebSocketBusinessException(TOO_MANY_REQUESTS)); // 진행 중 예외
+                                                return routeEvent(event, gameState, player);
+                                            });
                                 }
 
                                 return routeEvent(event, gameState, player);
