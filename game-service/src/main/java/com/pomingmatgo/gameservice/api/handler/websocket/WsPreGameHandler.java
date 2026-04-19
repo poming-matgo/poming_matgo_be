@@ -96,22 +96,25 @@ public class WsPreGameHandler {
     private Mono<GameState> checkChongtongAndProceed(GameState gameState) {
         Long roomId = gameState.getRoomId();
 
-        Mono<Boolean> p1HasChongtong = preGameService.isConfusedPlayer(roomId, PLAYER_1);
-        Mono<Boolean> p2HasChongtong = preGameService.isConfusedPlayer(roomId, PLAYER_2);
+        Mono<Boolean> p1HasChongtong = preGameService.isConfusedPlayer(roomId, PLAYER_1)
+                .defaultIfEmpty(false);
+        Mono<Boolean> p2HasChongtong = preGameService.isConfusedPlayer(roomId, PLAYER_2)
+                .defaultIfEmpty(false);
 
         return Mono.zip(p1HasChongtong, p2HasChongtong)
                 .flatMap(tuple -> {
                     boolean p1Result = tuple.getT1();
                     boolean p2Result = tuple.getT2();
 
-                    if (p1Result && p2Result) {} // 둘 다 총통인 경우. 로또 확률보다 낮다 => 무승부 처리
-                    if (p1Result || p2Result) {
-                        Player winner = p1Result ? PLAYER_2 : PLAYER_1;
-                        return Mono.empty();
-                    } else {
-
+                    if (p1Result && p2Result) {
+                        // 둘 다 총통인 경우 — todo: 무승부 처리
                         return Mono.just(gameState);
                     }
+                    if (p1Result || p2Result) {
+                        // todo: 총통 승부 처리
+                        return Mono.just(gameState);
+                    }
+                    return Mono.just(gameState);
                 });
     }
 
