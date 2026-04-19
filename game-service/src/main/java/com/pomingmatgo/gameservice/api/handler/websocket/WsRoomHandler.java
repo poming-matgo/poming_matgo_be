@@ -45,40 +45,50 @@ public class WsRoomHandler {
         long roomId = gameState.getRoomId();
         RLockReactive lock = redissonReactiveClient.getLock("READY_LOCK:ROOM:" + roomId);
 
-        return lock.tryLock(3, 5, TimeUnit.SECONDS)
-                .flatMap(acquired -> {
-                    if (!acquired) {
-                        return Mono.error(new WebSocketBusinessException(WebSocketErrorCode.TOO_MANY_REQUESTS));
-                    }
-                    return roomService.readyFresh(roomId, player, true)
-                            .flatMap(freshState ->
-                                    messageSender.sendMessageToAllUser(
-                                                    roomId,
-                                                    WebSocketResDto.of(player, "READY", "Ready 했습니다.")
-                                            )
-                                            .then(checkAndProceedIfAllReady(freshState))
-                            )
-                            .doFinally(signal -> lock.unlock()
-                                    .subscribe(null, ex -> log.warn("READY_LOCK unlock failed for room {}", roomId, ex)));
-                });
+        return Mono.usingWhen(
+                lock.tryLock(5, 2, TimeUnit.SECONDS)
+                        .flatMap(acquired -> acquired
+                                ? Mono.just(lock)
+                                : Mono.error(new WebSocketBusinessException(WebSocketErrorCode.TOO_MANY_REQUESTS))),
+                acquiredLock -> roomService.readyFresh(roomId, player, true)
+                        .flatMap(freshState ->
+                                messageSender.sendMessageToAllUser(
+                                                roomId,
+                                                WebSocketResDto.of(player, "READY", "Ready 했습니다.")
+                                        )
+                                        .then(checkAndProceedIfAllReady(freshState))
+                        ),
+                this::releaseLock,
+                (acquiredLock, err) -> releaseLock(acquiredLock),
+                this::releaseLock
+        );
     }
 
     private Mono<Void> handleUnreadyEvent(GameState gameState, Player player) {
         long roomId = gameState.getRoomId();
         RLockReactive lock = redissonReactiveClient.getLock("READY_LOCK:ROOM:" + roomId);
 
-        return lock.tryLock(3, 5, TimeUnit.SECONDS)
-                .flatMap(acquired -> {
-                    if (!acquired) {
-                        return Mono.error(new WebSocketBusinessException(WebSocketErrorCode.TOO_MANY_REQUESTS));
-                    }
-                    return roomService.readyFresh(roomId, player, false)
-                            .then(messageSender.sendMessageToAllUser(
-                                    roomId,
-                                    WebSocketResDto.of(player, "UNREADY", "Ready 취소 했습니다.")
-                            ))
-                            .doFinally(signal -> lock.unlock()
-                                    .subscribe(null, ex -> log.warn("READY_LOCK unlock failed for room {}", roomId, ex)));
+        return Mono.usingWhen(
+                lock.tryLock(5, 2, TimeUnit.SECONDS)
+                        .flatMap(acquired -> acquired
+                                ? Mono.just(lock)
+                                : Mono.error(new WebSocketBusinessException(WebSocketErrorCode.TOO_MANY_REQUESTS))),
+                acquiredLock -> roomService.readyFresh(roomId, player, false)
+                        .then(messageSender.sendMessageToAllUser(
+                                roomId,
+                                WebSocketResDto.of(player, "UNREADY", "Ready 취소 했습니다.")
+                        )),
+                this::releaseLock,
+                (acquiredLock, err) -> releaseLock(acquiredLock),
+                this::releaseLock
+        );
+    }
+
+    private Mono<Void> releaseLock(RLockReactive lock) {
+        return lock.forceUnlock()
+                .then()
+                .onErrorResume(e -> {
+                    return Mono.empty();
                 });
     }
 
