@@ -6,6 +6,7 @@ import com.pomingmatgo.gameservice.domain.card.Card;
 import com.pomingmatgo.gameservice.domain.repository.GameStateRepository;
 import com.pomingmatgo.gameservice.domain.repository.InstalledCardRepository;
 import com.pomingmatgo.gameservice.domain.repository.LeadingPlayerRepository;
+import com.pomingmatgo.gameservice.global.exception.WebSocketBusinessException;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -17,6 +18,7 @@ import java.util.concurrent.ThreadLocalRandom;
 import java.util.stream.Collectors;
 
 import static com.pomingmatgo.gameservice.domain.GamePhase.IN_PROGRESS;
+import static com.pomingmatgo.gameservice.global.exception.WebSocketErrorCode.INVALID_GAME_PHASE;
 
 @Service
 @RequiredArgsConstructor
@@ -64,21 +66,18 @@ public class PreGameService {
                 });
     }
 
-    @GameLock(key = "'game:' + #gameState.roomId + ':lead:playerChoice'")
     public Mono<Boolean> selectCardAndCheckAllSelected(int cardIndex, GameState gameState, Player player) {
         Long roomId = gameState.getRoomId();
-        return Mono.zip(
-                        leadingPlayerRepository.getPlayerSelectedCard(roomId),
-                        leadingPlayerRepository.getCardByIndex(roomId, cardIndex)
-                )
-                .flatMap(tuple -> {
-                    ChooseLeadPlayer chooseCards = tuple.getT1();
-                    Card curUserSelectedCard = tuple.getT2();
-                    ChooseLeadPlayer updated = chooseCards.selectMonthForPlayer(player, curUserSelectedCard.getMonth());
-                    return leadingPlayerRepository.savePlayerSelectedCard(roomId, updated)
-                            .thenReturn(updated);
-                })
-                .map(updated -> updated.getPlayer1Month() != 0 && updated.getPlayer2Month() != 0);
+        return leadingPlayerRepository.getCardByIndex(roomId, cardIndex)
+                .switchIfEmpty(Mono.error(new WebSocketBusinessException(INVALID_GAME_PHASE)))
+                .flatMap(card -> leadingPlayerRepository.savePlayerMonth(roomId, player, card.getMonth()))
+                .then(leadingPlayerRepository.getPlayerSelectedCard(roomId))
+                .flatMap(choice -> {
+                    if (choice.getPlayer1Month() != 0 && choice.getPlayer2Month() != 0) {
+                        return leadingPlayerRepository.tryClaimLeaderSelectionTrigger(roomId);
+                    }
+                    return Mono.just(false);
+                });
     }
 
     public Mono<LeadSelectionRes> getLeadSelectionRes(Long roomId) {
