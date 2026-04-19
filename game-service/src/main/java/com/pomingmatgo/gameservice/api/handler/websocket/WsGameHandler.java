@@ -146,7 +146,9 @@ public class WsGameHandler {
                         return gameMessageSender.sendGoResultMessage(gs, player)
                                 .then(gameMessageSender.sendTurnInfo(gs));
                     } else {
-                        return Mono.empty();
+                        return gamePlayService.gameOver(gameState, player)
+                                .flatMap(finalState -> gameMessageSender.sendGameOverMessage(finalState, player)
+                                        .thenReturn(finalState));
                     }
                 })
                 .doOnNext(nextState -> {

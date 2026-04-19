@@ -9,6 +9,7 @@ import com.pomingmatgo.gameservice.domain.Player;
 import com.pomingmatgo.gameservice.domain.card.Card;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
+import org.springframework.web.reactive.function.client.WebClient;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 
@@ -16,6 +17,7 @@ import reactor.core.publisher.Mono;
 @RequiredArgsConstructor
 public class GamePlayService {
     private final GameService gameService;
+    private final WebClient.Builder builder;
 
     @GameLock(key = "'game:' + #roomId + ':' + #gameState.round + ':' + #gameState.currentTurn")
     public Mono<TurnExecutionResult> executeNormalSubmit(long roomId, GameState gameState, Player player, int cardIdx, Runnable onLockAcquired) {
@@ -94,7 +96,7 @@ public class GamePlayService {
             boolean go = event.getData().go();
 
             return go ? gameService.executeGoStop(gameState, player)
-                    .flatMap(this::proceedToNextTurn) : Mono.empty();
+                    .flatMap(this::proceedToNextTurn) : Mono.just(gameState.toBuilder().phase(GamePhase.END).build());
         });
     }
 
