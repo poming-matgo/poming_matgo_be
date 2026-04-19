@@ -148,7 +148,7 @@ public class WsGameHandler {
                         return gameMessageSender.sendGoResultMessage(gs, player)
                                 .then(gameMessageSender.sendTurnInfo(gs));
                     } else {
-                        return gamePlayService.gameOver(gameState, player)
+                        return gamePlayService.gameOver(gs, player)
                                 .flatMap(finalState -> gameMessageSender.sendGameOverMessage(finalState, player)
                                         .thenReturn(finalState));
                     }
