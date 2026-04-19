@@ -58,8 +58,8 @@ public class WsRoomHandler {
         return Mono.just(updatedGameState)
                 .filter(roomService::checkAllPlayersReady)
                 .flatMap(roomService::startGame)
-                .flatMap(state -> handleAllReadyEvent(state.getRoomId())
-                        .then(preGameService.pickFiveCardsAndSave(state.getRoomId()))
+                .flatMap(state -> preGameService.pickFiveCardsAndSave(state.getRoomId())
+                        .then(handleAllReadyEvent(state.getRoomId()))
                 );
     }
 
