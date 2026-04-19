@@ -81,7 +81,7 @@ public class AutoPlayScheduler {
                         return Mono.empty();
                     }
 
-                    String flagKey = "IN_FLIGHT:ROOM:" + roomId;
+                    String flagKey = "IN_FLIGHT:ROOM:" + roomId + ":PLAYER:" + currentPlayer.getNumber();
 
                     return redissonReactiveClient.getBucket(flagKey).isExists()
                             .flatMap(isDelayed -> {
@@ -96,7 +96,7 @@ public class AutoPlayScheduler {
     }
 
     private Mono<Void> executeAutoPlayLogic(long roomId, int round, int turnNumber, Player currentPlayer) {
-        String flagKey = "IN_FLIGHT:ROOM:" + roomId;
+        String flagKey = "IN_FLIGHT:ROOM:" + roomId + ":PLAYER:" + currentPlayer.getNumber();
         return redissonReactiveClient.getBucket(flagKey).setIfAbsent("AUTO_PLAY", Duration.ofSeconds(2))
                 .flatMap(acquired -> {
                     if (!acquired) return Mono.empty();

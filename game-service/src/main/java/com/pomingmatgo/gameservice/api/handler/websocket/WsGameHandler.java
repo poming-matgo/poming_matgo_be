@@ -56,7 +56,7 @@ public class WsGameHandler {
         long roomId = gameState.getRoomId();
         int cardIdx = event.getData().cardIndex();
 
-        String flagKey = "IN_FLIGHT:ROOM:" + roomId;
+        String flagKey = "IN_FLIGHT:ROOM:" + roomId + ":PLAYER:" + player.getNumber();
 
         Mono<Void> mainProcess =  gamePlayService.executeNormalSubmit(roomId, gameState, player, cardIdx, () -> autoPlayScheduler.cancelAutoPlay(roomId))
                 .flatMap(ctx -> {
@@ -140,7 +140,7 @@ public class WsGameHandler {
     private Mono<Void> handleGoStopChoice(RequestEvent<GoStopReq> event, GameState gameState, Player player) {
         long roomId = gameState.getRoomId();
         long deadlineMillis = System.currentTimeMillis() + TURN_TIMEOUT_MILLIS;
-        String flagKey = "IN_FLIGHT:ROOM:" + roomId;
+        String flagKey = "IN_FLIGHT:ROOM:" + roomId + ":PLAYER:" + player.getNumber();
 
         Mono<Void> mainProcess = gamePlayService.executeGoStop(gameState, player, event, () -> autoPlayScheduler.cancelAutoPlay(roomId))
                 .delayUntil(gs -> {

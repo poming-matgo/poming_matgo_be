@@ -86,7 +86,7 @@ public class GameWebSocketHandler implements WebSocketHandler {
                             .switchIfEmpty(Mono.error(new WebSocketBusinessException(NOT_EXISTED_ROOM)))
                             .flatMap(gameState -> {
                                 if (isGameAction(event, gameState, player)) {
-                                    String flagKey = "IN_FLIGHT:ROOM:" + roomId;
+                                    String flagKey = "IN_FLIGHT:ROOM:" + roomId + ":PLAYER:" + player.getNumber();
 
                                     return redissonReactiveClient.getBucket(flagKey)
                                             .setIfAbsent(event.getArrivalTime(), Duration.ofSeconds(3))
