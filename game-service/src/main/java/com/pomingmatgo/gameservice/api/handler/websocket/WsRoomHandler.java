@@ -8,18 +8,27 @@ import com.pomingmatgo.gameservice.domain.service.matgo.PreGameService;
 import com.pomingmatgo.gameservice.domain.service.matgo.RoomService;
 import com.pomingmatgo.gameservice.global.MessageSender;
 import com.pomingmatgo.gameservice.global.WebSocketResDto;
+import com.pomingmatgo.gameservice.global.exception.WebSocketBusinessException;
+import com.pomingmatgo.gameservice.global.exception.WebSocketErrorCode;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.redisson.api.RLockReactive;
+import org.redisson.api.RedissonReactiveClient;
 import org.springframework.stereotype.Component;
 import reactor.core.publisher.Mono;
+
+import java.util.concurrent.TimeUnit;
 
 import static com.pomingmatgo.gameservice.domain.Player.PLAYER_NOTHING;
 
 @Component
 @RequiredArgsConstructor
+@Slf4j
 public class WsRoomHandler {
     private final MessageSender messageSender;
     private final RoomService roomService;
     private final PreGameService preGameService;
+    private final RedissonReactiveClient redissonReactiveClient;
 
     public Mono<Void> handleRoomEvent(RequestEvent<?> event, GameState gameState, Player player) {
         SubCategory eventType = SubCategory.from(event.getEventType().getSubType());
@@ -33,25 +42,44 @@ public class WsRoomHandler {
     }
 
     private Mono<Void> handleReadyEvent(GameState gameState, Player player) {
-        return roomService.ready(gameState, player, true)
-                .flatMap(updatedGameState ->
-                        messageSender.sendMessageToAllUser(
-                                        gameState.getRoomId(),
-                                        WebSocketResDto.of(player, "READY", "Ready 했습니다.")
-                                )
-                                // 모든 유저 준비 완료 시 후속 처리
-                                .then(checkAndProceedIfAllReady(updatedGameState))
-                );
+        long roomId = gameState.getRoomId();
+        RLockReactive lock = redissonReactiveClient.getLock("READY_LOCK:ROOM:" + roomId);
+
+        return lock.tryLock(3, 5, TimeUnit.SECONDS)
+                .flatMap(acquired -> {
+                    if (!acquired) {
+                        return Mono.error(new WebSocketBusinessException(WebSocketErrorCode.TOO_MANY_REQUESTS));
+                    }
+                    return roomService.readyFresh(roomId, player, true)
+                            .flatMap(freshState ->
+                                    messageSender.sendMessageToAllUser(
+                                                    roomId,
+                                                    WebSocketResDto.of(player, "READY", "Ready 했습니다.")
+                                            )
+                                            .then(checkAndProceedIfAllReady(freshState))
+                            )
+                            .doFinally(signal -> lock.unlock()
+                                    .subscribe(null, ex -> log.warn("READY_LOCK unlock failed for room {}", roomId, ex)));
+                });
     }
 
     private Mono<Void> handleUnreadyEvent(GameState gameState, Player player) {
-        return roomService.ready(gameState, player, false)
-                .then(
-                        messageSender.sendMessageToAllUser(
-                                gameState.getRoomId(),
-                                WebSocketResDto.of(player, "UNREADY", "Ready 취소 했습니다.")
-                        )
-                );
+        long roomId = gameState.getRoomId();
+        RLockReactive lock = redissonReactiveClient.getLock("READY_LOCK:ROOM:" + roomId);
+
+        return lock.tryLock(3, 5, TimeUnit.SECONDS)
+                .flatMap(acquired -> {
+                    if (!acquired) {
+                        return Mono.error(new WebSocketBusinessException(WebSocketErrorCode.TOO_MANY_REQUESTS));
+                    }
+                    return roomService.readyFresh(roomId, player, false)
+                            .then(messageSender.sendMessageToAllUser(
+                                    roomId,
+                                    WebSocketResDto.of(player, "UNREADY", "Ready 취소 했습니다.")
+                            ))
+                            .doFinally(signal -> lock.unlock()
+                                    .subscribe(null, ex -> log.warn("READY_LOCK unlock failed for room {}", roomId, ex)));
+                });
     }
 
     private Mono<Void> checkAndProceedIfAllReady(GameState updatedGameState) {

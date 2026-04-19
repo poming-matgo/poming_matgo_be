@@ -99,6 +99,13 @@ public class RoomService {
                 .thenReturn(newState);
     }
 
+    public Mono<GameState> readyFresh(long roomId, Player player, boolean isReady) {
+        return gameStateRepository.findById(roomId)
+                .switchIfEmpty(Mono.error(new WebSocketBusinessException(WebSocketErrorCode.NOT_EXISTED_ROOM)))
+                .map(state -> state.withPlayerReady(player, isReady))
+                .flatMap(state -> gameStateRepository.save(state).thenReturn(state));
+    }
+
 
     public boolean checkAllPlayersReady(GameState gs) {
         return gs.allPlayersReady();
