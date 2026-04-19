@@ -140,7 +140,9 @@ public class WsGameHandler {
     private Mono<Void> handleGoStopChoice(RequestEvent<GoStopReq> event, GameState gameState, Player player) {
         long roomId = gameState.getRoomId();
         long deadlineMillis = System.currentTimeMillis() + TURN_TIMEOUT_MILLIS;
-        return gamePlayService.executeGoStop(gameState, player, event, () -> autoPlayScheduler.cancelAutoPlay(roomId))
+        String flagKey = "IN_FLIGHT:ROOM:" + roomId;
+
+        Mono<Void> mainProcess = gamePlayService.executeGoStop(gameState, player, event, () -> autoPlayScheduler.cancelAutoPlay(roomId))
                 .delayUntil(gs -> {
                     if (gs.isPlaying()) {
                         return gameMessageSender.sendGoResultMessage(gs, player)
@@ -165,5 +167,11 @@ public class WsGameHandler {
                     }
                 })
                 .then();
+
+        return Mono.usingWhen(
+                Mono.just(flagKey),
+                key -> mainProcess,
+                key -> redissonReactiveClient.getBucket(key).delete()
+        ).then();
     }
 }
