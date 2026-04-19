@@ -37,17 +37,22 @@ public class GamePlayService {
     }
 
     @GameLock(key = "'game:' + #roomId + ':' + #gameState.round + ':' + #gameState.currentTurn")
-    public Mono<FloorSelectionResult> executeFloorSelection(long roomId, GameState gameState, Player player, RequestEvent<NormalSubmitReq> event) {
-        return gameService.selectFloorCard(gameState, player, event)
-                .flatMap(result -> {
-                    if (result.isChoiceRequired()) {
-                        return Mono.just(new FloorSelectionResult(result, gameState, true));
-                    }
+    public Mono<FloorSelectionResult> executeFloorSelection(long roomId, GameState gameState, Player player, RequestEvent<NormalSubmitReq> event, Runnable onLockAcquired) {
+        return Mono.defer(() -> {
+            if (onLockAcquired != null) {
+                onLockAcquired.run();
+            }
+            return gameService.selectFloorCard(gameState, player, event)
+                    .flatMap(result -> {
+                        if (result.isChoiceRequired()) {
+                            return Mono.just(new FloorSelectionResult(result, gameState, true));
+                        }
 
-                    return applyTurnEffects(roomId, gameState, result)
-                            .then(gameService.calculateAndApplyScores(roomId, gameState))
-                            .map(nextState -> new FloorSelectionResult(result, nextState, false));
-                });
+                        return applyTurnEffects(roomId, gameState, result)
+                                .then(gameService.calculateAndApplyScores(roomId, gameState))
+                                .map(nextState -> new FloorSelectionResult(result, nextState, false));
+                    });
+        });
     }
 
     private Mono<TurnExecutionResult> buildNormalSubmitResult(long roomId, GameState gameState, Card submittedCard, Card topCard, ProcessCardResult processResult) {
@@ -80,11 +85,17 @@ public class GamePlayService {
         return gameState.canGoStop(player);
     }
 
-    public Mono<GameState> executeGoStop(GameState gameState, Player player, RequestEvent<GoStopReq> event) {
-        boolean go = event.getData().go();
+    public Mono<GameState> executeGoStop(GameState gameState, Player player, RequestEvent<GoStopReq> event, Runnable onLockAcquired) {
+        return Mono.defer(() -> {
+            if (onLockAcquired != null) {
+                onLockAcquired.run();
+            }
 
-        return go ? gameService.executeGoStop(gameState, player)
-                .flatMap(this::proceedToNextTurn) : Mono.empty();
+            boolean go = event.getData().go();
+
+            return go ? gameService.executeGoStop(gameState, player)
+                    .flatMap(this::proceedToNextTurn) : Mono.empty();
+        });
     }
 
     public Mono<GameState> gameOver(GameState gameState, Player winner) {

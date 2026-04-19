@@ -56,7 +56,7 @@ public class AutoPlayScheduler {
         if (delayMillis <= 0) delayMillis = 100;
 
         Disposable task = Mono.delay(Duration.ofMillis(delayMillis))
-                .flatMap(v -> attemptAutoPlay(roomId, round, currentTurn, currentPlayer, deadlineMillis))
+                .flatMap(v -> attemptAutoPlay(roomId, round, currentTurn, currentPlayer))
                 .subscribe(
                         success -> {},
                         error -> log.error("[AutoPlay] 룸({}) 자동플레이 스케줄링 중 에러 발생!", roomId, error)
@@ -72,7 +72,7 @@ public class AutoPlayScheduler {
         }
     }
 
-    private Mono<Void> attemptAutoPlay(long roomId, int round, int currentTurn, Player currentPlayer, long deadlineMillis) {
+    private Mono<Void> attemptAutoPlay(long roomId, int round, int currentTurn, Player currentPlayer) {
         return roomService.getGameState(roomId)
                 .flatMap(gameState -> {
                     if (gameState.getRound() != round || gameState.getCurrentTurn() != currentTurn || gameState.getPhase() != IN_PROGRESS) {
@@ -87,7 +87,7 @@ public class AutoPlayScheduler {
                             .flatMap(isDelayed -> {
                                 if (isDelayed) {
                                     return Mono.delay(Duration.ofSeconds(1))
-                                            .then(Mono.defer(() -> attemptAutoPlay(roomId, round, currentTurn, currentPlayer, deadlineMillis)));
+                                            .then(Mono.defer(() -> attemptAutoPlay(roomId, round, currentTurn, currentPlayer)));
                                 } else {
                                     return executeAutoPlayLogic(roomId, round, currentTurn, currentPlayer);
                                 }
@@ -97,50 +97,49 @@ public class AutoPlayScheduler {
 
     private Mono<Void> executeAutoPlayLogic(long roomId, int round, int turnNumber, Player currentPlayer) {
         String flagKey = "IN_FLIGHT:ROOM:" + roomId;
-        return redissonReactiveClient.getBucket(flagKey).set("AUTO_PLAY", Duration.ofSeconds(2))
-                .then(Mono.defer(() -> roomService.getGameState(roomId)
-                        .flatMap(gameState -> {
+        return redissonReactiveClient.getBucket(flagKey).setIfAbsent("AUTO_PLAY", Duration.ofSeconds(2))
+                .flatMap(acquired -> {
+                    if (!acquired) return Mono.empty();
+                    return Mono.defer(() -> roomService.getGameState(roomId)
+                            .flatMap(gameState -> {
 
-                            if (gameState.getRound() != round || gameState.getCurrentTurn() != turnNumber || gameState.getPhase() != IN_PROGRESS) {
-                                return Mono.empty();
-                            }
+                                if (gameState.getRound() != round || gameState.getCurrentTurn() != turnNumber || gameState.getPhase() != IN_PROGRESS) {
+                                    return Mono.empty();
+                                }
 
-                            int autoCardIdx = 0;
+                                int autoCardIdx = 0;
 
-                            return gamePlayService.executeNormalSubmit(roomId, gameState, currentPlayer, autoCardIdx, () -> {})
-                                    .flatMap(ctx -> {
-                                        Mono<Void> sendInfos = Mono.when(
-                                                gameMessageSender.sendSubmitCardInfo(roomId, currentPlayer, ctx.submittedCard()),
-                                                gameMessageSender.sendTopCardInfo(roomId, currentPlayer, ctx.topCard())
-                                        );
+                                return gamePlayService.executeNormalSubmit(roomId, gameState, currentPlayer, autoCardIdx, () -> {})
+                                        .flatMap(ctx -> {
+                                            Mono<Void> sendInfos = Mono.when(
+                                                    gameMessageSender.sendSubmitCardInfo(roomId, currentPlayer, ctx.submittedCard()),
+                                                    gameMessageSender.sendTopCardInfo(roomId, currentPlayer, ctx.topCard())
+                                            );
 
-                                        long TURN_TIMEOUT_MILLIS = 10000L;
-                                        long deadlineMillis = System.currentTimeMillis() + TURN_TIMEOUT_MILLIS;
-                                        Mono<Void> handleResult;
+                                            long TURN_TIMEOUT_MILLIS = 10000L;
+                                            long deadlineMillis = System.currentTimeMillis() + TURN_TIMEOUT_MILLIS;
+                                            Mono<Void> handleResult;
 
-                                        if (ctx.isChoiceRequired()) {
-                                            handleResult = gameMessageSender.sendChooseFloorCardMessage(roomId, currentPlayer, ctx.cardResult().getSelectableCards())
-                                                    .doOnSuccess(v -> scheduleAutoPlay(
-                                                            roomId, ctx.updatedGameState().getRound(), ctx.updatedGameState().getCurrentTurn(), currentPlayer, deadlineMillis
-                                                    ));
-                                        } else {
-                                            handleResult = gameNotificationService.broadcastTurnResult(roomId, currentPlayer, ctx.updatedGameState(), ctx.cardResult())
-                                                    .doOnNext(nextState -> {
-                                                        if (nextState.getPhase() == IN_PROGRESS) {
-                                                            scheduleAutoPlay(
+                                            if (ctx.isChoiceRequired()) {
+                                                handleResult = gameMessageSender.sendChooseFloorCardMessage(roomId, currentPlayer, ctx.cardResult().getSelectableCards());
+                                            } else {
+                                                handleResult = gameNotificationService.broadcastTurnResult(roomId, currentPlayer, ctx.updatedGameState(), ctx.cardResult(), () -> this.cancelAutoPlay(roomId))
+                                                        .doOnNext(nextState -> {
+                                                            if (nextState.getPhase() == IN_PROGRESS) {
+                                                                scheduleAutoPlay(
+                                                                        roomId, nextState.getRound(), nextState.getCurrentTurn(), nextState.getCurrentPlayer(), deadlineMillis
+                                                                );
+                                                            }
+                                                        })
+                                                        .then();
+                                            }
 
-                                                                    roomId, nextState.getRound(), nextState.getCurrentTurn(), nextState.getCurrentPlayer(), deadlineMillis
-                                                            );
-                                                        }
-                                                    })
-                                                    .then();
-                                        }
-
-                                        return sendInfos.then(handleResult);
-                                    });
-                        })))
-                .then(redissonReactiveClient.getBucket(flagKey).delete())
-                .onErrorResume(error -> redissonReactiveClient.getBucket(flagKey).delete().then(Mono.error(error)))
-                .then();
+                                            return sendInfos.then(handleResult);
+                                        });
+                            }))
+                            .then(redissonReactiveClient.getBucket(flagKey).delete())
+                            .onErrorResume(error -> redissonReactiveClient.getBucket(flagKey).delete().then(Mono.error(error)))
+                            .then();
+                });
     }
 }
