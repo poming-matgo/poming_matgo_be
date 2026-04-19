@@ -153,4 +153,9 @@ public class GameState implements Serializable {
                 .choiceInfo(null)
                 .build();
     }
+
+    @JsonIgnore
+    public boolean isLastTurn() {
+        return this.getRound() == 10 && this.getCurrentTurn() == 2;
+    }
 }

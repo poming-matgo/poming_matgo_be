@@ -34,14 +34,15 @@ public class GameNotificationService {
                 .then(sendSpecial)
                 .then(sendScoreInfo(gameState))
                 .then(Mono.defer(() -> {
+                    if (gameState.isLastTurn()) {
+                        return processGameOver(gameState, player);
+                    }
                     if (gamePlayService.canGoStop(gameState, player)) {
                         if (onLockAcquired != null) {
                             onLockAcquired.run();
                         }
                         if(gameState.getRound() == 10) {
-                            return gamePlayService.gameOver(gameState, player)
-                                    .flatMap(finalState -> gameMessageSender.sendGameOverMessage(finalState, player)
-                                    .thenReturn(finalState));
+                            return processGameOver(gameState, player);
                         }
                         return gameMessageSender.sendGoStopChoiceMessage(gameState, player)
                                 .thenReturn(gameState);
@@ -52,6 +53,12 @@ public class GameNotificationService {
                                 .thenReturn(nextState));
                     }
                 }));
+    }
+
+    private Mono<GameState> processGameOver(GameState gameState, Player player) {
+        return gamePlayService.gameOver(gameState, player)
+                .flatMap(finalState -> gameMessageSender.sendGameOverMessage(finalState, player)
+                        .thenReturn(finalState));
     }
 
     private Mono<Void> sendScoreInfo(GameState gameState) {
