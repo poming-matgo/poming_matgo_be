@@ -64,25 +64,21 @@ public class PreGameService {
                 });
     }
 
-    @GameLock(key = "'game:' + #roomId + ':lead:playerChoice'")
-    public Mono<Void> selectCard(int cardIndex, GameState gameState, Player player) {
+    @GameLock(key = "'game:' + #gameState.roomId + ':lead:playerChoice'")
+    public Mono<Boolean> selectCardAndCheckAllSelected(int cardIndex, GameState gameState, Player player) {
         Long roomId = gameState.getRoomId();
-        Mono<ChooseLeadPlayer> selectedCardsMono = leadingPlayerRepository.getPlayerSelectedCard(roomId);
-        Mono<Card> curUserSelectedCardMono = leadingPlayerRepository.getCardByIndex(roomId, cardIndex);
-
-        return Mono.zip(selectedCardsMono, curUserSelectedCardMono)
+        return Mono.zip(
+                        leadingPlayerRepository.getPlayerSelectedCard(roomId),
+                        leadingPlayerRepository.getCardByIndex(roomId, cardIndex)
+                )
                 .flatMap(tuple -> {
                     ChooseLeadPlayer chooseCards = tuple.getT1();
                     Card curUserSelectedCard = tuple.getT2();
-                    ChooseLeadPlayer updatedChooseCards = chooseCards.selectMonthForPlayer(player, curUserSelectedCard.getMonth());
-                    return leadingPlayerRepository.savePlayerSelectedCard(roomId, updatedChooseCards);
-                });
-    }
-
-
-    public Mono<Boolean> isAllPlayerCardSelected(Long roomId) {
-        return leadingPlayerRepository.getPlayerSelectedCard(roomId)
-                .map(selectedCards -> selectedCards.getPlayer1Month() != 0 && selectedCards.getPlayer2Month() != 0);
+                    ChooseLeadPlayer updated = chooseCards.selectMonthForPlayer(player, curUserSelectedCard.getMonth());
+                    return leadingPlayerRepository.savePlayerSelectedCard(roomId, updated)
+                            .thenReturn(updated);
+                })
+                .map(updated -> updated.getPlayer1Month() != 0 && updated.getPlayer2Month() != 0);
     }
 
     public Mono<LeadSelectionRes> getLeadSelectionRes(Long roomId) {

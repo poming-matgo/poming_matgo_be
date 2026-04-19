@@ -49,13 +49,13 @@ public class WsPreGameHandler {
 
     private Mono<Void> handleLeaderSelectionEvent(RequestEvent<LeadSelectionReq> event, GameState gameState, Player player) {
         long roomId = gameState.getRoomId();
-
         int cardIndex = event.getData().cardIndex();
-        return preGameService.selectCard(cardIndex, gameState, player)
-                .then(sendLeaderSelectionMessage(roomId, player, cardIndex))
-                .then(preGameService.isAllPlayerCardSelected(roomId))
-                .filter(allSelected -> allSelected)
-                .flatMap(allSelected -> afterleaderSelectionCardAllSelection(gameState));
+
+        return preGameService.selectCardAndCheckAllSelected(cardIndex, gameState, player)
+                .flatMap(allSelected -> sendLeaderSelectionMessage(roomId, player, cardIndex)
+                        .then(allSelected
+                                ? afterleaderSelectionCardAllSelection(gameState)
+                                : Mono.empty()));
     }
 
     private Mono<Void> sendLeaderSelectionMessage(long roomId, Player player, int cardIndex) {
