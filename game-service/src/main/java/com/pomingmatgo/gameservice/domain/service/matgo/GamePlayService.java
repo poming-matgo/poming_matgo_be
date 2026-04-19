@@ -38,7 +38,7 @@ public class GamePlayService {
         });
     }
 
-    @GameLock(key = "'game:' + #roomId + ':' + #gameState.round + ':' + #gameState.currentTurn")
+    @GameLock(key = "'floor:' + #roomId + ':' + #gameState.round + ':' + #gameState.currentTurn")
     public Mono<FloorSelectionResult> executeFloorSelection(long roomId, GameState gameState, Player player, RequestEvent<NormalSubmitReq> event, Runnable onLockAcquired) {
         return Mono.defer(() -> {
             if (onLockAcquired != null) {
