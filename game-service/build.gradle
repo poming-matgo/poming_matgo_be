@@ -28,6 +28,7 @@ dependencies {
     implementation 'org.springframework.boot:spring-boot-starter-webflux'
     implementation 'org.redisson:redisson-spring-boot-starter:3.52.0'
     implementation 'org.springframework.boot:spring-boot-starter-aop'
+    implementation 'io.projectreactor.tools:blockhound:1.0.9.RELEASE'
     runtimeOnly 'io.projectreactor:reactor-tools'
     //implementation 'org.springframework.boot:spring-boot-starter-websocket'
     compileOnly 'org.projectlombok:lombok'
