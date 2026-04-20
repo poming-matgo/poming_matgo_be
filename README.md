@@ -7,7 +7,6 @@
 
 ## 🛠 기술 스택
 - **Backend:** Java 21, Spring WebFlux, WebSocket
-- **Network & Security:** eBPF (XDP)
 - **Data Structure:** `ConcurrentHashMap` (In-Memory)
 
 <br/>
@@ -18,12 +17,7 @@
 턴제 게임 특성상 유저가 고민하는 동안 서버 리소스를 거의 사용하지 않는 대기 시간(Idle Time)이 깁니다. 기존 Spring MVC는 WebSocket 연결당 1개의 스레드를 점유하여 동시 접속자가 늘어날수록 비효율적입니다.
 이를 해결하기 위해 **I/O가 발생할 때만 스레드가 관여하는 Event-Driven 방식의 WebFlux를 채택**하여, 적은 수의 스레드로도 대규모 동시 접속을 낭비 없이 처리할 수 있도록 구성했습니다.
 
-### 2. eBPF (XDP) : 커널 레벨 패킷 차단을 통한 Netty EventLoop 보호
-WebFlux는 적은 스레드로 높은 동시성을 처리하지만, 역으로 소수의 스레드가 DDoS 공격에 노출되면 전체 시스템이 마비될 수 있는 취약점이 있습니다.
-이를 방어하기 위해 **NIC 드라이버 레벨(XDP)에서 악성 패킷을 조기 차단**하여 OS 커널 네트워크 스택 진입 전에 부하를 제거했습니다.
-* **결과:** WebSocket SYN Flood 발생 시, 기존 애플리케이션 레벨 차단 대비 **CPU 사용률을 약 [N]% 절감**하고 정상 유저의 **패킷 처리량을 약 [M]% 향상**시켜 서버의 가용성을 완벽히 보호했습니다.
-
-### 3. In-Memory 전환 (Redis ➡️ ConcurrentHashMap) : 처리량 극대화
+### 2. In-Memory 전환 (Redis ➡️ ConcurrentHashMap) : 처리량 극대화
 초기에는 게임 상태 관리를 위해 Redis를 도입했으나, 단일 방 안에서만 상태 공유가 필요한 게임 도메인 특성상 분산 환경의 오버헤드가 불필요하다고 판단했습니다.
 이를 `ConcurrentHashMap` 기반의 인메모리 구조로 전환하여 **TCP 통신 및 직렬화/역직렬화 비용을 완전히 제거**했습니다.
 * **결과:** 응답 지연 시간을 약 [N]% 단축하고 I/O 병목을 해소하여 **초당 약 72,000건의 웹소켓 메시지를 유실 없이 처리**하는 등 단일 서버 처리량을 기존 Redis 대비 **약 6.6배 향상**시켰습니다.
