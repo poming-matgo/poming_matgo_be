@@ -5,9 +5,9 @@ import com.pomingmatgo.gameservice.domain.Player;
 import com.pomingmatgo.gameservice.domain.service.matgo.GameNotificationService;
 import com.pomingmatgo.gameservice.domain.service.matgo.GamePlayService;
 import com.pomingmatgo.gameservice.domain.service.matgo.RoomService;
+import com.pomingmatgo.gameservice.global.lock.InFlightManager;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.log4j.Log4j2;
-import org.redisson.api.RedissonReactiveClient;
 import org.springframework.stereotype.Service;
 import reactor.core.Disposable;
 import reactor.core.publisher.Mono;
@@ -24,7 +24,7 @@ import static com.pomingmatgo.gameservice.domain.GamePhase.IN_PROGRESS;
 @Log4j2
 public class AutoPlayScheduler {
 
-    private final RedissonReactiveClient redissonReactiveClient;
+    private final InFlightManager inFlightManager;
     private final RoomService roomService;
     private final GamePlayService gamePlayService;
     private final GameMessageSender gameMessageSender;
@@ -44,8 +44,8 @@ public class AutoPlayScheduler {
         int existingSequence = scheduledSequences.getOrDefault(roomId, 0);
 
         if (newSequence < existingSequence) {
-            log.warn("[AutoPlay] 예약 무시됨: 이미 더 최신 턴이 예약되어 있습니다. 기존: {}, 무시된 요청: (라운드:{}, 턴:{})",
-                    existingSequence, round, currentTurn);
+            //log.warn("[AutoPlay] 예약 무시됨: 이미 더 최신 턴이 예약되어 있습니다. 기존: {}, 무시된 요청: (라운드:{}, 턴:{})",
+            //        existingSequence, round, currentTurn);
             return;
         }
 
@@ -77,14 +77,14 @@ public class AutoPlayScheduler {
         return roomService.getGameState(roomId)
                 .flatMap(gameState -> {
                     if (gameState.getRound() != round || gameState.getCurrentTurn() != currentTurn || gameState.getPhase() != IN_PROGRESS) {
-                        log.warn("[AutoPlay] 턴 불일치 또는 상태 이상 - expected:({}, {}), actual:({}, {}), phase:{}",
-                                round, currentTurn, gameState.getRound(), gameState.getCurrentTurn(), gameState.getPhase());
+                      //  log.warn("[AutoPlay] 턴 불일치 또는 상태 이상 - expected:({}, {}), actual:({}, {}), phase:{}",
+                      //          round, currentTurn, gameState.getRound(), gameState.getCurrentTurn(), gameState.getPhase());
                         return Mono.empty();
                     }
 
                     String flagKey = "IN_FLIGHT:ROOM:" + roomId + ":PLAYER:" + currentPlayer.getNumber();
 
-                    return redissonReactiveClient.getBucket(flagKey).isExists()
+                    return inFlightManager.isSet(flagKey)
                             .flatMap(isDelayed -> {
                                 if (isDelayed) {
                                     return Mono.delay(Duration.ofSeconds(1))
@@ -98,7 +98,7 @@ public class AutoPlayScheduler {
 
     private Mono<Void> executeAutoPlayLogic(long roomId, int round, int turnNumber, Player currentPlayer) {
         String flagKey = "IN_FLIGHT:ROOM:" + roomId + ":PLAYER:" + currentPlayer.getNumber();
-        return redissonReactiveClient.getBucket(flagKey).setIfAbsent("AUTO_PLAY", Duration.ofSeconds(2))
+        return inFlightManager.trySetFlag(flagKey, "AUTO_PLAY", Duration.ofSeconds(2))
                 .flatMap(acquired -> {
                     if (!acquired) return Mono.empty();
 
@@ -144,7 +144,7 @@ public class AutoPlayScheduler {
                     return Mono.usingWhen(
                             Mono.just(flagKey),
                             key -> mainProcess,
-                            key -> redissonReactiveClient.getBucket(key).delete()
+                            key -> inFlightManager.deleteFlag(key)
                     ).then();
                 });
     }
