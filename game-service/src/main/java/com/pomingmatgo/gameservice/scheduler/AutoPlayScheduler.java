@@ -100,7 +100,8 @@ public class AutoPlayScheduler {
         return redissonReactiveClient.getBucket(flagKey).setIfAbsent("AUTO_PLAY", Duration.ofSeconds(2))
                 .flatMap(acquired -> {
                     if (!acquired) return Mono.empty();
-                    return Mono.defer(() -> roomService.getGameState(roomId)
+
+                    Mono<Void> mainProcess = Mono.defer(() -> roomService.getGameState(roomId)
                             .flatMap(gameState -> {
 
                                 if (gameState.getRound() != round || gameState.getCurrentTurn() != turnNumber || gameState.getPhase() != IN_PROGRESS) {
@@ -136,10 +137,13 @@ public class AutoPlayScheduler {
 
                                             return sendInfos.then(handleResult);
                                         });
-                            }))
-                            .then(redissonReactiveClient.getBucket(flagKey).delete())
-                            .onErrorResume(error -> redissonReactiveClient.getBucket(flagKey).delete().then(Mono.error(error)))
-                            .then();
+                            }));
+
+                    return Mono.usingWhen(
+                            Mono.just(flagKey),
+                            key -> mainProcess,
+                            key -> redissonReactiveClient.getBucket(key).delete()
+                    ).then();
                 });
     }
 }
