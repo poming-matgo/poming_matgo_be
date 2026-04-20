@@ -121,13 +121,15 @@ public class GameService {
         );
 
         return installedCardRepository.deleteAllRevealedCardByMonth(roomId, month)
-                .then(moveCardMono)
-                .map(movedCard -> {
-                    acquiredCards.add(movedCard);
-                    return cardStack.size() == 1
-                            ? ProcessCardResult.jjok(acquiredCards, movedCard)
-                            : ProcessCardResult.ttadak(acquiredCards, movedCard);
-                });
+                .then(moveCardMono
+                        .map(movedCard -> {
+                            acquiredCards.add(movedCard);
+                            return cardStack.size() == 1
+                                    ? ProcessCardResult.jjok(acquiredCards, movedCard)
+                                    : ProcessCardResult.ttadak(acquiredCards, movedCard);
+                        })
+                        .switchIfEmpty(Mono.fromSupplier(() -> ProcessCardResult.immediate(acquiredCards)))
+                );
     }
 
     private Mono<ProcessCardResult> processPpeok(long roomId, Card submittedCard, Card turnedCard) {
