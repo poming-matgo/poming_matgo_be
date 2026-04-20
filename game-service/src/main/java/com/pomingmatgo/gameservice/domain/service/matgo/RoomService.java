@@ -10,8 +10,13 @@ import com.pomingmatgo.gameservice.global.exception.WebSocketBusinessException;
 import com.pomingmatgo.gameservice.global.exception.WebSocketErrorCode;
 import com.pomingmatgo.gameservice.global.session.SessionManager;
 import lombok.RequiredArgsConstructor;
+import org.redisson.api.RLockReactive;
+import org.redisson.api.RedissonReactiveClient;
 import org.springframework.stereotype.Service;
 import reactor.core.publisher.Mono;
+
+import java.util.UUID;
+import java.util.concurrent.TimeUnit;
 
 import static com.pomingmatgo.gameservice.domain.GamePhase.DETERMINING_STARTING_PLAYER;
 
@@ -21,15 +26,35 @@ import static com.pomingmatgo.gameservice.domain.GamePhase.DETERMINING_STARTING_
 public class RoomService {
     private final GameStateRepository gameStateRepository;
     private final SessionManager sessionManager;
+    private final RedissonReactiveClient redissonReactiveClient;
+
     public Mono<Void> joinRoom(long userId, long roomId) {
-        return gameStateRepository.findById(roomId)
-                .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.NOT_EXISTED_ROOM)))
-                .filter(gameState -> !isRoomFull(gameState))
-                .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.FULL_ROOM)))
-                .filter(gameState -> !isUserInRoom(gameState, userId))
-                .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.ALREADY_IN_ROOM)))
-                .flatMap(gameState -> saveWithUserId(gameState, userId))
-                .then();
+        RLockReactive lock = redissonReactiveClient.getLock("READY_LOCK:ROOM:" + roomId);
+        long executionId = UUID.randomUUID().getMostSignificantBits();
+
+        return Mono.usingWhen(
+                lock.tryLock(5, 2, TimeUnit.SECONDS, executionId)
+                        .flatMap(acquired -> acquired
+                                ? Mono.just(lock)
+                                : Mono.error(new BusinessException(ErrorCode.SYSTEM_ERROR))),
+                acquiredLock -> gameStateRepository.findById(roomId)
+                        .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.NOT_EXISTED_ROOM)))
+                        .filter(gameState -> !isRoomFull(gameState))
+                        .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.FULL_ROOM)))
+                        .filter(gameState -> !isUserInRoom(gameState, userId))
+                        .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.ALREADY_IN_ROOM)))
+                        .flatMap(gameState -> saveWithUserId(gameState, userId))
+                        .then(),
+                acquiredLock -> releaseLock(acquiredLock, executionId),
+                (acquiredLock, err) -> releaseLock(acquiredLock, executionId),
+                acquiredLock -> releaseLock(acquiredLock, executionId)
+        );
+    }
+
+    private Mono<Void> releaseLock(RLockReactive lock, long executionId) {
+        return lock.unlock(executionId)
+                .then()
+                .onErrorResume(e -> Mono.empty());
     }
 
     public Mono<Void> leaveRoom(long userId, long roomId) {
