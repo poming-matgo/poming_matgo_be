@@ -323,12 +323,12 @@ public class GameService {
                 .phase(GamePhase.END)
                 .build();
         long roomId = gameState.getRoomId();
-        String keyPattern = "game:" + gameState.getRoomId() + "*";
+        String keyPattern = "game:" + gameState.getRoomId() + ":*";
 
         GameState initState = GameState.createEmptyRoom(roomId);
 
         return redisTemplate.delete(redisTemplate.keys(keyPattern))
-                .then(gameStateRepository.create(initState))
+                .then(Mono.defer(() -> gameStateRepository.create(initState)))
                 .thenReturn(newState);
     }
 }

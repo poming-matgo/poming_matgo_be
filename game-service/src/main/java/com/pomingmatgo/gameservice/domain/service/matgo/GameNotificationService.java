@@ -57,8 +57,7 @@ public class GameNotificationService {
 
     private Mono<GameState> processGameOver(GameState gameState, Player player) {
         return gamePlayService.gameOver(gameState, player)
-                .flatMap(finalState -> gameMessageSender.sendGameOverMessage(finalState, player)
-                        .thenReturn(finalState));
+                .delayUntil(finalState -> gameMessageSender.sendGameOverMessage(finalState, player));
     }
 
     private Mono<Void> sendScoreInfo(GameState gameState) {

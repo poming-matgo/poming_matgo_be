@@ -149,8 +149,7 @@ public class WsGameHandler {
                                 .then(gameMessageSender.sendTurnInfo(gs));
                     } else {
                         return gamePlayService.gameOver(gs, player)
-                                .flatMap(finalState -> gameMessageSender.sendGameOverMessage(finalState, player)
-                                        .thenReturn(finalState));
+                                .delayUntil(finalState -> gameMessageSender.sendGameOverMessage(finalState, player));
                     }
                 })
                 .doOnNext(nextState -> {
