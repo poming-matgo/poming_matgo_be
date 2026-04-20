@@ -15,10 +15,10 @@ import com.pomingmatgo.gameservice.global.WebSocketResDto;
 import com.pomingmatgo.gameservice.global.exception.WebSocketBusinessException;
 import com.pomingmatgo.gameservice.global.exception.WebSocketErrorCode;
 import com.pomingmatgo.gameservice.global.exception.dto.WebSocketErrorResDto;
+import com.pomingmatgo.gameservice.global.lock.InFlightManager;
 import com.pomingmatgo.gameservice.global.session.SessionManager;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.redisson.api.RedissonReactiveClient;
 import org.springframework.stereotype.Component;
 import org.springframework.web.reactive.socket.WebSocketHandler;
 import org.springframework.web.reactive.socket.WebSocketMessage;
@@ -42,7 +42,7 @@ public class GameWebSocketHandler implements WebSocketHandler {
     private final WsPreGameHandler wsPreGameHandler;
     private final WsGameHandler wsGameHandler;
     private final MessageSender messageSender;
-    private final RedissonReactiveClient redissonReactiveClient;
+    private final InFlightManager inFlightManager;
 
     @Override
     public Mono<Void> handle(WebSocketSession session) {
@@ -88,11 +88,14 @@ public class GameWebSocketHandler implements WebSocketHandler {
                                 if (isGameAction(event, gameState, player)) {
                                     String flagKey = "IN_FLIGHT:ROOM:" + roomId + ":PLAYER:" + player.getNumber();
 
-                                    return redissonReactiveClient.getBucket(flagKey)
-                                            .setIfAbsent(event.getArrivalTime(), Duration.ofSeconds(3))
+                                    return inFlightManager.trySetFlag(flagKey, event.getArrivalTime(), Duration.ofSeconds(3))
                                             .flatMap(isSet -> {
-                                                if (!isSet) return Mono.error(new WebSocketBusinessException(TOO_MANY_REQUESTS)); // 진행 중 예외
-                                                return routeEvent(event, gameState, player);
+                                                if (!isSet) return Mono.error(new WebSocketBusinessException(TOO_MANY_REQUESTS));
+                                                return Mono.usingWhen(
+                                                        Mono.just(flagKey),
+                                                        key -> routeEvent(event, gameState, player),
+                                                        key -> inFlightManager.deleteFlag(key)
+                                                );
                                             });
                                 }
 

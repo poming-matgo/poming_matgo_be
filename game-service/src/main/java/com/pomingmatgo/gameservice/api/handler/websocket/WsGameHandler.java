@@ -12,7 +12,6 @@ import com.pomingmatgo.gameservice.global.exception.WebSocketBusinessException;
 import com.pomingmatgo.gameservice.scheduler.AutoPlayScheduler;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.redisson.api.RedissonReactiveClient;
 import org.springframework.stereotype.Component;
 import reactor.core.publisher.Mono;
 
@@ -31,7 +30,6 @@ public class WsGameHandler {
     private final GameMessageSender gameMessageSender;
     private final GameNotificationService gameNotificationService;
     private final AutoPlayScheduler autoPlayScheduler;
-    private final RedissonReactiveClient redissonReactiveClient;
 
     long TURN_TIMEOUT_MILLIS = 10000L;
     long GRACE_PERIOD_MILLIS = 2000L;
@@ -59,9 +57,7 @@ public class WsGameHandler {
         long roomId = gameState.getRoomId();
         int cardIdx = event.getData().cardIndex();
 
-        String flagKey = "IN_FLIGHT:ROOM:" + roomId + ":PLAYER:" + player.getNumber();
-
-        Mono<Void> mainProcess =  gamePlayService.executeNormalSubmit(roomId, gameState, player, cardIdx, () -> autoPlayScheduler.cancelAutoPlay(roomId))
+        return gamePlayService.executeNormalSubmit(roomId, gameState, player, cardIdx, () -> autoPlayScheduler.cancelAutoPlay(roomId))
                 .flatMap(ctx -> {
                     Mono<Void> sendInfos = Mono.when(
                             gameMessageSender.sendSubmitCardInfo(roomId, player, ctx.submittedCard()),
@@ -76,8 +72,8 @@ public class WsGameHandler {
                         handleResult = gameNotificationService.broadcastTurnResult(roomId, player, ctx.updatedGameState(), ctx.cardResult(), () -> autoPlayScheduler.cancelAutoPlay(roomId), TURN_TIMEOUT_MILLIS)
                                 .doOnNext(nextState -> {
                                     if (nextState.getPhase() == IN_PROGRESS && !nextState.getCurrentPlayer().equals(player)) {
-                                        log.info("[AutoPlay Schedule] 스케줄링 등록! roomId: {}, 예약된 턴: ({}, {}), 대상 플레이어: {}",
-                                                roomId, nextState.getRound(), nextState.getCurrentTurn(), nextState.getCurrentPlayer());
+                                   //     log.info("[AutoPlay Schedule] 스케줄링 등록! roomId: {}, 예약된 턴: ({}, {}), 대상 플레이어: {}",
+                                   //             roomId, nextState.getRound(), nextState.getCurrentTurn(), nextState.getCurrentPlayer());
                                         autoPlayScheduler.scheduleAutoPlay(
                                                 roomId,
                                                 nextState.getRound(),
@@ -91,13 +87,7 @@ public class WsGameHandler {
                     }
 
                     return sendInfos.then(handleResult);
-                });
-
-        return Mono.usingWhen(
-                Mono.just(flagKey),
-                key -> mainProcess,
-                key -> redissonReactiveClient.getBucket(key).delete()
-        ).then();
+                }).then();
     }
 
     private Mono<Void> handleFloorSelect(RequestEvent<NormalSubmitReq> event, GameState gameState, Player player) {
@@ -119,8 +109,8 @@ public class WsGameHandler {
                             .delayUntil(nextState -> gameNotificationService.broadcastNextTurnInfo(nextState, TURN_TIMEOUT_MILLIS))
                             .doOnNext(nextState -> {
                                 if (nextState.getPhase() == IN_PROGRESS) {
-                                    log.info("[AutoPlay Schedule] 스케줄링 등록! roomId: {}, 예약된 턴: ({}, {}), 대상 플레이어: {}",
-                                            roomId, nextState.getRound(), nextState.getCurrentTurn(), nextState.getCurrentPlayer());
+                              //      log.info("[AutoPlay Schedule] 스케줄링 등록! roomId: {}, 예약된 턴: ({}, {}), 대상 플레이어: {}",
+                              //              roomId, nextState.getRound(), nextState.getCurrentTurn(), nextState.getCurrentPlayer());
                                     autoPlayScheduler.scheduleAutoPlay(
                                             roomId,
                                             nextState.getRound(),
@@ -138,9 +128,8 @@ public class WsGameHandler {
 
     private Mono<Void> handleGoStopChoice(RequestEvent<GoStopReq> event, GameState gameState, Player player) {
         long roomId = gameState.getRoomId();
-        String flagKey = "IN_FLIGHT:ROOM:" + roomId + ":PLAYER:" + player.getNumber();
 
-        Mono<Void> mainProcess = gamePlayService.executeGoStop(gameState, player, event, () -> autoPlayScheduler.cancelAutoPlay(roomId))
+        return gamePlayService.executeGoStop(gameState, player, event, () -> autoPlayScheduler.cancelAutoPlay(roomId))
                 .delayUntil(gs -> {
                     if (gs.isPlaying()) {
                         return gameMessageSender.sendGoResultMessage(gs, player)
@@ -152,8 +141,8 @@ public class WsGameHandler {
                 })
                 .doOnNext(nextState -> {
                     if (nextState.getPhase() == IN_PROGRESS) {
-                        log.info("[AutoPlay Schedule] 스케줄링 등록! roomId: {}, 예약된 턴: ({}, {}), 대상 플레이어: {}",
-                                roomId, nextState.getRound(), nextState.getCurrentTurn(), nextState.getCurrentPlayer());
+                  //      log.info("[AutoPlay Schedule] 스케줄링 등록! roomId: {}, 예약된 턴: ({}, {}), 대상 플레이어: {}",
+                  //              roomId, nextState.getRound(), nextState.getCurrentTurn(), nextState.getCurrentPlayer());
                         autoPlayScheduler.scheduleAutoPlay(
                                 roomId,
                                 nextState.getRound(),
@@ -164,11 +153,5 @@ public class WsGameHandler {
                     }
                 })
                 .then();
-
-        return Mono.usingWhen(
-                Mono.just(flagKey),
-                key -> mainProcess,
-                key -> redissonReactiveClient.getBucket(key).delete()
-        ).then();
     }
 }

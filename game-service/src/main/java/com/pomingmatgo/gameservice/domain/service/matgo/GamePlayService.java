@@ -7,11 +7,15 @@ import com.pomingmatgo.gameservice.domain.GamePhase;
 import com.pomingmatgo.gameservice.domain.GameState;
 import com.pomingmatgo.gameservice.domain.Player;
 import com.pomingmatgo.gameservice.domain.card.Card;
+import com.pomingmatgo.gameservice.global.exception.WebSocketBusinessException;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.web.reactive.function.client.WebClient;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
+
+import static com.pomingmatgo.gameservice.global.exception.WebSocketErrorCode.INVALID_GAME_PHASE;
+import static com.pomingmatgo.gameservice.global.exception.WebSocketErrorCode.NOT_YOUR_TURN;
 
 @Service
 @RequiredArgsConstructor
@@ -25,15 +29,23 @@ public class GamePlayService {
             if (onLockAcquired != null) {
                 onLockAcquired.run();
             }
-            return Mono.zip(gameService.submitCardEvent(roomId, player, cardIdx), gameService.getTopCard(roomId))
-                    .flatMap(tuple -> {
-                        Card submittedCard = tuple.getT1();
-                        Card topCard = tuple.getT2();
-
-                        return gameService.submitCard(gameState, submittedCard, topCard)
-                                .flatMap(processResult -> buildNormalSubmitResult(
-                                        roomId, gameState, submittedCard, topCard, processResult
-                                ));
+            return gameService.findGameState(roomId)
+                    .flatMap(freshState -> {
+                        if (freshState.getPhase() != GamePhase.IN_PROGRESS) {
+                            return Mono.error(new WebSocketBusinessException(INVALID_GAME_PHASE));
+                        }
+                        if (!player.equals(freshState.getCurrentPlayer())) {
+                            return Mono.error(new WebSocketBusinessException(NOT_YOUR_TURN));
+                        }
+                        return Mono.zip(gameService.submitCardEvent(roomId, player, cardIdx), gameService.getTopCard(roomId))
+                                .flatMap(tuple -> {
+                                    Card submittedCard = tuple.getT1();
+                                    Card topCard = tuple.getT2();
+                                    return gameService.submitCard(freshState, submittedCard, topCard)
+                                            .flatMap(processResult -> buildNormalSubmitResult(
+                                                    roomId, freshState, submittedCard, topCard, processResult
+                                            ));
+                                });
                     });
         });
     }
@@ -44,15 +56,20 @@ public class GamePlayService {
             if (onLockAcquired != null) {
                 onLockAcquired.run();
             }
-            return gameService.selectFloorCard(gameState, player, event)
-                    .flatMap(result -> {
-                        if (result.isChoiceRequired()) {
-                            return Mono.just(new FloorSelectionResult(result, gameState, true));
+            return gameService.findGameState(roomId)
+                    .flatMap(freshState -> {
+                        if (freshState.getPhase() != GamePhase.AWAITING_FLOOR_CARD_CHOICE) {
+                            return Mono.error(new WebSocketBusinessException(INVALID_GAME_PHASE));
                         }
-
-                        return applyTurnEffects(roomId, gameState, result)
-                                .then(gameService.calculateAndApplyScores(roomId, gameState))
-                                .map(nextState -> new FloorSelectionResult(result, nextState, false));
+                        return gameService.selectFloorCard(freshState, player, event)
+                                .flatMap(result -> {
+                                    if (result.isChoiceRequired()) {
+                                        return Mono.just(new FloorSelectionResult(result, freshState, true));
+                                    }
+                                    return applyTurnEffects(roomId, freshState, result)
+                                            .then(gameService.calculateAndApplyScores(roomId, freshState))
+                                            .map(nextState -> new FloorSelectionResult(result, nextState, false));
+                                });
                     });
         });
     }
@@ -93,11 +110,13 @@ public class GamePlayService {
             if (onLockAcquired != null) {
                 onLockAcquired.run();
             }
-
-            boolean go = event.getData().go();
-
-            return go ? gameService.executeGoStop(gameState, player)
-                    .flatMap(this::proceedToNextTurn) : Mono.just(gameState.toBuilder().phase(GamePhase.END).build());
+            return gameService.findGameState(gameState.getRoomId())
+                    .flatMap(freshState -> {
+                        boolean go = event.getData().go();
+                        return go ? gameService.executeGoStop(freshState, player)
+                                .flatMap(this::proceedToNextTurn)
+                                : Mono.just(freshState.toBuilder().phase(GamePhase.END).build());
+                    });
         });
     }
 

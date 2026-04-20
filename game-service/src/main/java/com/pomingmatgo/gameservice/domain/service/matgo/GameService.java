@@ -12,7 +12,6 @@ import com.pomingmatgo.gameservice.domain.repository.InstalledCardRepository;
 import com.pomingmatgo.gameservice.domain.service.matgo.calculatescore.ScoreCalculator;
 import com.pomingmatgo.gameservice.global.exception.WebSocketBusinessException;
 import lombok.RequiredArgsConstructor;
-import org.springframework.data.redis.core.ReactiveStringRedisTemplate;
 import org.springframework.stereotype.Service;
 import reactor.core.publisher.Mono;
 
@@ -30,7 +29,11 @@ public class GameService {
     private final GameStateRepository gameStateRepository;
     private final AcquiredCardRepository acquiredCardRepository;
     private final ScoreCalculator scoreCalculator;
-    private final ReactiveStringRedisTemplate redisTemplate;
+    private final RoomCleanupService roomCleanupService;
+
+    public Mono<GameState> findGameState(long roomId) {
+        return gameStateRepository.findById(roomId);
+    }
 
     public Mono<GameState> setGameInProgress(GameState gameState) {
         GameState newState = gameState.markInProgress();
@@ -325,11 +328,9 @@ public class GameService {
                 .phase(GamePhase.END)
                 .build();
         long roomId = gameState.getRoomId();
-        String keyPattern = "game:" + gameState.getRoomId() + ":*";
-
         GameState initState = GameState.createEmptyRoom(roomId);
 
-        return redisTemplate.delete(redisTemplate.keys(keyPattern))
+        return roomCleanupService.cleanupRoomData(roomId)
                 .then(Mono.defer(() -> gameStateRepository.create(initState)))
                 .thenReturn(newState);
     }

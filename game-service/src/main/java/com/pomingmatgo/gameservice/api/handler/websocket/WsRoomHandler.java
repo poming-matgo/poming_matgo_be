@@ -10,14 +10,11 @@ import com.pomingmatgo.gameservice.global.MessageSender;
 import com.pomingmatgo.gameservice.global.WebSocketResDto;
 import com.pomingmatgo.gameservice.global.exception.WebSocketBusinessException;
 import com.pomingmatgo.gameservice.global.exception.WebSocketErrorCode;
+import com.pomingmatgo.gameservice.global.lock.RoomLockManager;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.redisson.api.RLockReactive;
-import org.redisson.api.RedissonReactiveClient;
 import org.springframework.stereotype.Component;
 import reactor.core.publisher.Mono;
-import java.util.UUID;
-import java.util.concurrent.TimeUnit;
 
 import static com.pomingmatgo.gameservice.domain.Player.PLAYER_NOTHING;
 
@@ -28,7 +25,7 @@ public class WsRoomHandler {
     private final MessageSender messageSender;
     private final RoomService roomService;
     private final PreGameService preGameService;
-    private final RedissonReactiveClient redissonReactiveClient;
+    private final RoomLockManager roomLockManager;
 
 
     public Mono<Void> handleRoomEvent(RequestEvent<?> event, GameState gameState, Player player) {
@@ -43,17 +40,9 @@ public class WsRoomHandler {
 
     private Mono<Void> handleReadyEvent(GameState gameState, Player player) {
         long roomId = gameState.getRoomId();
-        RLockReactive lock = redissonReactiveClient.getLock("READY_LOCK:ROOM:" + roomId);
 
-        long executionId = UUID.randomUUID().getMostSignificantBits();
-
-        return Mono.usingWhen(
-                lock.tryLock(5, 2, TimeUnit.SECONDS, executionId)
-                        .flatMap(acquired -> acquired
-                                ? Mono.just(lock)
-                                : Mono.error(new WebSocketBusinessException(WebSocketErrorCode.TOO_MANY_REQUESTS))),
-
-                acquiredLock -> roomService.readyFresh(roomId, player, true)
+        return roomLockManager.withLock(roomId,
+                roomService.readyFresh(roomId, player, true)
                         .flatMap(freshState ->
                                 messageSender.sendMessageToAllUser(
                                                 roomId,
@@ -61,47 +50,28 @@ public class WsRoomHandler {
                                         )
                                         .then(checkAndProceedIfAllReady(freshState))
                         ),
-                acquiredLock -> releaseLock(acquiredLock, executionId),
-                (acquiredLock, err) -> releaseLock(acquiredLock, executionId),
-                acquiredLock -> releaseLock(acquiredLock, executionId)
+                () -> new WebSocketBusinessException(WebSocketErrorCode.TOO_MANY_REQUESTS)
         );
     }
 
     private Mono<Void> handleUnreadyEvent(GameState gameState, Player player) {
         long roomId = gameState.getRoomId();
-        RLockReactive lock = redissonReactiveClient.getLock("READY_LOCK:ROOM:" + roomId);
-        long executionId = UUID.randomUUID().getMostSignificantBits();
 
-        return Mono.usingWhen(
-                lock.tryLock(5, 2, TimeUnit.SECONDS, executionId)
-                        .flatMap(acquired -> acquired
-                                ? Mono.just(lock)
-                                : Mono.error(new WebSocketBusinessException(WebSocketErrorCode.TOO_MANY_REQUESTS))),
-
-                acquiredLock -> roomService.readyFresh(roomId, player, false)
+        return roomLockManager.withLock(roomId,
+                roomService.readyFresh(roomId, player, false)
                         .then(messageSender.sendMessageToAllUser(
                                 roomId,
                                 WebSocketResDto.of(player, "UNREADY", "Ready 취소 했습니다.")
                         )),
-
-                acquiredLock -> releaseLock(acquiredLock, executionId),
-                (acquiredLock, err) -> releaseLock(acquiredLock, executionId),
-                acquiredLock -> releaseLock(acquiredLock, executionId)
+                () -> new WebSocketBusinessException(WebSocketErrorCode.TOO_MANY_REQUESTS)
         );
-    }
-
-    private Mono<Void> releaseLock(RLockReactive lock, long executionId) {
-        return lock.unlock(executionId)
-                .then()
-                .onErrorResume(e -> {
-                    return Mono.empty();
-                });
     }
 
     private Mono<Void> checkAndProceedIfAllReady(GameState updatedGameState) {
         long roomId = updatedGameState.getRoomId();
         return Mono.just(updatedGameState)
                 .filter(roomService::checkAllPlayersReady)
+                .filter(gs -> !gs.isGameStarted())
                 .flatMap(gs -> roomService.startGame(gs))
                 .flatMap(state -> preGameService.pickFiveCardsAndSave(state.getRoomId())
                         .then(handleAllReadyEvent(state.getRoomId()))
