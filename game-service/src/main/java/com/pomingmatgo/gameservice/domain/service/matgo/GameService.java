@@ -190,14 +190,14 @@ public class GameService {
                 gameState.getRoomId()
         );
 
-        return acquiredCardsMono.zipWith(moveCardMono)
-                .map(tuple -> {
-                    List<Card> acquiredCards = tuple.getT1();
-                    Card movedCard = tuple.getT2();
-
-                    acquiredCards.add(movedCard);
-                    return ProcessCardResult.claimOpponentPi(acquiredCards, movedCard);
-                });
+        return acquiredCardsMono.flatMap(acquiredCards ->
+                moveCardMono
+                        .map(movedCard -> {
+                            acquiredCards.add(movedCard);
+                            return ProcessCardResult.claimOpponentPi(acquiredCards, movedCard);
+                        })
+                        .switchIfEmpty(Mono.fromSupplier(() -> ProcessCardResult.immediate(acquiredCards)))
+        );
     }
 
     private Mono<ProcessCardResult> handleTwoCardsOnFloor(GameState gameState, Card submittedCard, List<Card> selectableCards, Card turnedCard) {
