@@ -12,6 +12,7 @@ import org.redisson.api.RedissonReactiveClient;
 import org.springframework.expression.ExpressionParser;
 import org.springframework.expression.spel.standard.SpelExpressionParser;
 import org.springframework.expression.spel.support.StandardEvaluationContext;
+import org.springframework.context.annotation.Profile;
 import org.springframework.stereotype.Component;
 import reactor.core.publisher.Mono;
 
@@ -20,6 +21,7 @@ import java.util.concurrent.TimeUnit;
 
 import static com.pomingmatgo.gameservice.global.exception.WebSocketErrorCode.TRY_AGAIN;
 
+@Profile("redis")
 @Slf4j
 @Aspect
 @Component
