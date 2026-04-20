@@ -6,9 +6,11 @@ import com.pomingmatgo.gameservice.global.exception.ErrorCode;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.data.redis.core.ReactiveRedisOperations;
+import org.springframework.context.annotation.Profile;
 import org.springframework.stereotype.Repository;
 import reactor.core.publisher.Mono;
 
+@Profile("redis")
 @Repository
 //@RequiredArgsConstructor
 public class RedisGameStateRepository implements GameStateRepository {

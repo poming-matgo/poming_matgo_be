@@ -13,8 +13,11 @@ import reactor.core.publisher.Mono;
 import java.util.Collection;
 import java.util.List;
 
+import org.springframework.context.annotation.Profile;
+
 import static com.pomingmatgo.gameservice.global.exception.WebSocketErrorCode.SYSTEM_ERROR;
 
+@Profile("redis")
 @Repository
 public class RedisInstalledCardRepository implements InstalledCardRepository {
     @Qualifier("cardRedisTemplate")

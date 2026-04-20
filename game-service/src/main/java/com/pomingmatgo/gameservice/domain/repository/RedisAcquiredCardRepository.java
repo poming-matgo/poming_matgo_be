@@ -2,12 +2,14 @@ package com.pomingmatgo.gameservice.domain.repository;
 
 import com.pomingmatgo.gameservice.domain.card.Card;
 import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.context.annotation.Profile;
 import org.springframework.data.redis.core.ReactiveRedisOperations;
 import org.springframework.stereotype.Repository;
 import reactor.core.publisher.Mono;
 
 import java.util.List;
 
+@Profile("redis")
 @Repository
 public class RedisAcquiredCardRepository implements AcquiredCardRepository {
 
