@@ -15,6 +15,7 @@ import org.springframework.expression.spel.support.StandardEvaluationContext;
 import org.springframework.stereotype.Component;
 import reactor.core.publisher.Mono;
 
+import java.util.UUID;
 import java.util.concurrent.TimeUnit;
 
 import static com.pomingmatgo.gameservice.global.exception.WebSocketErrorCode.TRY_AGAIN;
@@ -40,7 +41,9 @@ public class GameDistributedLockAspect {
         String keyName = generateKey(gameLock.key(), joinPoint);
         RLockReactive lock = redissonClient.getLock(keyName);
 
-        return lock.tryLock(gameLock.waitTime(), gameLock.leaseTime(), TimeUnit.MILLISECONDS)
+        long executionId = UUID.randomUUID().getMostSignificantBits();
+
+        return lock.tryLock(gameLock.waitTime(), gameLock.leaseTime(), TimeUnit.MILLISECONDS, executionId)
                 .flatMap(available -> {
                     if (!available) {
                         return Mono.error(new WebSocketBusinessException(TRY_AGAIN));
@@ -55,15 +58,15 @@ public class GameDistributedLockAspect {
                                     return Mono.error(e);
                                 }
                             },
-                            this::releaseLock,           // 정상 완료 시
-                            (l, err) -> releaseLock(l),  // 에러 발생 시
-                            this::releaseLock            // 취소 시
+                            l -> releaseLock(l, executionId),
+                            (l, err) -> releaseLock(l, executionId),
+                            l -> releaseLock(l, executionId)
                     );
                 });
     }
 
-    private Mono<Void> releaseLock(RLockReactive lock) {
-        return lock.unlock()
+    private Mono<Void> releaseLock(RLockReactive lock, long executionId) {
+        return lock.unlock(executionId)
                 .onErrorResume(e -> {
                     if (e instanceof IllegalMonitorStateException) {
                         log.info("Redisson Lock already released (lease time expired): {}", e.getMessage());
