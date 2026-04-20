@@ -7,6 +7,7 @@ import reactor.core.publisher.Mono;
 import java.util.List;
 
 public interface InstalledCardRepository {
+    Mono<Void> cleanup(long roomId);
     Mono<Boolean> savePlayerCards(List<Card> cards, long roomId, Player player);
     Mono<Boolean> deletePlayerCards(long roomId, Player player);
     Mono<Boolean> saveRevealedCard(List<Card> cards, long roomId);

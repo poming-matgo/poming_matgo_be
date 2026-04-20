@@ -68,4 +68,9 @@ public class RedisGameStateRepository implements GameStateRepository {
     public Mono<Boolean> saveState(GameState gameState, String redisKey) {
         return redisOps.opsForValue().set(redisKey, gameState);
     }
+
+    @Override
+    public Mono<Void> cleanup(long roomId) {
+        return redisOps.delete(generateKey(roomId)).then();
+    }
 }

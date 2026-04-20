@@ -44,4 +44,9 @@ public class RedisAcquiredCardRepository implements AcquiredCardRepository {
     public Mono<Long> removeCard(long roomId, long playerId, Card card) {
         return redisOps.opsForSet().remove(generateKey(roomId, playerId), card.name());
     }
+
+    @Override
+    public Mono<Void> cleanup(long roomId) {
+        return redisOps.delete(generateKey(roomId, 1), generateKey(roomId, 2)).then();
+    }
 }

@@ -135,4 +135,16 @@ public class RedisInstalledCardRepository implements InstalledCardRepository {
                 .then(savePlayerCards(cards, roomId, player))
                 .then();
     }
+
+    @Override
+    public Mono<Void> cleanup(long roomId) {
+        String[] keys = new String[15];
+        keys[0] = String.format(PLAYER1_CARD_KEY_FORMAT, roomId);
+        keys[1] = String.format(PLAYER2_CARD_KEY_FORMAT, roomId);
+        keys[2] = generateHiddenCardKey(roomId);
+        for (int i = 0; i < 12; i++) {
+            keys[3 + i] = generateRevealedCardKey(roomId, i + 1);
+        }
+        return redisOps.delete(keys).then();
+    }
 }

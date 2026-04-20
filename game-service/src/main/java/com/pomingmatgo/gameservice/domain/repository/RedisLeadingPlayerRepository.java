@@ -81,4 +81,13 @@ public class RedisLeadingPlayerRepository implements LeadingPlayerRepository {
         String key = String.format(LEADER_TRIGGER_KEY_FORMAT, roomId);
         return cardRedisOps.opsForValue().setIfAbsent(key, "1", Duration.ofSeconds(30));
     }
+
+    @Override
+    public Mono<Void> cleanup(long roomId) {
+        String select5Key = generateSelectedFiveCardKey(roomId);
+        String p1MonthKey = String.format(PLAYER1_MONTH_KEY_FORMAT, roomId);
+        String p2MonthKey = String.format(PLAYER2_MONTH_KEY_FORMAT, roomId);
+        String triggerKey = String.format(LEADER_TRIGGER_KEY_FORMAT, roomId);
+        return cardRedisOps.delete(select5Key, p1MonthKey, p2MonthKey, triggerKey).then();
+    }
 }

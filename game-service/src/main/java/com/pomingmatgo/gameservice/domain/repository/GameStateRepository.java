@@ -8,4 +8,5 @@ public interface GameStateRepository {
     Mono<Long> create(GameState gameState);
     Mono<Long> delete(long roomId);
     Mono<Long> save(GameState gameState);
+    Mono<Void> cleanup(long roomId);
 }

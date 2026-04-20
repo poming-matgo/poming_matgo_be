@@ -8,6 +8,7 @@ import reactor.core.publisher.Mono;
 import java.util.List;
 
 public interface LeadingPlayerRepository {
+    Mono<Void> cleanup(long roomId);
     Mono<Void> saveSelectedCard(List<Card> cards, Long roomId);
     Mono<Card> getCardByIndex(Long roomId, int index);
     Mono<List<Card>> getAllCards(Long roomId);
