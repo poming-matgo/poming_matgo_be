@@ -15,7 +15,7 @@ public class GameNotificationService {
     private final GameMessageSender gameMessageSender;
     private final GamePlayService gamePlayService;
 
-    public Mono<GameState> broadcastTurnResult(long roomId, Player player, GameState gameState, ProcessCardResult result, Runnable onLockAcquired) {
+    public Mono<GameState> broadcastTurnResult(long roomId, Player player, GameState gameState, ProcessCardResult result, Runnable onLockAcquired, long remainingMs) {
         Mono<Void> sendMoveCards = Flux.fromIterable(result.getMoveCards())
                 .concatMap(card -> gameMessageSender.sendMovingCardMessage(roomId, player, gameState.getOtherPlayer(), card))
                 .then();
@@ -49,7 +49,7 @@ public class GameNotificationService {
 
                     } else {
                         return gamePlayService.proceedToNextTurn(gameState)
-                                .flatMap(nextState ->gameMessageSender.sendTurnInfo(nextState)
+                                .flatMap(nextState -> gameMessageSender.sendTurnInfo(nextState, remainingMs)
                                 .thenReturn(nextState));
                     }
                 }));
@@ -65,10 +65,10 @@ public class GameNotificationService {
         return gameMessageSender.sendScoreInfo(gameState.getRoomId(), scoreInfoRes);
     }
 
-    public Mono<Void> broadcastNextTurnInfo(GameState nextState) {
+    public Mono<Void> broadcastNextTurnInfo(GameState nextState, long remainingMs) {
         ScoreInfoRes scoreInfoRes = ScoreInfoRes.from(nextState);
         return Mono.when(
-                gameMessageSender.sendTurnInfo(nextState),
+                gameMessageSender.sendTurnInfo(nextState, remainingMs),
                 gameMessageSender.sendScoreInfo(nextState.getRoomId(), scoreInfoRes)
         );
     }

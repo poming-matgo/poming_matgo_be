@@ -50,11 +50,12 @@ public class GameMessageSender {
         );
     }
 
-    public Mono<Void> sendTurnInfo(GameState gameState) {
+    public Mono<Void> sendTurnInfo(GameState gameState, long remainingMs) {
         AnnounceRoundRes res = new AnnounceRoundRes(
                 gameState.getRound(),
                 gameState.getCurrentTurn(),
-                gameState.getCurrentPlayer()
+                gameState.getCurrentPlayer(),
+                remainingMs
         );
         return messageSender.sendMessageToAllUser(gameState.getRoomId(),
                 WebSocketResDto.of(PLAYER_NOTHING, "ANNOUNCE_TURN_INFORMATION", "턴을 알립니다.", res));

@@ -15,6 +15,7 @@ import reactor.core.publisher.Mono;
 import java.time.Duration;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.TimeUnit;
 
 import static com.pomingmatgo.gameservice.domain.GamePhase.IN_PROGRESS;
 
@@ -38,7 +39,7 @@ public class AutoPlayScheduler {
     }
 
 
-    public void scheduleAutoPlay(long roomId, int round, int currentTurn, Player currentPlayer, long deadlineMillis) {
+    public void scheduleAutoPlay(long roomId, int round, int currentTurn, Player currentPlayer, long deadlineNanos) {
         int newSequence = getTurnSequence(round, currentTurn);
         int existingSequence = scheduledSequences.getOrDefault(roomId, 0);
 
@@ -52,7 +53,7 @@ public class AutoPlayScheduler {
 
         scheduledSequences.put(roomId, newSequence);
 
-        long delayMillis = deadlineMillis - System.currentTimeMillis();
+        long delayMillis = TimeUnit.NANOSECONDS.toMillis(deadlineNanos - System.nanoTime());
         if (delayMillis <= 0) delayMillis = 100;
 
         Disposable task = Mono.delay(Duration.ofMillis(delayMillis))
@@ -118,17 +119,18 @@ public class AutoPlayScheduler {
                                             );
 
                                             long TURN_TIMEOUT_MILLIS = 10000L;
-                                            long deadlineMillis = System.currentTimeMillis() + TURN_TIMEOUT_MILLIS;
+                                            long GRACE_PERIOD_MILLIS = 2000L;
+                                            long deadlineNanos = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(TURN_TIMEOUT_MILLIS + GRACE_PERIOD_MILLIS);
                                             Mono<Void> handleResult;
 
                                             if (ctx.isChoiceRequired()) {
                                                 handleResult = gameMessageSender.sendChooseFloorCardMessage(roomId, currentPlayer, ctx.cardResult().getSelectableCards());
                                             } else {
-                                                handleResult = gameNotificationService.broadcastTurnResult(roomId, currentPlayer, ctx.updatedGameState(), ctx.cardResult(), () -> this.cancelAutoPlay(roomId))
+                                                handleResult = gameNotificationService.broadcastTurnResult(roomId, currentPlayer, ctx.updatedGameState(), ctx.cardResult(), () -> this.cancelAutoPlay(roomId), TURN_TIMEOUT_MILLIS)
                                                         .doOnNext(nextState -> {
                                                             if (nextState.getPhase() == IN_PROGRESS) {
                                                                 scheduleAutoPlay(
-                                                                        roomId, nextState.getRound(), nextState.getCurrentTurn(), nextState.getCurrentPlayer(), deadlineMillis
+                                                                        roomId, nextState.getRound(), nextState.getCurrentTurn(), nextState.getCurrentPlayer(), deadlineNanos
                                                                 );
                                                             }
                                                         })

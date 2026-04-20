@@ -12,4 +12,5 @@ public class AnnounceRoundRes {
     private int round;
     private int turn;
     private Player curPlayer;
+    private long remainingMs;
 }

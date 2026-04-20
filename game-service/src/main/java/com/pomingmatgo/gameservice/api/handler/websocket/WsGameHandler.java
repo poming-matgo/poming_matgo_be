@@ -16,6 +16,8 @@ import org.redisson.api.RedissonReactiveClient;
 import org.springframework.stereotype.Component;
 import reactor.core.publisher.Mono;
 
+import java.util.concurrent.TimeUnit;
+
 import static com.pomingmatgo.gameservice.domain.GamePhase.*;
 import static com.pomingmatgo.gameservice.global.exception.WebSocketErrorCode.INVALID_GAME_PHASE;
 import static com.pomingmatgo.gameservice.global.exception.WebSocketErrorCode.NOT_YOUR_TURN;
@@ -32,6 +34,7 @@ public class WsGameHandler {
     private final RedissonReactiveClient redissonReactiveClient;
 
     long TURN_TIMEOUT_MILLIS = 10000L;
+    long GRACE_PERIOD_MILLIS = 2000L;
 
     public Mono<Void> handleGameEvent(RequestEvent<?> event, GameState gameState, Player player) {
         if (!player.equals(gameState.getCurrentPlayer())) {
@@ -65,14 +68,12 @@ public class WsGameHandler {
                             gameMessageSender.sendTopCardInfo(roomId, player, ctx.topCard())
                     );
 
-                    long deadlineMillis = System.currentTimeMillis() + TURN_TIMEOUT_MILLIS;
-
                     Mono<Void> handleResult;
                     if (ctx.isChoiceRequired()) {
                         autoPlayScheduler.cancelAutoPlay(roomId);
                         handleResult = gameMessageSender.sendChooseFloorCardMessage(roomId, player, ctx.cardResult().getSelectableCards());
                     } else {
-                        handleResult = gameNotificationService.broadcastTurnResult(roomId, player, ctx.updatedGameState(), ctx.cardResult(), () -> autoPlayScheduler.cancelAutoPlay(roomId))
+                        handleResult = gameNotificationService.broadcastTurnResult(roomId, player, ctx.updatedGameState(), ctx.cardResult(), () -> autoPlayScheduler.cancelAutoPlay(roomId), TURN_TIMEOUT_MILLIS)
                                 .doOnNext(nextState -> {
                                     if (nextState.getPhase() == IN_PROGRESS && !nextState.getCurrentPlayer().equals(player)) {
                                         log.info("[AutoPlay Schedule] 스케줄링 등록! roomId: {}, 예약된 턴: ({}, {}), 대상 플레이어: {}",
@@ -82,7 +83,7 @@ public class WsGameHandler {
                                                 nextState.getRound(),
                                                 nextState.getCurrentTurn(),
                                                 nextState.getCurrentPlayer(),
-                                                deadlineMillis
+                                                System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(TURN_TIMEOUT_MILLIS + GRACE_PERIOD_MILLIS)
                                         );
                                     }
                                 })
@@ -114,10 +115,8 @@ public class WsGameHandler {
                     Mono<Void> sendAcquired = gameMessageSender.sendAcquiredCardMessage(roomId, player, ctx.cardResult().getAcquiredCards());
                     Mono<GameState> setNextTurn = gamePlayService.proceedToNextTurn(ctx.updatedGameState());
 
-                    long deadlineMillis = System.currentTimeMillis() + TURN_TIMEOUT_MILLIS;
-
                     return sendAcquired.then(setNextTurn)
-                            .delayUntil(gameNotificationService::broadcastNextTurnInfo)
+                            .delayUntil(nextState -> gameNotificationService.broadcastNextTurnInfo(nextState, TURN_TIMEOUT_MILLIS))
                             .doOnNext(nextState -> {
                                 if (nextState.getPhase() == IN_PROGRESS) {
                                     log.info("[AutoPlay Schedule] 스케줄링 등록! roomId: {}, 예약된 턴: ({}, {}), 대상 플레이어: {}",
@@ -127,7 +126,7 @@ public class WsGameHandler {
                                             nextState.getRound(),
                                             nextState.getCurrentTurn(),
                                             nextState.getCurrentPlayer(),
-                                            deadlineMillis
+                                            System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(TURN_TIMEOUT_MILLIS + GRACE_PERIOD_MILLIS)
                                     );
                                 }
                             })
@@ -139,14 +138,13 @@ public class WsGameHandler {
 
     private Mono<Void> handleGoStopChoice(RequestEvent<GoStopReq> event, GameState gameState, Player player) {
         long roomId = gameState.getRoomId();
-        long deadlineMillis = System.currentTimeMillis() + TURN_TIMEOUT_MILLIS;
         String flagKey = "IN_FLIGHT:ROOM:" + roomId + ":PLAYER:" + player.getNumber();
 
         Mono<Void> mainProcess = gamePlayService.executeGoStop(gameState, player, event, () -> autoPlayScheduler.cancelAutoPlay(roomId))
                 .delayUntil(gs -> {
                     if (gs.isPlaying()) {
                         return gameMessageSender.sendGoResultMessage(gs, player)
-                                .then(gameMessageSender.sendTurnInfo(gs));
+                                .then(gameMessageSender.sendTurnInfo(gs, TURN_TIMEOUT_MILLIS));
                     } else {
                         return gamePlayService.gameOver(gs, player)
                                 .delayUntil(finalState -> gameMessageSender.sendGameOverMessage(finalState, player));
@@ -161,7 +159,7 @@ public class WsGameHandler {
                                 nextState.getRound(),
                                 nextState.getCurrentTurn(),
                                 nextState.getCurrentPlayer(),
-                                deadlineMillis
+                                System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(TURN_TIMEOUT_MILLIS + GRACE_PERIOD_MILLIS)
                         );
                     }
                 })
