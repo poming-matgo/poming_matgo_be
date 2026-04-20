@@ -74,7 +74,7 @@ public class WsGameHandler {
                     } else {
                         handleResult = gameNotificationService.broadcastTurnResult(roomId, player, ctx.updatedGameState(), ctx.cardResult(), () -> autoPlayScheduler.cancelAutoPlay(roomId))
                                 .doOnNext(nextState -> {
-                                    if (nextState.getPhase() == IN_PROGRESS) {
+                                    if (nextState.getPhase() == IN_PROGRESS && !nextState.getCurrentPlayer().equals(player)) {
                                         log.info("[AutoPlay Schedule] 스케줄링 등록! roomId: {}, 예약된 턴: ({}, {}), 대상 플레이어: {}",
                                                 roomId, nextState.getRound(), nextState.getCurrentTurn(), nextState.getCurrentPlayer());
                                         autoPlayScheduler.scheduleAutoPlay(
