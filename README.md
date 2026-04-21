@@ -1,3 +1,4 @@
+<img width="1015" height="533" alt="Animation" src="https://github.com/user-attachments/assets/0cbac32e-dd16-4f6c-abab-baf98d026d18" />
 # 🎴 웹 고스톱 게임 (Web Go-Stop)
 
 > **대규모 동시 접속 환경을 고려한 실시간 턴제 웹 고스톱 게임입니다.**
