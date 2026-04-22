@@ -8,27 +8,22 @@ import org.springframework.stereotype.Repository;
 import reactor.core.publisher.Mono;
 
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.atomic.AtomicReference;
 
 @Profile("in-memory")
 @Repository
 public class InMemoryGameStateRepository implements GameStateRepository {
 
-    private final ConcurrentHashMap<Long, AtomicReference<GameState>> store = new ConcurrentHashMap<>();
+    private final ConcurrentHashMap<Long, GameState> store = new ConcurrentHashMap<>();
 
     @Override
     public Mono<GameState> findById(long roomId) {
-        return Mono.fromCallable(() -> {
-            AtomicReference<GameState> ref = store.get(roomId);
-            return ref != null ? ref.get() : null;
-        });
+        return Mono.fromCallable(() -> store.get(roomId));
     }
 
     @Override
     public Mono<Long> create(GameState gameState) {
         return Mono.fromCallable(() -> {
-            AtomicReference<GameState> existing = store.putIfAbsent(
-                    gameState.getRoomId(), new AtomicReference<>(gameState));
+            GameState existing = store.putIfAbsent(gameState.getRoomId(), gameState);
             if (existing != null) {
                 throw new BusinessException(ErrorCode.ALREADY_EXISTED_ROOM);
             }
@@ -47,11 +42,11 @@ public class InMemoryGameStateRepository implements GameStateRepository {
     @Override
     public Mono<Long> save(GameState gameState) {
         return Mono.fromCallable(() -> {
-            AtomicReference<GameState> ref = store.get(gameState.getRoomId());
-            if (ref == null) {
+            // RoomLockManager 직렬화 보장 → containsKey + put 사이 레이스 없음
+            if (!store.containsKey(gameState.getRoomId())) {
                 throw new BusinessException(ErrorCode.SYSTEM_ERROR);
             }
-            ref.set(gameState);
+            store.put(gameState.getRoomId(), gameState);
             return gameState.getRoomId();
         });
     }
