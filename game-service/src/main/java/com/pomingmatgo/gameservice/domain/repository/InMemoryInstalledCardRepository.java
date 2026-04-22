@@ -9,7 +9,7 @@ import reactor.core.publisher.Mono;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 
-@Profile("local")
+@Profile("in-memory")
 @Repository
 public class InMemoryInstalledCardRepository implements InstalledCardRepository {
 

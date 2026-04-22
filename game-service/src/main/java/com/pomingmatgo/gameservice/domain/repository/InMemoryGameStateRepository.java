@@ -10,7 +10,7 @@ import reactor.core.publisher.Mono;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicReference;
 
-@Profile("local")
+@Profile("in-memory")
 @Repository
 public class InMemoryGameStateRepository implements GameStateRepository {
 

@@ -21,7 +21,7 @@ import java.util.concurrent.TimeUnit;
 
 import static com.pomingmatgo.gameservice.global.exception.WebSocketErrorCode.TRY_AGAIN;
 
-@Profile("local")
+@Profile("in-memory")
 @Slf4j
 @Aspect
 @Component

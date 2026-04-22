@@ -11,7 +11,7 @@ import java.util.List;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 
-@Profile("local")
+@Profile("in-memory")
 @Repository
 public class InMemoryAcquiredCardRepository implements AcquiredCardRepository {
 
