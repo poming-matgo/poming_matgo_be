@@ -6,4 +6,8 @@ import java.util.function.Supplier;
 
 public interface RoomLockManager {
     <T> Mono<T> withLock(long roomId, Mono<T> task, Supplier<? extends RuntimeException> lockFailError);
+
+    default Mono<Void> cleanup(long roomId) {
+        return Mono.empty();
+    }
 }

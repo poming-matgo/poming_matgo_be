@@ -10,7 +10,7 @@ import java.util.concurrent.Semaphore;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Supplier;
 
-@Profile("local")
+@Profile("in-memory")
 @Component
 public class InMemoryRoomLockManager implements RoomLockManager {
 
@@ -32,5 +32,10 @@ public class InMemoryRoomLockManager implements RoomLockManager {
                             s -> Mono.fromRunnable(s::release)
                     );
                 });
+    }
+
+    @Override
+    public Mono<Void> cleanup(long roomId) {
+        return Mono.fromRunnable(() -> locks.remove(roomId));
     }
 }
