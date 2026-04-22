@@ -1,6 +1,7 @@
 package com.pomingmatgo.gameservice.domain.service.matgo;
 
 import com.pomingmatgo.gameservice.global.exception.WebSocketBusinessException;
+import com.pomingmatgo.gameservice.global.lock.GameLockCleaner;
 import lombok.extern.slf4j.Slf4j;
 import org.aspectj.lang.ProceedingJoinPoint;
 import org.aspectj.lang.annotation.Around;
@@ -24,7 +25,7 @@ import static com.pomingmatgo.gameservice.global.exception.WebSocketErrorCode.TR
 @Slf4j
 @Aspect
 @Component
-public class InMemoryGameLockAspect {
+public class InMemoryGameLockAspect implements GameLockCleaner {
 
     private final ConcurrentHashMap<String, Semaphore> locks = new ConcurrentHashMap<>();
     private final ExpressionParser parser = new SpelExpressionParser();
@@ -60,6 +61,9 @@ public class InMemoryGameLockAspect {
                             s -> Mono.fromRunnable(s::release)
                     );
                 });
+    @Override
+    public Mono<Void> cleanup(long roomId) {
+        return Mono.fromRunnable(() -> locksByRoom.remove(roomId));
     }
 
     private String generateKey(String key, ProceedingJoinPoint joinPoint) {
