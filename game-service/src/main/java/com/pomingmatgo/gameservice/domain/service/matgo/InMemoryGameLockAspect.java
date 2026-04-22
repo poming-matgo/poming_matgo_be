@@ -13,11 +13,9 @@ import org.springframework.expression.spel.standard.SpelExpressionParser;
 import org.springframework.expression.spel.support.StandardEvaluationContext;
 import org.springframework.stereotype.Component;
 import reactor.core.publisher.Mono;
-import reactor.core.scheduler.Schedulers;
 
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Semaphore;
-import java.util.concurrent.TimeUnit;
 
 import static com.pomingmatgo.gameservice.global.exception.WebSocketErrorCode.TRY_AGAIN;
 
@@ -27,8 +25,9 @@ import static com.pomingmatgo.gameservice.global.exception.WebSocketErrorCode.TR
 @Component
 public class InMemoryGameLockAspect implements GameLockCleaner {
 
-    private final ConcurrentHashMap<String, Semaphore> locks = new ConcurrentHashMap<>();
+    private final ConcurrentHashMap<Long, ConcurrentHashMap<String, Semaphore>> locksByRoom = new ConcurrentHashMap<>();
     private final ExpressionParser parser = new SpelExpressionParser();
+    private final ConcurrentHashMap<String, org.springframework.expression.Expression> expressionCache = new ConcurrentHashMap<>();
 
     @Around("@annotation(gameLock)")
     public Mono<Object> lock(ProceedingJoinPoint joinPoint, GameLock gameLock) {
@@ -38,45 +37,64 @@ public class InMemoryGameLockAspect implements GameLockCleaner {
         }
 
         String keyName = generateKey(gameLock.key(), joinPoint);
-        Semaphore semaphore = locks.computeIfAbsent(keyName, k -> new Semaphore(1));
+        long roomId = extractRoomIdFromArgs(joinPoint);
+        Semaphore semaphore = locksByRoom
+                .computeIfAbsent(roomId, k -> new ConcurrentHashMap<>())
+                .computeIfAbsent(keyName, k -> new Semaphore(1));
 
-        // tryAcquire는 블로킹이므로 boundedElastic에서 실행
-        return Mono.fromCallable(() -> semaphore.tryAcquire(gameLock.waitTime(), TimeUnit.MILLISECONDS))
-                .subscribeOn(Schedulers.boundedElastic())
-                .flatMap(acquired -> {
-                    if (!acquired) {
-                        return Mono.error(new WebSocketBusinessException(TRY_AGAIN));
+        // 정상 게임 흐름에서 같은 round:turn 락 경쟁은 발생하지 않음
+        // 경쟁이 발생했다면 버그 → 즉시 실패가 3초 대기보다 안전
+        if (!semaphore.tryAcquire()) {
+            return Mono.error(new WebSocketBusinessException(TRY_AGAIN));
+        }
+
+        return Mono.usingWhen(
+                Mono.just(semaphore),
+                s -> {
+                    try {
+                        return (Mono<Object>) joinPoint.proceed();
+                    } catch (Throwable e) {
+                        return Mono.error(e);
                     }
-                    return Mono.usingWhen(
-                            Mono.just(semaphore),
-                            s -> {
-                                try {
-                                    return (Mono<Object>) joinPoint.proceed();
-                                } catch (Throwable e) {
-                                    return Mono.error(e);
-                                }
-                            },
-                            s -> Mono.fromRunnable(s::release),
-                            (s, err) -> Mono.fromRunnable(s::release),
-                            s -> Mono.fromRunnable(s::release)
-                    );
-                });
+                },
+                s -> Mono.fromRunnable(s::release),
+                (s, err) -> Mono.fromRunnable(s::release),
+                s -> Mono.fromRunnable(s::release)
+        );
+    }
+
     @Override
     public Mono<Void> cleanup(long roomId) {
         return Mono.fromRunnable(() -> locksByRoom.remove(roomId));
     }
 
+    private long extractRoomIdFromArgs(ProceedingJoinPoint joinPoint) {
+        MethodSignature signature = (MethodSignature) joinPoint.getSignature();
+        String[] paramNames = signature.getParameterNames();
+        Object[] args = joinPoint.getArgs();
+        for (int i = 0; i < paramNames.length; i++) {
+            if ("roomId".equals(paramNames[i])) {
+                return (Long) args[i];
+            }
+        }
+        throw new IllegalStateException("@GameLock 메서드에 roomId 파라미터가 없습니다: " + signature.getName());
+    }
+
     private String generateKey(String key, ProceedingJoinPoint joinPoint) {
+        return "LOCK:" + expressionCache.computeIfAbsent(key, parser::parseExpression)
+                .getValue(buildContext(joinPoint), String.class);
+    }
+
+    private StandardEvaluationContext buildContext(ProceedingJoinPoint joinPoint) {
         MethodSignature signature = (MethodSignature) joinPoint.getSignature();
         StandardEvaluationContext context = new StandardEvaluationContext();
         Object[] args = joinPoint.getArgs();
         String[] paramNames = signature.getParameterNames();
-
         if (paramNames != null) {
             for (int i = 0; i < args.length; i++) {
                 context.setVariable(paramNames[i], args[i]);
             }
         }
-        return "LOCK:" + parser.parseExpression(key).getValue(context, String.class);
+        return context;
     }
 }
