@@ -13,22 +13,16 @@ import java.util.concurrent.ConcurrentHashMap;
 @Repository
 public class InMemoryInstalledCardRepository implements InstalledCardRepository {
 
-    private final ConcurrentHashMap<String, List<Card>> playerCards = new ConcurrentHashMap<>();
-    private final ConcurrentHashMap<String, Set<Card>> revealedCards = new ConcurrentHashMap<>();
+    private final ConcurrentHashMap<Long, ConcurrentHashMap<String, List<Card>>> playerCards = new ConcurrentHashMap<>();
+    private final ConcurrentHashMap<Long, ConcurrentHashMap<Integer, Set<Card>>> revealedCards = new ConcurrentHashMap<>();
     private final ConcurrentHashMap<Long, ArrayDeque<Card>> hiddenDeck = new ConcurrentHashMap<>();
-
-    private String playerKey(long roomId, Player player) {
-        return roomId + ":" + player.name();
-    }
-
-    private String revealedKey(long roomId, int month) {
-        return roomId + ":" + month;
-    }
 
     @Override
     public Mono<Boolean> savePlayerCards(List<Card> cards, long roomId, Player player) {
         return Mono.fromCallable(() -> {
-            playerCards.computeIfAbsent(playerKey(roomId, player), k -> new ArrayList<>())
+            // @GameLock 직렬화 보장 → computeIfAbsent 후 리스트 뮤테이션은 단일 스레드
+            playerCards.computeIfAbsent(roomId, k -> new ConcurrentHashMap<>())
+                       .computeIfAbsent(player.name(), k -> new ArrayList<>())
                        .addAll(cards);
             return true;
         });
@@ -37,7 +31,8 @@ public class InMemoryInstalledCardRepository implements InstalledCardRepository 
     @Override
     public Mono<Boolean> deletePlayerCards(long roomId, Player player) {
         return Mono.fromCallable(() -> {
-            playerCards.remove(playerKey(roomId, player));
+            ConcurrentHashMap<String, List<Card>> room = playerCards.get(roomId);
+            if (room != null) room.remove(player.name());
             return true;
         });
     }
@@ -45,9 +40,10 @@ public class InMemoryInstalledCardRepository implements InstalledCardRepository 
     @Override
     public Mono<Boolean> saveRevealedCard(List<Card> cards, long roomId) {
         return Mono.fromCallable(() -> {
+            ConcurrentHashMap<Integer, Set<Card>> room = revealedCards.computeIfAbsent(roomId, k -> new ConcurrentHashMap<>());
             for (Card card : cards) {
-                revealedCards.computeIfAbsent(revealedKey(roomId, card.getMonth()), k -> new HashSet<>())
-                             .add(card);
+                // @GameLock 직렬화 보장 → computeIfAbsent 후 셋 뮤테이션은 단일 스레드
+                room.computeIfAbsent(card.getMonth(), k -> new HashSet<>()).add(card);
             }
             return true;
         });
@@ -56,8 +52,8 @@ public class InMemoryInstalledCardRepository implements InstalledCardRepository 
     @Override
     public Mono<Boolean> saveHiddenCard(List<Card> cards, long roomId) {
         return Mono.fromCallable(() -> {
-            hiddenDeck.computeIfAbsent(roomId, k -> new ArrayDeque<>())
-                      .addAll(cards);
+            // @GameLock 직렬화 보장 → computeIfAbsent 후 덱 뮤테이션은 단일 스레드
+            hiddenDeck.computeIfAbsent(roomId, k -> new ArrayDeque<>()).addAll(cards);
             return true;
         });
     }
@@ -65,7 +61,8 @@ public class InMemoryInstalledCardRepository implements InstalledCardRepository 
     @Override
     public Mono<Boolean> deleteAllRevealedCardByMonth(long roomId, int month) {
         return Mono.fromCallable(() -> {
-            revealedCards.remove(revealedKey(roomId, month));
+            ConcurrentHashMap<Integer, Set<Card>> room = revealedCards.get(roomId);
+            if (room != null) room.remove(month);
             return true;
         });
     }
@@ -73,16 +70,20 @@ public class InMemoryInstalledCardRepository implements InstalledCardRepository 
     @Override
     public Mono<Boolean> deleteRevealedCard(long roomId, Card card) {
         return Mono.fromCallable(() -> {
-            Set<Card> set = revealedCards.get(revealedKey(roomId, card.getMonth()));
+            ConcurrentHashMap<Integer, Set<Card>> room = revealedCards.get(roomId);
+            Set<Card> set = room != null ? room.get(card.getMonth()) : null;
             return set != null && set.remove(card);
         });
     }
 
     @Override
     public Mono<List<Card>> getRevealedCardByMonth(long roomId, long month) {
-        return Mono.fromCallable(() ->
-                new ArrayList<>(revealedCards.getOrDefault(revealedKey(roomId, (int) month), Collections.emptySet()))
-        );
+        return Mono.fromCallable(() -> {
+            ConcurrentHashMap<Integer, Set<Card>> room = revealedCards.get(roomId);
+            return room != null
+                    ? new ArrayList<>(room.getOrDefault((int) month, Collections.emptySet()))
+                    : Collections.emptyList();
+        });
     }
 
     @Override
@@ -95,9 +96,12 @@ public class InMemoryInstalledCardRepository implements InstalledCardRepository 
 
     @Override
     public Mono<List<Card>> getPlayerCards(Long roomId, Player player) {
-        return Mono.fromCallable(() ->
-                new ArrayList<>(playerCards.getOrDefault(playerKey(roomId, player), Collections.emptyList()))
-        );
+        return Mono.fromCallable(() -> {
+            ConcurrentHashMap<String, List<Card>> room = playerCards.get(roomId);
+            return room != null
+                    ? new ArrayList<>(room.getOrDefault(player.name(), Collections.emptyList()))
+                    : Collections.emptyList();
+        });
     }
 
     @Override
@@ -109,9 +113,10 @@ public class InMemoryInstalledCardRepository implements InstalledCardRepository 
 
     @Override
     public Mono<Void> cleanup(long roomId) {
+        // 2단계 맵: O(1) 제거, 다른 방 키 탐색 없음
         return Mono.fromRunnable(() -> {
-            playerCards.keySet().removeIf(k -> k.startsWith(roomId + ":"));
-            revealedCards.keySet().removeIf(k -> k.startsWith(roomId + ":"));
+            playerCards.remove(roomId);
+            revealedCards.remove(roomId);
             hiddenDeck.remove(roomId);
         });
     }
