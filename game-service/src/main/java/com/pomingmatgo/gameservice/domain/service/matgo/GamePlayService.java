@@ -104,13 +104,13 @@ public class GamePlayService {
         return gameState.canGoStop(player);
     }
 
-    @GameLock(key = "'game:' + #gameState.roomId + ':' + #gameState.round + ':' + #gameState.currentTurn")
-    public Mono<GameState> executeGoStop(GameState gameState, Player player, RequestEvent<GoStopReq> event, Runnable onLockAcquired) {
+    @GameLock(key = "'game:' + #roomId + ':' + #gameState.round + ':' + #gameState.currentTurn")
+    public Mono<GameState> executeGoStop(long roomId, Player player, RequestEvent<GoStopReq> event, Runnable onLockAcquired) {
         return Mono.defer(() -> {
             if (onLockAcquired != null) {
                 onLockAcquired.run();
             }
-            return gameService.findGameState(gameState.getRoomId())
+            return gameService.findGameState(roomId)
                     .flatMap(freshState -> {
                         boolean go = event.getData().go();
                         return go ? gameService.executeGoStop(freshState, player)

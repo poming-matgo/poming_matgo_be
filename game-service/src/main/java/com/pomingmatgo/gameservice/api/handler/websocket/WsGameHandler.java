@@ -129,7 +129,7 @@ public class WsGameHandler {
     private Mono<Void> handleGoStopChoice(RequestEvent<GoStopReq> event, GameState gameState, Player player) {
         long roomId = gameState.getRoomId();
 
-        return gamePlayService.executeGoStop(gameState, player, event, () -> autoPlayScheduler.cancelAutoPlay(roomId))
+        return gamePlayService.executeGoStop(roomId, player, event, () -> autoPlayScheduler.cancelAutoPlay(roomId))
                 .delayUntil(gs -> {
                     if (gs.isPlaying()) {
                         return gameMessageSender.sendGoResultMessage(gs, player)
