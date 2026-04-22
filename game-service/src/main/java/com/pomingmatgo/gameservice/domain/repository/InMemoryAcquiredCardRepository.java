@@ -15,11 +15,7 @@ import java.util.concurrent.ConcurrentHashMap;
 @Repository
 public class InMemoryAcquiredCardRepository implements AcquiredCardRepository {
 
-    private final ConcurrentHashMap<String, Set<Card>> store = new ConcurrentHashMap<>();
-
-    private String key(long roomId, long playerId) {
-        return roomId + ":" + playerId;
-    }
+    private final ConcurrentHashMap<Long, ConcurrentHashMap<Long, Set<Card>>> store = new ConcurrentHashMap<>();
 
     @Override
     public Mono<Long> addCards(long roomId, long playerId, List<Card> cards) {
@@ -27,7 +23,9 @@ public class InMemoryAcquiredCardRepository implements AcquiredCardRepository {
             return Mono.just(0L);
         }
         return Mono.fromCallable(() -> {
-            store.computeIfAbsent(key(roomId, playerId), k -> ConcurrentHashMap.newKeySet())
+            // @GameLock 직렬화 보장 → computeIfAbsent 후 셋 뮤테이션은 단일 스레드
+            store.computeIfAbsent(roomId, k -> new ConcurrentHashMap<>())
+                 .computeIfAbsent(playerId, k -> ConcurrentHashMap.newKeySet())
                  .addAll(cards);
             return (long) cards.size();
         });
@@ -35,23 +33,26 @@ public class InMemoryAcquiredCardRepository implements AcquiredCardRepository {
 
     @Override
     public Mono<List<Card>> getAllCards(long roomId, long playerId) {
-        return Mono.fromCallable(() ->
-                new ArrayList<>(store.getOrDefault(key(roomId, playerId), Collections.emptySet()))
-        );
+        return Mono.fromCallable(() -> {
+            ConcurrentHashMap<Long, Set<Card>> room = store.get(roomId);
+            return room != null
+                    ? new ArrayList<>(room.getOrDefault(playerId, Collections.emptySet()))
+                    : Collections.emptyList();
+        });
     }
 
     @Override
     public Mono<Long> removeCard(long roomId, long playerId, Card card) {
         return Mono.fromCallable(() -> {
-            Set<Card> set = store.get(key(roomId, playerId));
+            ConcurrentHashMap<Long, Set<Card>> room = store.get(roomId);
+            Set<Card> set = room != null ? room.get(playerId) : null;
             return (set != null && set.remove(card)) ? 1L : 0L;
         });
     }
 
     @Override
     public Mono<Void> cleanup(long roomId) {
-        return Mono.fromRunnable(() ->
-                store.keySet().removeIf(k -> k.startsWith(roomId + ":"))
-        );
+        // 2단계 맵: O(1) 제거, 다른 방 키 탐색 없음
+        return Mono.fromRunnable(() -> store.remove(roomId));
     }
 }
