@@ -67,7 +67,7 @@ public class RedisInstalledCardRepository implements InstalledCardRepository {
     public Mono<Boolean> deleteRevealedCard(long roomId, Card card) {
         int month = card.getMonth();
         String redisKey = generateRevealedCardKey(roomId, month);
-        return redisOps.opsForSet().remove(redisKey, card)
+        return redisOps.opsForSet().remove(redisKey, card.name())
                 .map(removedCount -> removedCount > 0);
     }
 
