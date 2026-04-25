@@ -43,29 +43,28 @@ public class GameWebSocketHandler implements WebSocketHandler {
     private final WsGameHandler wsGameHandler;
     private final MessageSender messageSender;
     private final InFlightManager inFlightManager;
+    private final RoomCleanupService roomCleanupService;
 
     @Override
     public Mono<Void> handle(WebSocketSession session) {
         return session.receive()
-                .flatMap(message -> {
-                    long arrivalTime = System.currentTimeMillis();
-                    return handleMessage(message, session, arrivalTime);
-                })
-                .then();
+                .flatMap(message -> handleMessage(message, session))
+                .then()
+                // 정상 종료(onComplete) / 에러(onError) / 구독 취소(cancel) 모든 경로에서 disconnect 처리
+                .doFinally(signal -> handleDisconnect(session)
+                        .subscribeOn(Schedulers.boundedElastic())
+                        .subscribe());
     }
 
-    private Mono<Void> handleMessage(WebSocketMessage message, WebSocketSession session, long arrivalTime) {
-        return Mono.fromCallable(() -> {
+    private Mono<Void> handleMessage(WebSocketMessage message, WebSocketSession session) {
+        return Mono.<RequestEvent<?>>fromCallable(() -> {
                     JsonNode rootNode = objectMapper.readTree(message.getPayloadAsText());
                     String subTypeStr = rootNode.path("eventType").path("subType").asText();
 
                     SubCategory subType = SubCategory.from(subTypeStr);
                     JavaType type = objectMapper.getTypeFactory().constructParametricType(RequestEvent.class, subType.getPayloadClass());
 
-                    RequestEvent<?> event = objectMapper.convertValue(rootNode, type);
-
-                    event.setArrivalTime(arrivalTime);
-                    return event;
+                    return objectMapper.convertValue(rootNode, type);
                 })
                 .flatMap(event -> processEvent(event, session))
                 .onErrorResume(error -> handleWebSocketError(session, error));
@@ -156,6 +155,37 @@ public class GameWebSocketHandler implements WebSocketHandler {
         return Mono.fromCallable(() -> objectMapper.writeValueAsString(errorDto))
                 .map(session::textMessage)
                 .flatMap(message -> session.send(Mono.just(message)));
+    }
+
+    private Mono<Void> handleDisconnect(WebSocketSession session) {
+        return sessionManager.getPlayerContext(session)
+                .flatMap(context -> {
+                    long roomId = context.roomId();
+                    int playerNum = context.playerNum();
+                    Player disconnected = Player.fromNumber(playerNum);
+
+                    sessionManager.deletePlayer(roomId, playerNum);
+
+                    return roomService.getGameState(roomId)
+                            .flatMap(gameState -> {
+                                GamePhase phase = gameState.getPhase();
+                                boolean inProgress = phase != GamePhase.NONE && phase != GamePhase.END;
+
+                                Mono<Void> notify = inProgress
+                                        ? messageSender.sendMessageToAllUser(roomId,
+                                                WebSocketResDto.of(disconnected, "OPPONENT_DISCONNECTED",
+                                                        "상대방이 연결을 끊어 게임이 종료됩니다."))
+                                        : Mono.empty();
+
+                                return notify
+                                        .then(roomCleanupService.cleanupRoomData(roomId))
+                                        .then(sessionManager.removeRoom(roomId));
+                            });
+                })
+                .onErrorResume(e -> {
+                    log.warn("Disconnect handling failed for session [{}]", session.getId(), e);
+                    return Mono.empty();
+                });
     }
 
     private Mono<Void> routeEvent(RequestEvent<?> event, GameState gameState, Player player) {

@@ -6,6 +6,7 @@ import com.pomingmatgo.gameservice.domain.repository.InstalledCardRepository;
 import com.pomingmatgo.gameservice.domain.repository.LeadingPlayerRepository;
 import com.pomingmatgo.gameservice.global.lock.GameLockCleaner;
 import com.pomingmatgo.gameservice.global.lock.RoomLockManager;
+import com.pomingmatgo.gameservice.scheduler.AutoPlayScheduler;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import reactor.core.publisher.Mono;
@@ -20,6 +21,7 @@ public class RoomCleanupService {
     private final LeadingPlayerRepository leadingPlayerRepository;
     private final RoomLockManager roomLockManager;
     private final GameLockCleaner gameLockCleaner;
+    private final AutoPlayScheduler autoPlayScheduler;
 
     public Mono<Void> cleanupRoomData(long roomId) {
         return Mono.when(
@@ -28,7 +30,9 @@ public class RoomCleanupService {
                 acquiredCardRepository.cleanup(roomId),
                 leadingPlayerRepository.cleanup(roomId),
                 roomLockManager.cleanup(roomId),
-                gameLockCleaner.cleanup(roomId)
+                gameLockCleaner.cleanup(roomId),
+                // 예약된 자동플레이 task dispose + scheduled 맵 entry 제거
+                Mono.fromRunnable(() -> autoPlayScheduler.cancelAutoPlay(roomId))
         );
     }
 }
