@@ -18,6 +18,8 @@ import reactor.core.publisher.Mono;
 import java.util.concurrent.TimeUnit;
 
 import static com.pomingmatgo.gameservice.domain.GamePhase.*;
+import static com.pomingmatgo.gameservice.domain.TurnTiming.GRACE_PERIOD_MILLIS;
+import static com.pomingmatgo.gameservice.domain.TurnTiming.TURN_TIMEOUT_MILLIS;
 import static com.pomingmatgo.gameservice.global.exception.WebSocketErrorCode.INVALID_GAME_PHASE;
 import static com.pomingmatgo.gameservice.global.exception.WebSocketErrorCode.NOT_YOUR_TURN;
 
@@ -30,9 +32,6 @@ public class WsGameHandler {
     private final GameMessageSender gameMessageSender;
     private final GameNotificationService gameNotificationService;
     private final AutoPlayScheduler autoPlayScheduler;
-
-    long TURN_TIMEOUT_MILLIS = 10000L;
-    long GRACE_PERIOD_MILLIS = 2000L;
 
     public Mono<Void> handleGameEvent(RequestEvent<?> event, GameState gameState, Player player) {
         if (!player.equals(gameState.getCurrentPlayer())) {
@@ -129,7 +128,7 @@ public class WsGameHandler {
     private Mono<Void> handleGoStopChoice(RequestEvent<GoStopReq> event, GameState gameState, Player player) {
         long roomId = gameState.getRoomId();
 
-        return gamePlayService.executeGoStop(roomId, player, event, () -> autoPlayScheduler.cancelAutoPlay(roomId))
+        return gamePlayService.executeGoStop(roomId, gameState, player, event, () -> autoPlayScheduler.cancelAutoPlay(roomId))
                 .delayUntil(gs -> {
                     if (gs.isPlaying()) {
                         return gameMessageSender.sendGoResultMessage(gs, player)
