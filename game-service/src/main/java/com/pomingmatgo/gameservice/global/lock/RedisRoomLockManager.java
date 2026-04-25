@@ -16,6 +16,9 @@ import java.util.function.Supplier;
 @RequiredArgsConstructor
 public class RedisRoomLockManager implements RoomLockManager {
 
+    private static final long ACQUIRE_WAIT_MILLIS = 1000L;
+    private static final long LEASE_TIME_MILLIS = -1L;
+
     private final RedissonReactiveClient redissonClient;
 
     @Override
@@ -24,7 +27,7 @@ public class RedisRoomLockManager implements RoomLockManager {
         long executionId = UUID.randomUUID().getMostSignificantBits();
 
         return Mono.usingWhen(
-                lock.tryLock(5000, 2000, TimeUnit.MILLISECONDS, executionId)
+                lock.tryLock(ACQUIRE_WAIT_MILLIS, LEASE_TIME_MILLIS, TimeUnit.MILLISECONDS, executionId)
                         .flatMap(acquired -> acquired
                                 ? Mono.just(lock)
                                 : Mono.error(lockFailError.get())),
