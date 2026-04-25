@@ -11,7 +11,6 @@ import reactor.core.publisher.Mono;
 
 import org.springframework.context.annotation.Profile;
 
-import java.time.Duration;
 import java.util.List;
 
 @Profile("redis")
@@ -79,7 +78,8 @@ public class RedisLeadingPlayerRepository implements LeadingPlayerRepository {
 
     public Mono<Boolean> tryClaimLeaderSelectionTrigger(Long roomId) {
         String key = String.format(LEADER_TRIGGER_KEY_FORMAT, roomId);
-        return cardRedisOps.opsForValue().setIfAbsent(key, "1", Duration.ofSeconds(30));
+        // TTL 없음. InMemory 영구 저장과 동일 의미 — cleanup(roomId)에서 명시적 삭제 보장
+        return cardRedisOps.opsForValue().setIfAbsent(key, "1");
     }
 
     @Override
