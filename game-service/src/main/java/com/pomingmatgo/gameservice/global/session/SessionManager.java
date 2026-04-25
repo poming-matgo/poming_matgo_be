@@ -57,20 +57,6 @@ public class SessionManager {
         );
     }
 
-    public void deleteRoom(long roomId) {
-        roomSessions.remove(roomId);
-    }
-
-    public Mono<Void> addPlayer(long roomId, Player player, WebSocketSession session) {
-        return Mono.fromRunnable(() -> {
-            if (player == Player.PLAYER_1) {
-                roomSessions.get(roomId).setPlayer1Session(session);
-            } else if (player == Player.PLAYER_2) {
-                roomSessions.get(roomId).setPlayer2Session(session);
-            }
-        });
-    }
-
     public void deletePlayer(long roomId, int playerNum) {
         RoomSessionData data = roomSessions.get(roomId);
         if (data == null) return;
