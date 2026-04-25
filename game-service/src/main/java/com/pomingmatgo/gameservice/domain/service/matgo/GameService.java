@@ -36,9 +36,8 @@ public class GameService {
     }
 
     public Mono<GameState> setGameInProgress(GameState gameState) {
-        GameState newState = gameState.markInProgress();
-        return gameStateRepository.save(newState)
-                .thenReturn(newState);
+        return gameStateRepository.save(gameState)
+                .thenReturn(gameState);
     }
 
     public Mono<GameState> calculateAndApplyScores(long roomId, GameState gameState) {

@@ -105,7 +105,7 @@ public class GamePlayService {
     }
 
     @GameLock(key = "'game:' + #roomId + ':' + #gameState.round + ':' + #gameState.currentTurn")
-    public Mono<GameState> executeGoStop(long roomId, Player player, RequestEvent<GoStopReq> event, Runnable onLockAcquired) {
+    public Mono<GameState> executeGoStop(long roomId, GameState gameState, Player player, RequestEvent<GoStopReq> event, Runnable onLockAcquired) {
         return Mono.defer(() -> {
             if (onLockAcquired != null) {
                 onLockAcquired.run();

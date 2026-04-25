@@ -34,7 +34,6 @@ public class GameState implements Serializable {
     private int leadingPlayer;
     private int currentTurn;
     private int round;
-    private long lastTime; // 마지막 행동 시점 (밀리초 단위)
 
     public PlayerState getPlayerState(Player player) {
         return player == Player.PLAYER_1 ? this.player1 : this.player2;
@@ -133,12 +132,6 @@ public class GameState implements Serializable {
 
     public boolean allPlayersReady() {
         return this.player1.isReady() && this.player2.isReady();
-    }
-
-    public GameState markInProgress() {
-        return this.toBuilder()
-                .lastTime(System.currentTimeMillis())
-                .build();
     }
 
     public GameState setNextTurn(GameState gameState) {
