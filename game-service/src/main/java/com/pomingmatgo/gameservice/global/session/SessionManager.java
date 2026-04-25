@@ -72,10 +72,16 @@ public class SessionManager {
     }
 
     public void deletePlayer(long roomId, int playerNum) {
-        if (playerNum == 1)
-            roomSessions.get(roomId).setPlayer1Session(null);
-        else
-            roomSessions.get(roomId).setPlayer2Session(null);
+        RoomSessionData data = roomSessions.get(roomId);
+        if (data == null) return;
+
+        WebSocketSession sessionToRemove = (playerNum == 1) ? data.getPlayer1Session() : data.getPlayer2Session();
+        if (sessionToRemove != null) {
+            sessionToRoomMap.remove(sessionToRemove.getId());
+        }
+
+        if (playerNum == 1) data.setPlayer1Session(null);
+        else data.setPlayer2Session(null);
     }
 
     public WebSocketSession getSession(long roomId, int playerNum) {
