@@ -92,7 +92,17 @@ public class SessionManager {
     }
 
     public Mono<Void> removeRoom(Long roomId) {
-        return Mono.fromRunnable(() -> roomSessions.remove(roomId));
+        return Mono.fromRunnable(() -> {
+            RoomSessionData removed = roomSessions.remove(roomId);
+            if (removed == null) return;
+            // deletePlayer로 정리 안 된 잔여 session이 있다면 sessionToRoomMap도 함께 정리 (cleanup safety)
+            if (removed.getPlayer1Session() != null) {
+                sessionToRoomMap.remove(removed.getPlayer1Session().getId());
+            }
+            if (removed.getPlayer2Session() != null) {
+                sessionToRoomMap.remove(removed.getPlayer2Session().getId());
+            }
+        });
     }
 
     public Collection<WebSocketSession> getAllUser(long roomId) {
