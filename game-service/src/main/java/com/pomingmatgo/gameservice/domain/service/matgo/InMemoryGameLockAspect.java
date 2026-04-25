@@ -26,8 +26,10 @@ import static com.pomingmatgo.gameservice.global.exception.WebSocketErrorCode.TR
 public class InMemoryGameLockAspect implements GameLockCleaner {
 
     private final ConcurrentHashMap<Long, ConcurrentHashMap<String, Semaphore>> locksByRoom = new ConcurrentHashMap<>();
+    // SpelExpressionParser는 thread-safe (필드 공유 OK).
+    // 단, parseExpression이 반환하는 Expression 객체는 evaluation 도중 내부 상태를 갱신하므로 thread-safe하지 않다.
+    // 캐싱 시 동시 evaluation에서 partial state로 인해 "property cannot be found on null" 같은 race 발생 → 매번 parse
     private final ExpressionParser parser = new SpelExpressionParser();
-    private final ConcurrentHashMap<String, org.springframework.expression.Expression> expressionCache = new ConcurrentHashMap<>();
 
     @Around("@annotation(gameLock)")
     public Mono<Object> lock(ProceedingJoinPoint joinPoint, GameLock gameLock) {
@@ -81,7 +83,7 @@ public class InMemoryGameLockAspect implements GameLockCleaner {
     }
 
     private String generateKey(String key, ProceedingJoinPoint joinPoint) {
-        return "LOCK:" + expressionCache.computeIfAbsent(key, parser::parseExpression)
+        return "LOCK:" + parser.parseExpression(key)
                 .getValue(buildContext(joinPoint), String.class);
     }
 
