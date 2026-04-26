@@ -6,8 +6,10 @@ import com.pomingmatgo.gameservice.api.handler.event.RequestEvent;
 import com.pomingmatgo.gameservice.api.handler.event.category.EventCategory;
 import com.pomingmatgo.gameservice.api.handler.event.category.SubCategory;
 import com.pomingmatgo.gameservice.api.request.websocket.JoinRoomReq;
+import com.pomingmatgo.gameservice.domain.GamePhase;
 import com.pomingmatgo.gameservice.domain.GameState;
 import com.pomingmatgo.gameservice.domain.Player;
+import com.pomingmatgo.gameservice.domain.service.matgo.RoomCleanupService;
 import com.pomingmatgo.gameservice.domain.service.matgo.RoomService;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.pomingmatgo.gameservice.global.MessageSender;
@@ -24,6 +26,7 @@ import org.springframework.web.reactive.socket.WebSocketHandler;
 import org.springframework.web.reactive.socket.WebSocketMessage;
 import org.springframework.web.reactive.socket.WebSocketSession;
 import reactor.core.publisher.Mono;
+import reactor.core.scheduler.Schedulers;
 
 import java.time.Duration;
 
@@ -85,9 +88,11 @@ public class GameWebSocketHandler implements WebSocketHandler {
                             .switchIfEmpty(Mono.error(new WebSocketBusinessException(NOT_EXISTED_ROOM)))
                             .flatMap(gameState -> {
                                 if (isGameAction(event, gameState, player)) {
-                                    String flagKey = "IN_FLIGHT:ROOM:" + roomId + ":PLAYER:" + player.getNumber();
+                                    // 정상 요청은 NORMAL 키만 사용. 자동플레이가 진행 중이어도 InFlight 단계에선 차단되지 않음.
+                                    // 자동플레이의 abort는 routeEvent 안의 onLockAcquired 콜백에서 cancelAutoPlay 호출로 처리됨.
+                                    String flagKey = "IN_FLIGHT:NORMAL:ROOM:" + roomId + ":PLAYER:" + player.getNumber();
 
-                                    return inFlightManager.trySetFlag(flagKey, event.getArrivalTime(), Duration.ofSeconds(3))
+                                    return inFlightManager.trySetFlag(flagKey, "NORMAL", Duration.ofSeconds(3))
                                             .flatMap(isSet -> {
                                                 if (!isSet) return Mono.error(new WebSocketBusinessException(TOO_MANY_REQUESTS));
                                                 return Mono.usingWhen(
