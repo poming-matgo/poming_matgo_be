@@ -59,14 +59,11 @@ public class RedisGameStateRepository implements GameStateRepository {
     public Mono<Long> save(GameState gameState) {
         String redisKey = generateKey(gameState.getRoomId());
 
-        return saveState(gameState, redisKey)
-                .filter(isSaved -> isSaved) // true 값만 통과시킴
-                .map(isSaved -> gameState.getRoomId()) // roomId로 변환
+        return redisOps.opsForValue()
+                .setIfPresent(redisKey, gameState)
+                .filter(Boolean::booleanValue)
+                .map(b -> gameState.getRoomId())
                 .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.SYSTEM_ERROR)));
-    }
-
-    public Mono<Boolean> saveState(GameState gameState, String redisKey) {
-        return redisOps.opsForValue().set(redisKey, gameState);
     }
 
     @Override
