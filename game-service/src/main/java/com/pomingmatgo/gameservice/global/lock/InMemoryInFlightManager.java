@@ -16,8 +16,19 @@ public class InMemoryInFlightManager implements InFlightManager {
     @Override
     public Mono<Boolean> trySetFlag(String key, Object value, Duration ttl) {
         return Mono.fromCallable(() -> {
-            long expiry = System.nanoTime() + ttl.toNanos();
-            return flags.putIfAbsent(key, expiry) == null;
+            // 만료 엔트리가 잔존한 경우에도 CAS로 교체. isSet 호출이 선행되지 않아도 영구 차단되지 않음
+            while (true) {
+                long now = System.nanoTime();
+                long newExpiry = now + ttl.toNanos();
+                Long existing = flags.get(key);
+                if (existing == null) {
+                    if (flags.putIfAbsent(key, newExpiry) == null) return true;
+                } else if (now > existing) {
+                    if (flags.replace(key, existing, newExpiry)) return true;
+                } else {
+                    return false;
+                }
+            }
         });
     }
 
