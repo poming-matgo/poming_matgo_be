@@ -6,11 +6,13 @@ import com.pomingmatgo.gameservice.global.exception.WebSocketBusinessException;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.data.redis.core.ReactiveRedisOperations;
+import org.springframework.data.redis.core.script.RedisScript;
 import org.springframework.stereotype.Repository;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 
 import java.util.Collection;
+import java.util.Collections;
 import java.util.List;
 
 import org.springframework.context.annotation.Profile;
@@ -27,6 +29,13 @@ public class RedisInstalledCardRepository implements InstalledCardRepository {
     private static final String PLAYER2_CARD_KEY_FORMAT = "game:%d:cards:player2Card:";
     private static final String REVEALED_CARD_KEY_FORMAT = "game:%d:cards:revealed:%d";
     private static final String HIDDEN_CARD_KEY_FORMAT = "game:%d:cards:hidden";
+
+    private static final RedisScript<Long> UPDATE_PLAYER_CARDS_SCRIPT = RedisScript.of(
+            "redis.call('DEL', KEYS[1]); " +
+            "if #ARGV > 0 then redis.call('RPUSH', KEYS[1], unpack(ARGV)); end; " +
+            "return 1;",
+            Long.class
+    );
 
     private String getKeyPrefixForPlayer(Player player, long roomId) {
         return switch (player) {
@@ -131,8 +140,11 @@ public class RedisInstalledCardRepository implements InstalledCardRepository {
     }
 
     public Mono<Void> updatePlayerCards(long roomId, Player player, List<Card> cards) {
-        return deletePlayerCards(roomId, player)
-                .then(savePlayerCards(cards, roomId, player))
+        String redisKey = getKeyPrefixForPlayer(player, roomId);
+        List<String> cardNames = cards == null
+                ? Collections.emptyList()
+                : cards.stream().map(Enum::name).toList();
+        return redisOps.execute(UPDATE_PLAYER_CARDS_SCRIPT, Collections.singletonList(redisKey), cardNames)
                 .then();
     }
 
