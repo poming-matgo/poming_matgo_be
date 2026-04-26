@@ -42,9 +42,9 @@ public class AutoPlayScheduler {
     private final GameMessageSender gameMessageSender;
     private final GameNotificationService gameNotificationService;
 
-    private final Map<Long, Disposable> autoPlayTasks = new ConcurrentHashMap<>();
+    private record Scheduled(int sequence, Disposable task) {}
 
-    private final Map<Long, Integer> scheduledSequences = new ConcurrentHashMap<>();
+    private final Map<Long, Scheduled> scheduled = new ConcurrentHashMap<>();
 
     private int getTurnSequence(int round, int turn) {
         return (round * 10000) + turn;
@@ -57,20 +57,32 @@ public class AutoPlayScheduler {
         long delayMillis = TimeUnit.NANOSECONDS.toMillis(deadlineNanos - System.nanoTime());
         if (delayMillis <= 0) delayMillis = 100;
 
-        Disposable task = Mono.delay(Duration.ofMillis(delayMillis))
+        Disposable newTask = Mono.delay(Duration.ofMillis(delayMillis))
                 .flatMap(v -> attemptAutoPlay(roomId, round, currentTurn, currentPlayer))
                 .subscribe(
                         success -> {},
                         error -> log.error("[AutoPlay] 룸({}) 자동플레이 스케줄링 중 에러 발생!", roomId, error)
                 );
 
-        autoPlayTasks.put(roomId, task);
+        Disposable[] toDispose = new Disposable[1];
+        scheduled.compute(roomId, (k, prev) -> {
+            if (prev != null && prev.sequence > newSequence) {
+                toDispose[0] = newTask;
+                return prev;
+            }
+            toDispose[0] = (prev != null) ? prev.task : null;
+            return new Scheduled(newSequence, newTask);
+        });
+
+        if (toDispose[0] != null && !toDispose[0].isDisposed()) {
+            toDispose[0].dispose();
+        }
     }
 
     public void cancelAutoPlay(long roomId) {
-        Disposable task = autoPlayTasks.remove(roomId);
-        if (task != null && !task.isDisposed()) {
-            task.dispose();
+        Scheduled removed = scheduled.remove(roomId);
+        if (removed != null && removed.task != null && !removed.task.isDisposed()) {
+            removed.task.dispose();
         }
     }
 
