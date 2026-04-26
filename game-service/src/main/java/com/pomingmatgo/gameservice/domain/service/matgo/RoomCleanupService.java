@@ -8,6 +8,7 @@ import com.pomingmatgo.gameservice.global.lock.GameLockCleaner;
 import com.pomingmatgo.gameservice.global.lock.RoomLockManager;
 import com.pomingmatgo.gameservice.scheduler.AutoPlayScheduler;
 import lombok.RequiredArgsConstructor;
+import org.springframework.context.annotation.Lazy;
 import org.springframework.stereotype.Service;
 import reactor.core.publisher.Mono;
 
@@ -21,6 +22,8 @@ public class RoomCleanupService {
     private final LeadingPlayerRepository leadingPlayerRepository;
     private final RoomLockManager roomLockManager;
     private final GameLockCleaner gameLockCleaner;
+
+    @Lazy
     private final AutoPlayScheduler autoPlayScheduler;
 
     public Mono<Void> cleanupRoomData(long roomId) {
