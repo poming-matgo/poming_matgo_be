@@ -20,28 +20,30 @@
 ```text
 Client ──WS──▶ GameWebSocketHandler
                      │
-                     ▼
-              1) InFlightManager (자동플레이 <-> 정상 요청 race 1차 fail-fast, 유저제출/자동플레이 키 분리)
-                     │
-       ┌───────────────┼────────────────────┐
-       ▼               ▼                    ▼
-  WsRoomHandler  WsPreGameHandler   WsGameHandler
-       │               │                    │
-       ▼               ▼                    ▼
-  RoomService      PreGameService     GamePlayService ◀─── 재진입 ─────┐
-       │               │                    │                          │
-       ▼               ▼                    ▼                          │
-  2) RoomLockManager  2) Atomic Trigger     2) @GameLock AOP           │
-   (방 단위 Semaphore, (LeadingPlayer,      (round:turn 단위 Semaphore, │
-    Ready / Join 등    putIfAbsent로        자동플레이 ↔ 정상 요청      │
-    직렬화)            선플레이어 결정       race final guard)          │
-       │               1회 보장)            │                          │
-       │               │                    │                          │
-       └───────────────┬────────────────────┘                          │
-                       ▼                                               │
-            ConcurrentHashMap (In-Memory Game State) ── 등록 ──────────┤
-                                                                       │
-              3) AutoPlayScheduler ─── 타이머 발사 (Game 액션 전반) ────┘
+       ┌─────────────┼─────────────────────────────────────────┐
+       │             │                                         │
+       │             │      1) InFlightManager (Game 액션 경로에만 적용:
+       │             │         자동플레이 ↔ 정상 요청 race 1차 fail-fast,
+       │             │         유저제출 / 자동플레이 키 분리)
+       │             │                                          │
+       ▼             ▼                                          ▼
+  WsRoomHandler  WsPreGameHandler                         WsGameHandler
+       │               │                                       │
+       ▼               ▼                                       ▼
+  RoomService      PreGameService                       GamePlayService ◀─── 재진입 ───────┐
+       │               │                                       │                          │
+       ▼               ▼                                       ▼                          │
+  2) RoomLockManager  2) Atomic Trigger                  2) @GameLock AOP                 │
+   (방 단위 Semaphore, (LeadingPlayer,                    (round:turn 단위 Semaphore,       │
+    Ready / Join 등    putIfAbsent로                      자동플레이 ↔ 정상 요청              │
+    직렬화)            선플레이어 결정                     race final guard)                 │
+       │               1회 보장)                               │                           │ 
+       │               │                                       │                          │
+       └───────────────┴───────────────┬───────────────────────┘                          │
+                                       ▼                                                  │
+                    ConcurrentHashMap (In-Memory Game State) ── 등록 ──────────────────────┤
+                                                                                          │
+                         3) AutoPlayScheduler ─── 타이머 발사 (Game 액션) ──────────────────┘
 ```
 
 **동시성 3레이어 요약:**
@@ -51,7 +53,7 @@ Client ──WS──▶ GameWebSocketHandler
   - **`RoomLockManager`** (방 단위 Semaphore): 단일 `GameState` 객체를 공유 수정하는 Ready/Join 작업의 직렬화
   - **`@GameLock` AOP** (round:turn 단위 Semaphore): InFlight를 통과한 자동플레이 ↔ 정상 요청 race의 final guard
   - **`LeadingPlayer.tryClaimLeaderSelectionTrigger`** (`putIfAbsent` 기반 atomic): 데이터가 이미 player별로 분리되어 락이 불필요한 대신, 두 플레이어가 거의 동시에 선플레이어 카드를 선택해도 후속 처리 트리거가 1회만 발생되도록 atomic으로 보장
-- **③ AutoPlay 스케줄러** — 턴 타임아웃 시 자동으로 Game 액션 발사 (현재는 `NORMAL_SUBMIT`, 추후 `FLOOR_SELECT` / `GO_STOP_CHOICE`로 확장 예정). (round, turn) 시퀀스를 단조 증가시켜 동시 호출에서도 마지막 task만 살아남도록 atomic swap. 발사 시 `isSet(NORMAL)` 체크로 정상 요청에게 양보하고, 자체 동시 시작은 `InFlightManager(AUTOPLAY 키)`로 방지
+- **③ AutoPlay 스케줄러** — 턴 타임아웃 시 자동으로 Game 액션 발사 (현재는 `NORMAL_SUBMIT`, 추후 `FLOOR_SELECT` / `GO_STOP_CHOICE`로 확장 예정). (round, turn) 시퀀스를 단조 증가시켜 동시 호출의 순서와 무관하게 가장 큰 sequence(=최신 턴)의 task만 살아남도록 atomic swap. 발사 시 `isSet(NORMAL)` 체크로 정상 요청에게 양보하고, 자체 동시 시작은 `InFlightManager(AUTOPLAY 키)`로 방지
 
 > **MSA → 단일 서비스 통합:** 초기에는 `api-gateway` / `user-service` / `auth-service` / `game-service` 의 MSA로 기획했으나, **`game-service`의 동시성/성능 최적화에 집중**하기 위해 나머지 서비스는 폐기하고 단일 서비스로 통합했습니다.
 
