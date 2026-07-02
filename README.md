@@ -3,7 +3,7 @@
 # 🎴 웹 고스톱 게임 (Web Go-Stop)
 
 > **대규모 동시 접속 환경을 고려한 실시간 턴제 웹 고스톱 게임입니다.**
-> 불필요한 네트워크/스레드 오버헤드를 줄여 **초당 약 68,000건의 웹소켓 메시지를 지연 없이 처리**하도록 최적화했습니다.
+> 불필요한 네트워크/스레드 오버헤드를 줄여 **단일 서버에서 초당 평균 약 57,000건(sustain 피크 약 68,000건)의 웹소켓 메시지를 안정적으로 처리**하도록 최적화했습니다.
 
 <br/>
 
@@ -85,7 +85,7 @@ k6 run gostop-test.js
 
 ### 부하 테스트 시계열 모니터링 (선택)
 
-InfluxDB + Grafana 스택을 Docker로 띄워 실시간 throughput을 시계열로 측정할 수 있습니다.
+InfluxDB + Grafana 스택을 Docker로 띄워 throughput 추이를 시계열로 관찰할 수 있습니다. 단, 5,000 VU 대규모 부하에서는 k6 → InfluxDB write backpressure로 샘플이 일부만 적재되므로(자세한 내용은 아래 [측정 방법론](#측정-방법론) 참조), **정확한 throughput은 k6 콘솔 집계를 신뢰하고 이 스택은 sustain 안정성 패턴 검증 용도로만 활용**합니다.
 
 ```bash
 # 1. 스택 기동 (Docker Desktop 필요)
@@ -116,7 +116,7 @@ k6 run --out influxdb=http://localhost:8086/k6 gostop-test.js
 
 `ConcurrentHashMap` 기반의 인메모리 구조로 전환하여 **TCP 통신 및 직렬화/역직렬화 비용을 완전히 제거**했습니다. *(Redis 프로파일은 그대로 유지해 분산 배포 시 전환 가능)*
 
-- **결과:** I/O 병목을 해소하여 **초당 약 68,000건의 웹소켓 메시지를 유실 없이 처리**하며, 단일 서버 처리량이 기존 Redis 대비 **약 6.6배 향상**되었습니다.
+ **결과:** I/O 병목을 해소하여 **초당 약 68,000건의 웹소켓 메시지를 유실 없이 처리**하며, 단일 서버 처리량이 기존 Redis 대비 **약 6.6배 향상**되었습니다.
 
 <br/>
 
@@ -152,7 +152,7 @@ k6 run --out influxdb=http://localhost:8086/k6 gostop-test.js
 
 ### 환경
 
-- **하드웨어:** Intel i7-14700 (20 코어 / 28 스레드), RAM 32GB, Windows
+- **하드웨어:** Intel i7-14700 (20 코어 / 28 스레드), RAM 32GB, Windows *(단일 데스크톱 머신 기준 처리량 상한 측정값이며, 프로덕션 서버 환경의 절대 수치가 아닌 최적화 효과 비교용 지표)*
 - **JVM:** Java 21 (G1GC, default)
 - **부하 도구:** [k6](https://k6.io/) v1.7.1 — 시나리오 코드: [`gostop-test.js`](gostop-test.js)
 - **시계열 모니터링:** InfluxDB 1.8 + Grafana 10.4 (Docker, 셋업 [`loadtest/`](loadtest/))
