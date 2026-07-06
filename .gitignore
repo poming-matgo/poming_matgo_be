@@ -36,5 +36,14 @@ out/
 .vscode/
 test.sh
 
+### 로컬 전용 (커밋 불필요) ###
+CLAUDE.md
+interview-qa.md
+log.txt
+gradlew
+gradlew.bat
+user-service.zip
+user-service/a.out
+
 #
 .gitignore
