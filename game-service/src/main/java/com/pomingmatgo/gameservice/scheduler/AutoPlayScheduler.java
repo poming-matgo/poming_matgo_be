@@ -15,6 +15,7 @@ import reactor.core.publisher.Mono;
 import java.time.Duration;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.TimeUnit;
 
 import static com.pomingmatgo.gameservice.domain.GamePhase.IN_PROGRESS;
@@ -114,7 +115,9 @@ public class AutoPlayScheduler {
         // AUTOPLAY 키는 자동플레이끼리의 동시 시작 방지용 (정상 요청과는 키 분리)
         String autoplayFlagKey = "IN_FLIGHT:AUTOPLAY:ROOM:" + roomId + ":PLAYER:" + currentPlayer.getNumber();
         String normalFlagKey = "IN_FLIGHT:NORMAL:ROOM:" + roomId + ":PLAYER:" + currentPlayer.getNumber();
-        return inFlightManager.trySetFlag(autoplayFlagKey, "AUTO_PLAY", Duration.ofSeconds(2))
+        // 발사별 소유 토큰: TTL 만료 후 다른 발사가 플래그를 재획득해도 내 정리가 남의 플래그를 지우지 않게 함
+        String autoplayToken = Long.toHexString(ThreadLocalRandom.current().nextLong());
+        return inFlightManager.trySetFlag(autoplayFlagKey, autoplayToken, Duration.ofSeconds(2))
                 .flatMap(acquired -> {
                     if (!acquired) return Mono.empty();
 
@@ -162,7 +165,7 @@ public class AutoPlayScheduler {
                     return Mono.usingWhen(
                             Mono.just(autoplayFlagKey),
                             key -> mainProcess,
-                            key -> inFlightManager.deleteFlag(key)
+                            key -> inFlightManager.deleteFlag(key, autoplayToken)
                     ).then();
                 });
     }

@@ -29,6 +29,7 @@ import reactor.core.publisher.Mono;
 import reactor.core.scheduler.Schedulers;
 
 import java.time.Duration;
+import java.util.concurrent.ThreadLocalRandom;
 
 import static com.pomingmatgo.gameservice.domain.GamePhase.IN_PROGRESS;
 import static com.pomingmatgo.gameservice.global.exception.WebSocketErrorCode.*;
@@ -91,14 +92,16 @@ public class GameWebSocketHandler implements WebSocketHandler {
                                     // 정상 요청은 NORMAL 키만 사용. 자동플레이가 진행 중이어도 InFlight 단계에선 차단되지 않음.
                                     // 자동플레이의 abort는 routeEvent 안의 onLockAcquired 콜백에서 cancelAutoPlay 호출로 처리됨.
                                     String flagKey = "IN_FLIGHT:NORMAL:ROOM:" + roomId + ":PLAYER:" + player.getNumber();
+                                    // 요청별 소유 토큰: TTL 만료 후 다른 요청이 플래그를 재획득해도 내 정리가 남의 플래그를 지우지 않게 함
+                                    String flagToken = Long.toHexString(ThreadLocalRandom.current().nextLong());
 
-                                    return inFlightManager.trySetFlag(flagKey, "NORMAL", Duration.ofSeconds(3))
+                                    return inFlightManager.trySetFlag(flagKey, flagToken, Duration.ofSeconds(3))
                                             .flatMap(isSet -> {
                                                 if (!isSet) return Mono.error(new WebSocketBusinessException(TOO_MANY_REQUESTS));
                                                 return Mono.usingWhen(
                                                         Mono.just(flagKey),
                                                         key -> routeEvent(event, gameState, player),
-                                                        key -> inFlightManager.deleteFlag(key)
+                                                        key -> inFlightManager.deleteFlag(key, flagToken)
                                                 );
                                             });
                                 }

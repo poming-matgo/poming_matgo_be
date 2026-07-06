@@ -11,20 +11,22 @@ import java.util.concurrent.ConcurrentHashMap;
 @Component
 public class InMemoryInFlightManager implements InFlightManager {
 
-    private final ConcurrentHashMap<String, Long> flags = new ConcurrentHashMap<>();
+    private record Flag(String token, long expiryNanos) {}
+
+    private final ConcurrentHashMap<String, Flag> flags = new ConcurrentHashMap<>();
 
     @Override
-    public Mono<Boolean> trySetFlag(String key, Object value, Duration ttl) {
+    public Mono<Boolean> trySetFlag(String key, String token, Duration ttl) {
         return Mono.fromCallable(() -> {
             // 만료 엔트리가 잔존한 경우에도 CAS로 교체. isSet 호출이 선행되지 않아도 영구 차단되지 않음
             while (true) {
                 long now = System.nanoTime();
-                long newExpiry = now + ttl.toNanos();
-                Long existing = flags.get(key);
+                Flag next = new Flag(token, now + ttl.toNanos());
+                Flag existing = flags.get(key);
                 if (existing == null) {
-                    if (flags.putIfAbsent(key, newExpiry) == null) return true;
-                } else if (now > existing) {
-                    if (flags.replace(key, existing, newExpiry)) return true;
+                    if (flags.putIfAbsent(key, next) == null) return true;
+                } else if (now > existing.expiryNanos()) {
+                    if (flags.replace(key, existing, next)) return true;
                 } else {
                     return false;
                 }
@@ -35,10 +37,10 @@ public class InMemoryInFlightManager implements InFlightManager {
     @Override
     public Mono<Boolean> isSet(String key) {
         return Mono.fromCallable(() -> {
-            Long expiry = flags.get(key);
-            if (expiry == null) return false;
-            if (System.nanoTime() > expiry) {
-                flags.remove(key, expiry);
+            Flag flag = flags.get(key);
+            if (flag == null) return false;
+            if (System.nanoTime() > flag.expiryNanos()) {
+                flags.remove(key, flag);
                 return false;
             }
             return true;
@@ -46,7 +48,14 @@ public class InMemoryInFlightManager implements InFlightManager {
     }
 
     @Override
-    public Mono<Void> deleteFlag(String key) {
-        return Mono.fromRunnable(() -> flags.remove(key));
+    public Mono<Void> deleteFlag(String key, String token) {
+        return Mono.fromRunnable(() -> {
+            // TTL 만료 후 다른 요청이 플래그를 재획득했을 수 있으므로 소유 토큰이 일치할 때만 삭제.
+            // remove(key, value)는 값 동등성 기반 원자 연산 → 그 사이 또 교체됐어도 no-op
+            Flag current = flags.get(key);
+            if (current != null && current.token().equals(token)) {
+                flags.remove(key, current);
+            }
+        });
     }
 }

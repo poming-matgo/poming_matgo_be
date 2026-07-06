@@ -16,8 +16,8 @@ public class RedisInFlightManager implements InFlightManager {
     private final RedissonReactiveClient redissonClient;
 
     @Override
-    public Mono<Boolean> trySetFlag(String key, Object value, Duration ttl) {
-        return redissonClient.getBucket(key).setIfAbsent(value, ttl);
+    public Mono<Boolean> trySetFlag(String key, String token, Duration ttl) {
+        return redissonClient.getBucket(key).setIfAbsent(token, ttl);
     }
 
     @Override
@@ -26,7 +26,8 @@ public class RedisInFlightManager implements InFlightManager {
     }
 
     @Override
-    public Mono<Void> deleteFlag(String key) {
-        return redissonClient.getBucket(key).delete().then();
+    public Mono<Void> deleteFlag(String key, String token) {
+        // 소유 토큰이 일치할 때만 삭제 (compareAndSet(expect, null) == 조건부 DEL, Lua 기반 원자 연산)
+        return redissonClient.getBucket(key).compareAndSet(token, null).then();
     }
 }
