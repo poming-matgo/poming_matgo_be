@@ -48,10 +48,10 @@ Client ──WS──▶ GameWebSocketHandler
 
 **동시성 3레이어 요약:**
 
-- **① In-Flight 플래그** — **자동플레이(③)와 정상 요청 사이의 race 1차 fail-fast** 가 본 목적. 같은 플레이어 단위로 `NORMAL` / `AUTOPLAY` 키를 분리해, 자동플레이는 `isSet(NORMAL)`로 양보하고 정상 요청은 자동플레이 진행 중에도 In-Flight 단계에서 막히지 않음. TTL 만료 엔트리는 `ConcurrentHashMap.replace(k, old, new)` 기반 원자적 비교-교체 loop로 자동 갱신. *(InFlight 통과 후의 race window는 `@GameLock`(②)이 final guard, 두 플레이어 동시 액션은 `currentPlayer` 체크로 차단 — 책임 분리)*
+- **① In-Flight 플래그** — **자동플레이(③)와 정상 요청 사이의 race 1차 fail-fast** 가 본 목적. 같은 플레이어 단위로 `NORMAL` / `AUTOPLAY` 키를 분리해, 자동플레이는 `isSet(NORMAL)`로 양보하고 정상 요청은 자동플레이 진행 중에도 In-Flight 단계에서 막히지 않음. TTL 만료 엔트리는 `ConcurrentHashMap.replace(k, old, new)` 기반 원자적 비교-교체 loop로 자동 갱신, 해제는 요청별 소유 토큰 검증 후 조건부 삭제. *(InFlight 통과 후의 race window는 `@GameLock`(②)의 직렬화 + 락 내부 재검증이 final guard, 두 플레이어 동시 액션은 `currentPlayer` 체크로 차단 — 책임 분리)*
 - **② 직렬화 / atomic 제어 (역할 분리)** — **공유 객체 수정에는 락, 데이터가 player별로 분리된 곳에는 atomic 연산**으로 메커니즘 비용 최소화. 핸들러별로 본 목적이 다름:
   - **`RoomLockManager`** (방 단위 Semaphore): 단일 `GameState` 객체를 공유 수정하는 Ready/Join 작업의 직렬화
-  - **`@GameLock` AOP** (round:turn 단위 Semaphore): InFlight를 통과한 자동플레이 ↔ 정상 요청 race의 final guard
+  - **`@GameLock` AOP** (round:turn 단위 Semaphore): InFlight를 통과한 자동플레이 ↔ 정상 요청 race의 final guard. 정확히는 2단 구조 — **락이 같은 턴 경쟁을 직렬화하고, 락 획득 후 gameState를 fresh 재조회해 phase/currentPlayer를 재검증**해 이미 소비된 턴을 거름 (락 키가 요청 시점 스냅샷 기반이므로 직렬화만으론 불충분)
   - **`LeadingPlayer.tryClaimLeaderSelectionTrigger`** (`putIfAbsent` 기반 atomic): 데이터가 이미 player별로 분리되어 락이 불필요한 대신, 두 플레이어가 거의 동시에 선플레이어 카드를 선택해도 후속 처리 트리거가 1회만 발생되도록 atomic으로 보장
 - **③ AutoPlay 스케줄러** — 턴 타임아웃 시 자동으로 Game 액션 발사 (현재는 `NORMAL_SUBMIT`, 추후 `FLOOR_SELECT` / `GO_STOP_CHOICE`로 확장 예정). (round, turn) 시퀀스를 단조 증가시켜 동시 호출의 순서와 무관하게 가장 큰 sequence(=최신 턴)의 task만 살아남도록 atomic swap. 발사 시 `isSet(NORMAL)` 체크로 정상 요청에게 양보하고, 자체 동시 시작은 `InFlightManager(AUTOPLAY 키)`로 방지
 
@@ -136,9 +136,11 @@ k6 run --out influxdb=http://localhost:8086/k6 gostop-test.js
 초기 설계 이후, 운영/장기 부하 시나리오를 점검하며 발견한 미세한 race condition을 추가로 보완했습니다.
 
 - **In-Flight 플래그의 만료 처리:** TTL이 지났지만 잔존하는 stale 엔트리가 새 요청을 영구 차단하던 문제를, **`ConcurrentHashMap.replace(k, old, new)` 기반 원자적 비교-교체 loop**로 안전하게 갱신하도록 개선
+- **In-Flight 해제의 소유 토큰 검증:** 처리가 TTL을 초과해 플래그가 만료·재획득된 경우, 뒤늦게 끝난 원 소유자의 정리가 **새 소유자의 플래그를 오삭제**하던 문제(Redis 분산 락의 "DEL 전 토큰 비교"와 동일한 고전 결함)를, 요청별 고유 토큰 저장 + 조건부 삭제로 해결 — in-memory는 `remove(key, value)`(값 동등성 기반 원자 연산), Redis는 Redisson `compareAndSet(token, null)`(Lua 기반 조건부 DEL). 두 프로파일이 같은 계약을 이행하도록 인터페이스 시그니처(`deleteFlag(key, token)`)에 토큰을 강제
+- **상태 저장 ↔ 방 정리(cleanup) race:** disconnect cleanup과 진행 중 게임 액션의 `save`가 동시 실행되면 `containsKey → put` 사이 TOCTOU로 **삭제된 방 상태가 부활(zombie entry)**해 메모리 누수가 되던 문제를, `computeIfPresent` 기반 조건부 저장으로 존재 확인과 갱신을 원자화해 해결 (Redis 프로파일의 `setIfPresent`(SET XX)와 동일 계약으로 정합)
 - **자동플레이 스케줄링의 원자성:** sequence 비교 → cancel → put이 분리되어 발생하던 race를 `ConcurrentHashMap.compute` 기반 **single-record atomic swap**으로 해결. 두 동시 호출의 순서와 무관하게 더 큰 sequence의 task가 살아남도록 보장
-- **락 cleanup의 안전성:** 락 보유 중인 방을 즉시 제거하면 후속 요청이 새 Semaphore를 만들어 동시 진입하는 race를, `tryAcquire` 성공 시에만 제거하도록 변경
-- **정상 요청 ↔ 자동플레이 우선순위 충돌 해소:** 동일한 In-Flight 키를 공유해 자동플레이가 deadline 임박 시점에 락을 먼저 잡으면 정상 요청이 `TOO_MANY_REQUESTS`로 거부되던 race를, **키를 `NORMAL` / `AUTOPLAY` prefix로 분리**해 정상 요청이 In-Flight 단계에서 차단되지 않도록 변경. 자동플레이는 진입 시점 + 게임 로직 직전 두 단계로 `isSet(NORMAL)` 체크하여 양보하고, 정상 요청은 `@GameLock` 획득 콜백에서 `cancelAutoPlay`를 호출해 진행 중인 자동플레이를 abort. **InFlight 통과 후의 잔존 race window는 `@GameLock`이 final guard로 받아 layered defense 완성**
+- **락 cleanup의 안전성 (방어 코드가 새 race를 만든 사례):** 락 보유 중인 방을 즉시 제거하면 후속 요청이 새 Semaphore를 만들어 동시 진입할 수 있어 `tryAcquire` 성공 시에만 제거하는 방어를 시도했으나, 이 변형이 `withLock`의 `computeIfAbsent → tryAcquire` 2단계 사이에 끼어들어 **다른 요청의 permit을 가로채 영구 timeout을 유발하는 새로운 race를 만든다는 것을 확인**. gameOver → cleanup 흐름상 해당 시점엔 락 경합이 사실상 없다는 도메인 근거로 단순 remove로 회귀 (이론적 완전성보다 실제 실행 경로 기반 판단)
+- **정상 요청 ↔ 자동플레이 우선순위 충돌 해소:** 동일한 In-Flight 키를 공유해 자동플레이가 deadline 임박 시점에 락을 먼저 잡으면 정상 요청이 `TOO_MANY_REQUESTS`로 거부되던 race를, **키를 `NORMAL` / `AUTOPLAY` prefix로 분리**해 정상 요청이 In-Flight 단계에서 차단되지 않도록 변경. 자동플레이는 진입 시점 + 게임 로직 직전 두 단계로 `isSet(NORMAL)` 체크하여 양보하고, 정상 요청은 `@GameLock` 획득 콜백에서 `cancelAutoPlay`를 호출해 진행 중인 자동플레이를 abort. **InFlight 통과 후의 잔존 race window는 `@GameLock`의 직렬화 + 락 내부 fresh 재검증이 final guard로 받아 layered defense 완성**
 
 ### 3. 네트워크 지연 및 OS 시간 역전을 고려한 타임아웃 정밀도 향상
 
