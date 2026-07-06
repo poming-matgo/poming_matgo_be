@@ -8,6 +8,7 @@ import com.pomingmatgo.gameservice.api.response.websocket.LeadSelectionRes;
 import com.pomingmatgo.gameservice.domain.GameState;
 import com.pomingmatgo.gameservice.domain.InstalledCard;
 import com.pomingmatgo.gameservice.domain.Player;
+import com.pomingmatgo.gameservice.domain.TurnTiming;
 import com.pomingmatgo.gameservice.domain.card.Card;
 import com.pomingmatgo.gameservice.domain.service.matgo.PreGameService;
 import com.pomingmatgo.gameservice.global.MessageSender;
@@ -168,7 +169,7 @@ public class WsPreGameHandler {
                 gameState.getRound(),
                 gameState.getCurrentTurn(),
                 gameState.getCurrentPlayer(),
-                10000
+                TurnTiming.TURN_TIMEOUT_MILLIS
         );
         return messageSender.sendMessageToAllUser(gameState.getRoomId(),
                 WebSocketResDto.of(PLAYER_NOTHING, "ANNOUNCE_TURN_INFORMATION", "턴을 알립니다.", res));
