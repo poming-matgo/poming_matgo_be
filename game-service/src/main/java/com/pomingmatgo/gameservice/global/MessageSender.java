@@ -15,7 +15,8 @@ public class MessageSender {
     private final SessionManager sessionManager;
     public <T> Mono<Void> sendMessageToSession(WebSocketSession session, WebSocketResDto<T> response) {
         //todo: 상세 예외처리 필요
-        if (!session.isOpen()) {
+        // session null: 상대 미접속 또는 방 정리와 동시 실행된 경우 → 전송 스킵
+        if (session == null || !session.isOpen()) {
             return Mono.empty();
         }
 

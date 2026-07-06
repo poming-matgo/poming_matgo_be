@@ -71,10 +71,10 @@ public class SessionManager {
     }
 
     public WebSocketSession getSession(long roomId, int playerNum) {
-        if(playerNum==1)
-            return roomSessions.get(roomId).getPlayer1Session();
-        else
-            return roomSessions.get(roomId).getPlayer2Session();
+        // 방 제거(removeRoom)와 동시 호출될 수 있으므로 null 방어
+        RoomSessionData data = roomSessions.get(roomId);
+        if (data == null) return null;
+        return (playerNum == 1) ? data.getPlayer1Session() : data.getPlayer2Session();
     }
 
     public Mono<Void> removeRoom(Long roomId) {
@@ -94,6 +94,8 @@ public class SessionManager {
     public Collection<WebSocketSession> getAllUser(long roomId) {
         Collection<WebSocketSession> userSessions = new ArrayList<>();
         RoomSessionData roomSessionData = roomSessions.get(roomId);
+        // 방 제거(removeRoom)와 동시 호출될 수 있으므로 null 방어 — 빈 목록 반환으로 브로드캐스트 no-op
+        if (roomSessionData == null) return userSessions;
 
         if (roomSessionData.getPlayer1Session() != null) {
             userSessions.add(roomSessionData.getPlayer1Session());

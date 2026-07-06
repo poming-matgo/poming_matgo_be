@@ -39,16 +39,20 @@ public class RoomService {
     }
 
     public Mono<Void> leaveRoom(long userId, long roomId) {
-        return gameStateRepository.findById(roomId)
-                .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.NOT_EXISTED_ROOM)))
-                .filter(gameState -> isUserInRoom(gameState, userId))
-                .flatMap(gameState -> {
-                    Player player = gameState.getPlayerType(userId);
+        // joinRoom/Ready와 동일하게 단일 GameState 공유 수정이므로 방 단위 락으로 직렬화 (lost update 방지)
+        return roomLockManager.withLock(roomId,
+                gameStateRepository.findById(roomId)
+                        .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.NOT_EXISTED_ROOM)))
+                        .filter(gameState -> isUserInRoom(gameState, userId))
+                        .flatMap(gameState -> {
+                            Player player = gameState.getPlayerType(userId);
 
-                    GameState newState = gameState.updatePlayerState(player, new PlayerState());
-                    return gameStateRepository.save(newState);
-                })
-                .then();
+                            GameState newState = gameState.updatePlayerState(player, new PlayerState());
+                            return gameStateRepository.save(newState);
+                        })
+                        .then(),
+                () -> new BusinessException(ErrorCode.SYSTEM_ERROR)
+        );
     }
 
     private boolean isUserInRoom(GameState gameState, long userId) {
