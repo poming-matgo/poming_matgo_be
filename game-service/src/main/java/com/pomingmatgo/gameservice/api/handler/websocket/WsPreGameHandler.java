@@ -15,6 +15,7 @@ import com.pomingmatgo.gameservice.global.MessageSender;
 import com.pomingmatgo.gameservice.global.WebSocketResDto;
 import com.pomingmatgo.gameservice.global.exception.WebSocketBusinessException;
 import com.pomingmatgo.gameservice.global.session.SessionManager;
+import com.pomingmatgo.gameservice.scheduler.AutoPlayScheduler;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
 import org.springframework.web.reactive.socket.WebSocketSession;
@@ -25,6 +26,7 @@ import java.util.Map;
 import java.util.stream.Collectors;
 
 import static com.pomingmatgo.gameservice.domain.GamePhase.DETERMINING_STARTING_PLAYER;
+import static com.pomingmatgo.gameservice.domain.GamePhase.IN_PROGRESS;
 import static com.pomingmatgo.gameservice.domain.Player.*;
 import static com.pomingmatgo.gameservice.global.exception.WebSocketErrorCode.INVALID_GAME_PHASE;
 
@@ -34,6 +36,7 @@ public class WsPreGameHandler {
     private final PreGameService preGameService;
     private final MessageSender messageSender;
     private final SessionManager sessionManager;
+    private final AutoPlayScheduler autoPlayScheduler;
 
     public Mono<Void> handlePreGameEvent(RequestEvent<?> event, GameState gameState, Player player) {
         if(gameState.getPhase() != DETERMINING_STARTING_PLAYER) {
@@ -121,7 +124,16 @@ public class WsPreGameHandler {
 
     private Mono<Void> startFirstTurn(GameState gameState) {
         return preGameService.setFirstTurn(gameState)
-                .flatMap(this::announceTurnToAllPlayers);
+                .flatMap(state -> announceTurnToAllPlayers(state)
+                        // 첫 턴도 타임아웃 시 자동플레이가 진행되도록 타이머 등록 (이후 턴은 TurnFlowService가 재등록)
+                        .then(Mono.fromRunnable(() -> autoPlayScheduler.scheduleAutoPlay(
+                                state.getRoomId(),
+                                state.getRound(),
+                                state.getCurrentTurn(),
+                                state.getCurrentPlayer(),
+                                TurnTiming.nextDeadlineNanos(),
+                                IN_PROGRESS
+                        ))));
     }
 
     private Mono<Void> sendAllSelectedEvent(long roomId, LeadSelectionRes leadSelectionRes) {
