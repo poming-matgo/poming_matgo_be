@@ -292,24 +292,6 @@ public class GameService {
                 .min(Comparator.comparing(c -> c.getSpecialType() == SpecialType.SSANG_PI));
     }
 
-    public Mono<GameState> setNextTurn(GameState gameState) {
-        GameState.GameStateBuilder builder = gameState.toBuilder()
-                .currentTurn((gameState.getCurrentTurn() == 1 ? 2 : 1))
-                .phase(GamePhase.IN_PROGRESS)
-                .choiceInfo(null);
-
-        if (gameState.getCurrentTurn() == 2) {
-            builder.round(gameState.getRound() + 1); // todo: 마지막 라운드는 향후 처리 예정
-        }
-
-        if (gameState.getRound() == 11)
-            builder.phase(GamePhase.END);
-
-        GameState newGameState = builder.build();
-
-        return Mono.just(newGameState);
-    }
-
     /** 고/스톱 선택 대기 진입 — phase를 저장해 선택 요청 검증과 자동플레이 타이머(TurnStep)가 같은 상태를 공유하게 한다 */
     public Mono<GameState> enterGoStopChoice(GameState gameState) {
         GameState newState = gameState.toBuilder()
@@ -328,7 +310,7 @@ public class GameService {
         return Mono.just(newState);
     }
 
-    public Mono<GameState> gameOver(GameState gameState, Player winner) {
+    public Mono<GameState> gameOver(GameState gameState) {
         GameState newState = gameState.toBuilder()
                 .phase(GamePhase.END)
                 .build();

@@ -20,12 +20,12 @@ public final class ScoreCalculator {
             }
             return acc + (Objects.equals(card.getSpecialType(), SpecialType.SSANG_PI) ? 2 : 1);
         }, Integer::sum);
-        return piCnt < 10 ? 0 : piCnt - 9; // Mono.just() 제거
+        return piCnt < 10 ? 0 : piCnt - 9;
     }
 
     public int calculateGwangScore(List<Card> cards) {
         int size = cards.size();
-        return switch (size) { // 바로 return
+        return switch (size) {
             case 3 -> {
                 boolean hasBiGwang = cards.stream()
                         .anyMatch(card -> Objects.equals(card.getSpecialType(), SpecialType.BI_GWANG));
@@ -44,7 +44,7 @@ public final class ScoreCalculator {
                 .limit(3)
                 .count() >= 3;
         int godoriScore = isGodori ? 5 : 0;
-        return size < 5 ? godoriScore : godoriScore + size - 4; // Mono.just() 제거
+        return size < 5 ? godoriScore : godoriScore + size - 4;
     }
 
     public int calculateDdiScore(List<Card> cards) {
@@ -55,7 +55,7 @@ public final class ScoreCalculator {
         int additionalScore = (int) Stream.of(SpecialType.HONG_DAN, SpecialType.CHO_DAN, SpecialType.CHUNG_DAN)
                 .filter(type -> specialTypeCount.getOrDefault(type, 0L) >= 3)
                 .count() * 3;
-        return size < 5 ? additionalScore : additionalScore + (int) size - 4; // Mono.just() 제거
+        return size < 5 ? additionalScore : additionalScore + (int) size - 4;
     }
 
     public int calculateTotalScore(List<Card> cards) {

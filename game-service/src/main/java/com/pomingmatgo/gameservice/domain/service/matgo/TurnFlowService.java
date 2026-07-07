@@ -62,7 +62,7 @@ public class TurnFlowService {
                                 .then(gameMessageSender.sendTurnInfo(nextState, TURN_TIMEOUT_MILLIS))
                                 .then(Mono.fromRunnable(() -> scheduleNextStep(roomId, nextState, scheduler)));
                     }
-                    return gamePlayService.gameOver(nextState, player)
+                    return gamePlayService.gameOver(nextState)
                             .delayUntil(finalState -> gameMessageSender.sendGameOverMessage(finalState, player))
                             .then();
                 });

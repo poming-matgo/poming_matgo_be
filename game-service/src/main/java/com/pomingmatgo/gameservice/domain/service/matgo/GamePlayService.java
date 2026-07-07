@@ -7,7 +7,6 @@ import com.pomingmatgo.gameservice.domain.card.Card;
 import com.pomingmatgo.gameservice.global.exception.WebSocketBusinessException;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
-import org.springframework.web.reactive.function.client.WebClient;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 
@@ -18,7 +17,6 @@ import static com.pomingmatgo.gameservice.global.exception.WebSocketErrorCode.NO
 @RequiredArgsConstructor
 public class GamePlayService {
     private final GameService gameService;
-    private final WebClient.Builder builder;
 
     @GameLock(key = "'game:' + #roomId + ':' + #gameState.round + ':' + #gameState.currentTurn")
     public Mono<TurnExecutionResult> executeNormalSubmit(long roomId, GameState gameState, Player player, int cardIdx, Runnable onLockAcquired) {
@@ -126,7 +124,7 @@ public class GamePlayService {
         });
     }
 
-    public Mono<GameState> gameOver(GameState gameState, Player winner) {
-        return gameService.gameOver(gameState, winner);
+    public Mono<GameState> gameOver(GameState gameState) {
+        return gameService.gameOver(gameState);
     }
 }

@@ -54,20 +54,12 @@ public class GameNotificationService {
     }
 
     private Mono<GameState> processGameOver(GameState gameState, Player player) {
-        return gamePlayService.gameOver(gameState, player)
+        return gamePlayService.gameOver(gameState)
                 .delayUntil(finalState -> gameMessageSender.sendGameOverMessage(finalState, player));
     }
 
     private Mono<Void> sendScoreInfo(GameState gameState) {
         ScoreInfoRes scoreInfoRes = ScoreInfoRes.from(gameState);
         return gameMessageSender.sendScoreInfo(gameState.getRoomId(), scoreInfoRes);
-    }
-
-    public Mono<Void> broadcastNextTurnInfo(GameState nextState, long remainingMs) {
-        ScoreInfoRes scoreInfoRes = ScoreInfoRes.from(nextState);
-        return Mono.when(
-                gameMessageSender.sendTurnInfo(nextState, remainingMs),
-                gameMessageSender.sendScoreInfo(nextState.getRoomId(), scoreInfoRes)
-        );
     }
 }
