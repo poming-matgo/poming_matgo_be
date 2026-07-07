@@ -121,6 +121,14 @@ public class RedisInstalledCardRepository implements InstalledCardRepository {
                 .collectList();
     }
 
+    public Mono<List<Card>> getAllRevealedCards(long roomId) {
+        return Flux.range(1, 12)
+                .flatMap(month -> redisOps.opsForSet()
+                        .members(generateRevealedCardKey(roomId, month)))
+                .map(Card::valueOf)
+                .collectList();
+    }
+
     public Mono<Card> getTopCard(long roomId) {
         String redisKey = generateHiddenCardKey(roomId);
         return redisOps.opsForList()

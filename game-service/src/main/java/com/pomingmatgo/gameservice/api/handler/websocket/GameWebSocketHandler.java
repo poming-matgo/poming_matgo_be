@@ -9,6 +9,7 @@ import com.pomingmatgo.gameservice.api.request.websocket.JoinRoomReq;
 import com.pomingmatgo.gameservice.domain.GamePhase;
 import com.pomingmatgo.gameservice.domain.GameState;
 import com.pomingmatgo.gameservice.domain.Player;
+import com.pomingmatgo.gameservice.domain.service.matgo.ReconnectService;
 import com.pomingmatgo.gameservice.domain.service.matgo.RoomCleanupService;
 import com.pomingmatgo.gameservice.domain.service.matgo.RoomService;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -47,6 +48,7 @@ public class GameWebSocketHandler implements WebSocketHandler {
     private final MessageSender messageSender;
     private final InFlightManager inFlightManager;
     private final RoomCleanupService roomCleanupService;
+    private final ReconnectService reconnectService;
 
     @Override
     public Mono<Void> handle(WebSocketSession session) {
@@ -138,11 +140,25 @@ public class GameWebSocketHandler implements WebSocketHandler {
 
         return roomService.getGameState(roomId)
                 .switchIfEmpty(Mono.error(new WebSocketBusinessException(NOT_EXISTED_ROOM)))
-                .flatMap(gameState -> Mono.fromCallable(() -> gameState.getPlayerType(userId)))
-                .flatMap(player -> sessionManager.addPlayer(roomId, player, userId, session).thenReturn(player))
-                .flatMap(player -> messageSender.sendMessageToAllUser(
-                        roomId, WebSocketResDto.of(player, "CONNECT", "접속했습니다."))
-                );
+                .flatMap(gameState -> Mono.fromCallable(() -> gameState.getPlayerType(userId))
+                        .flatMap(player -> sessionManager.addPlayer(roomId, player, userId, session)
+                                // 행동 대기 phase의 CONNECT는 진행 중인 게임으로의 재접속
+                                .then(gameState.getPhase().isPlayerActionPhase()
+                                        ? handleReconnect(roomId, player, session)
+                                        : messageSender.sendMessageToAllUser(
+                                                roomId, WebSocketResDto.of(player, "CONNECT", "접속했습니다.")))));
+    }
+
+    /**
+     * 진행 중인 게임으로의 재접속: 양쪽에 재접속을 알리고, 재접속자에게 화면 복원용 상태 스냅샷을 보낸다.
+     * 스냅샷은 fresh 조회 — 이탈 중 자동플레이가 게임을 진행시켰을 수 있다.
+     */
+    private Mono<Void> handleReconnect(long roomId, Player player, WebSocketSession session) {
+        return messageSender.sendMessageToAllUser(
+                        roomId, WebSocketResDto.of(player, "RECONNECT", "재접속했습니다."))
+                .then(reconnectService.buildSnapshot(roomId, player))
+                .flatMap(snapshot -> messageSender.sendMessageToSession(
+                        session, WebSocketResDto.of(player, "RECONNECT_STATE", "재접속 상태 동기화", snapshot)));
     }
 
     private Mono<Void> handleWebSocketError(WebSocketSession session, Throwable error) {
@@ -172,11 +188,34 @@ public class GameWebSocketHandler implements WebSocketHandler {
                     int playerNum = context.playerNum();
                     Player disconnected = Player.fromNumber(playerNum);
 
-                    sessionManager.deletePlayer(roomId, playerNum);
+                    // identity guard: 컨텍스트 조회 후 재접속이 슬롯을 교체했다면 새 세션을 지우지 않는다
+                    sessionManager.deletePlayer(roomId, playerNum, session);
+
+                    // 슬롯이 다시 점유돼 있다면 이 disconnect는 재접속에 밀린 낡은 것 —
+                    // 보존/teardown 판정까지 진행하면 방금 재접속한 세션 밑에서
+                    // OPPONENT_DISCONNECTED 오발송이나 방 파괴가 일어나므로 통째로 중단한다
+                    if (sessionManager.getSession(roomId, playerNum) != null) {
+                        return Mono.empty();
+                    }
 
                     return roomService.getGameState(roomId)
+                            // 방 상태가 이미 없으면(teardown과 교차한 재접속 등) 세션 매핑만 마저 정리 (roomSessions 누수 방지)
+                            .switchIfEmpty(Mono.defer(() ->
+                                    sessionManager.removeRoom(roomId).then(Mono.<GameState>empty())))
                             .flatMap(gameState -> {
                                 GamePhase phase = gameState.getPhase();
+                                int opponentNum = (playerNum == 1) ? 2 : 1;
+                                boolean opponentConnected = sessionManager.getSession(roomId, opponentNum) != null;
+
+                                // 행동 대기 phase는 자동플레이 타이머가 진행(liveness)을 보장하므로
+                                // 방을 보존해 재접속을 허용한다 — 이탈자의 턴은 기존 타이머가 그대로 대행.
+                                // 단, 마지막 접속자까지 나가면 버려진 방이므로 즉시 정리한다.
+                                if (phase.isPlayerActionPhase() && opponentConnected) {
+                                    return messageSender.sendMessageToAllUser(roomId,
+                                            WebSocketResDto.of(disconnected, "OPPONENT_DISCONNECTED",
+                                                    "상대방의 연결이 끊겼습니다. 재접속할 때까지 자동플레이로 진행합니다."));
+                                }
+
                                 boolean inProgress = phase != GamePhase.NONE && phase != GamePhase.END;
 
                                 Mono<Void> notify = inProgress

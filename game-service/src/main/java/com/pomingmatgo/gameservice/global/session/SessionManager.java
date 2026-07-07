@@ -21,8 +21,18 @@ public class SessionManager {
     public Mono<Void> addPlayer(long roomId, Player player, long userId, WebSocketSession session) {
         return Mono.fromRunnable(() -> {
             RoomSessionData roomData = roomSessions.computeIfAbsent(roomId, k -> new RoomSessionData());
+            WebSocketSession old = (player == Player.PLAYER_1)
+                    ? roomData.getPlayer1Session() : roomData.getPlayer2Session();
             roomData.addPlayer(player, userId, session);
             sessionToRoomMap.put(session.getId(), roomId);
+
+            // 재접속/중복 접속으로 교체된 낡은 세션은 매핑 제거 후 소켓 종료(kick).
+            // 매핑을 먼저 지우므로 낡은 세션의 disconnect 처리는 getPlayerContext가 비어 no-op이 된다
+            // (좀비 TCP 세션이 뒤늦게 닫혀도 새 세션을 지우지 못함).
+            if (old != null && !old.getId().equals(session.getId())) {
+                sessionToRoomMap.remove(old.getId());
+                old.close().subscribe();
+            }
         });
     }
 
@@ -57,15 +67,20 @@ public class SessionManager {
         );
     }
 
-    public void deletePlayer(long roomId, int playerNum) {
+    /**
+     * expected 세션이 아직 슬롯을 점유 중일 때만 제거한다 (identity guard).
+     * disconnect 처리가 컨텍스트 조회 후 실행되는 사이 재접속이 슬롯을 교체했을 수 있으므로,
+     * 무조건 비우면 새 세션을 지워버린다.
+     */
+    public void deletePlayer(long roomId, int playerNum, WebSocketSession expected) {
         RoomSessionData data = roomSessions.get(roomId);
         if (data == null) return;
 
-        WebSocketSession sessionToRemove = (playerNum == 1) ? data.getPlayer1Session() : data.getPlayer2Session();
-        if (sessionToRemove != null) {
-            sessionToRoomMap.remove(sessionToRemove.getId());
-        }
+        WebSocketSession current = (playerNum == 1) ? data.getPlayer1Session() : data.getPlayer2Session();
+        if (current == null) return;
+        if (expected != null && !current.getId().equals(expected.getId())) return;
 
+        sessionToRoomMap.remove(current.getId());
         if (playerNum == 1) data.setPlayer1Session(null);
         else data.setPlayer2Session(null);
     }

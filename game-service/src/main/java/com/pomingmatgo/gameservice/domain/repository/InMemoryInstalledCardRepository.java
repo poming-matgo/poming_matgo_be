@@ -87,6 +87,17 @@ public class InMemoryInstalledCardRepository implements InstalledCardRepository 
     }
 
     @Override
+    public Mono<List<Card>> getAllRevealedCards(long roomId) {
+        return Mono.fromCallable(() -> {
+            ConcurrentHashMap<Integer, Set<Card>> room = revealedCards.get(roomId);
+            if (room == null) return Collections.emptyList();
+            List<Card> all = new ArrayList<>();
+            room.values().forEach(all::addAll);
+            return all;
+        });
+    }
+
+    @Override
     public Mono<Card> getTopCard(long roomId) {
         return Mono.fromCallable(() -> {
             ArrayDeque<Card> deck = hiddenDeck.get(roomId);

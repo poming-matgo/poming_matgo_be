@@ -3,6 +3,7 @@ package com.pomingmatgo.gameservice.scheduler;
 import com.pomingmatgo.gameservice.domain.GamePhase;
 import com.pomingmatgo.gameservice.domain.GameState;
 import com.pomingmatgo.gameservice.domain.Player;
+import com.pomingmatgo.gameservice.domain.TurnTiming;
 import com.pomingmatgo.gameservice.domain.service.matgo.RoomService;
 import com.pomingmatgo.gameservice.domain.service.matgo.TurnFlowService;
 import com.pomingmatgo.gameservice.global.lock.InFlightManager;
@@ -77,9 +78,22 @@ public class AutoPlayScheduler implements TurnScheduler {
         }
     }
 
-    private record Scheduled(TurnStep step, Disposable task) {}
+    private record Scheduled(TurnStep step, long deadlineNanos, Disposable task) {}
 
     private final Map<Long, Scheduled> scheduled = new ConcurrentHashMap<>();
+
+    /**
+     * 현재 대기 중인 타이머 기준, 클라이언트에 알릴 남은 턴 시간(ms).
+     * deadline은 GRACE_PERIOD를 포함하므로 빼서 돌려준다. 타이머가 없으면(경합 틈) 턴 제한 전체를 반환 —
+     * 재접속 스냅샷 표시용 근사값이며 실제 타임아웃 판정은 타이머 자신이 한다.
+     */
+    public long getRemainingTurnMillis(long roomId) {
+        Scheduled current = scheduled.get(roomId);
+        if (current == null) return TurnTiming.TURN_TIMEOUT_MILLIS;
+        long remaining = TimeUnit.NANOSECONDS.toMillis(current.deadlineNanos() - System.nanoTime())
+                - TurnTiming.GRACE_PERIOD_MILLIS;
+        return Math.max(remaining, 0);
+    }
 
     @Override
     public void scheduleAutoPlay(long roomId, int round, int currentTurn, Player currentPlayer, long deadlineNanos, GamePhase expectedPhase) {
@@ -107,7 +121,7 @@ public class AutoPlayScheduler implements TurnScheduler {
                 return prev;
             }
             toDispose[0] = (prev != null) ? prev.task : null;
-            return new Scheduled(newStep, newTask);
+            return new Scheduled(newStep, deadlineNanos, newTask);
         });
 
         if (toDispose[0] != null && !toDispose[0].isDisposed()) {
