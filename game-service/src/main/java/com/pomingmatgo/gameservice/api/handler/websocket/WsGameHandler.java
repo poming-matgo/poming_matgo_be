@@ -15,11 +15,9 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 import reactor.core.publisher.Mono;
 
-import java.util.concurrent.TimeUnit;
-
 import static com.pomingmatgo.gameservice.domain.GamePhase.*;
-import static com.pomingmatgo.gameservice.domain.TurnTiming.GRACE_PERIOD_MILLIS;
 import static com.pomingmatgo.gameservice.domain.TurnTiming.TURN_TIMEOUT_MILLIS;
+import static com.pomingmatgo.gameservice.domain.TurnTiming.nextDeadlineNanos;
 import static com.pomingmatgo.gameservice.global.exception.WebSocketErrorCode.INVALID_GAME_PHASE;
 import static com.pomingmatgo.gameservice.global.exception.WebSocketErrorCode.NOT_YOUR_TURN;
 
@@ -29,8 +27,8 @@ import static com.pomingmatgo.gameservice.global.exception.WebSocketErrorCode.NO
 public class WsGameHandler {
 
     private final GamePlayService gamePlayService;
+    private final TurnFlowService turnFlowService;
     private final GameMessageSender gameMessageSender;
-    private final GameNotificationService gameNotificationService;
     private final AutoPlayScheduler autoPlayScheduler;
 
     public Mono<Void> handleGameEvent(RequestEvent<?> event, GameState gameState, Player player) {
@@ -49,80 +47,25 @@ public class WsGameHandler {
     }
 
     private Mono<Void> handleNormalSubmit(RequestEvent<NormalSubmitReq> event, GameState gameState, Player player) {
-        if(gameState.getPhase() != IN_PROGRESS) {
+        if (gameState.getPhase() != IN_PROGRESS) {
             return Mono.error(new WebSocketBusinessException(INVALID_GAME_PHASE));
         }
 
         long roomId = gameState.getRoomId();
-        int cardIdx = event.getData().cardIndex();
-
-        return gamePlayService.executeNormalSubmit(roomId, gameState, player, cardIdx, () -> autoPlayScheduler.cancelAutoPlay(roomId))
-                .flatMap(ctx -> {
-                    Mono<Void> sendInfos = Mono.when(
-                            gameMessageSender.sendSubmitCardInfo(roomId, player, ctx.submittedCard()),
-                            gameMessageSender.sendTopCardInfo(roomId, player, ctx.topCard())
-                    );
-
-                    Mono<Void> handleResult;
-                    if (ctx.isChoiceRequired()) {
-                        autoPlayScheduler.cancelAutoPlay(roomId);
-                        handleResult = gameMessageSender.sendChooseFloorCardMessage(roomId, player, ctx.cardResult().getSelectableCards());
-                    } else {
-                        handleResult = gameNotificationService.broadcastTurnResult(roomId, player, ctx.updatedGameState(), ctx.cardResult(), () -> autoPlayScheduler.cancelAutoPlay(roomId), TURN_TIMEOUT_MILLIS)
-                                .doOnNext(nextState -> {
-                                    if (nextState.getPhase() == IN_PROGRESS && !nextState.getCurrentPlayer().equals(player)) {
-                                   //     log.info("[AutoPlay Schedule] 스케줄링 등록! roomId: {}, 예약된 턴: ({}, {}), 대상 플레이어: {}",
-                                   //             roomId, nextState.getRound(), nextState.getCurrentTurn(), nextState.getCurrentPlayer());
-                                        autoPlayScheduler.scheduleAutoPlay(
-                                                roomId,
-                                                nextState.getRound(),
-                                                nextState.getCurrentTurn(),
-                                                nextState.getCurrentPlayer(),
-                                                System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(TURN_TIMEOUT_MILLIS + GRACE_PERIOD_MILLIS)
-                                        );
-                                    }
-                                })
-                                .then();
-                    }
-
-                    return sendInfos.then(handleResult);
-                }).then();
+        return turnFlowService.processNormalSubmit(
+                roomId, gameState, player, event.getData().cardIndex(),
+                () -> autoPlayScheduler.cancelAutoPlay(roomId), autoPlayScheduler);
     }
 
     private Mono<Void> handleFloorSelect(RequestEvent<NormalSubmitReq> event, GameState gameState, Player player) {
-        if(gameState.getPhase() != AWAITING_FLOOR_CARD_CHOICE) {
+        if (gameState.getPhase() != AWAITING_FLOOR_CARD_CHOICE) {
             return Mono.error(new WebSocketBusinessException(INVALID_GAME_PHASE));
         }
+
         long roomId = gameState.getRoomId();
-
-        return gamePlayService.executeFloorSelection(roomId, gameState, player, event, () -> autoPlayScheduler.cancelAutoPlay(roomId))
-                .flatMap(ctx -> {
-                    if (ctx.isChoiceRequired()) {
-                        return gameMessageSender.sendChooseFloorCardMessage(roomId, player, ctx.cardResult().getSelectableCards());
-                    }
-
-                    Mono<Void> sendAcquired = gameMessageSender.sendAcquiredCardMessage(roomId, player, ctx.cardResult().getAcquiredCards());
-                    Mono<GameState> setNextTurn = gamePlayService.proceedToNextTurn(ctx.updatedGameState());
-
-                    return sendAcquired.then(setNextTurn)
-                            .delayUntil(nextState -> gameNotificationService.broadcastNextTurnInfo(nextState, TURN_TIMEOUT_MILLIS))
-                            .doOnNext(nextState -> {
-                                if (nextState.getPhase() == IN_PROGRESS) {
-                              //      log.info("[AutoPlay Schedule] 스케줄링 등록! roomId: {}, 예약된 턴: ({}, {}), 대상 플레이어: {}",
-                              //              roomId, nextState.getRound(), nextState.getCurrentTurn(), nextState.getCurrentPlayer());
-                                    autoPlayScheduler.scheduleAutoPlay(
-                                            roomId,
-                                            nextState.getRound(),
-                                            nextState.getCurrentTurn(),
-                                            nextState.getCurrentPlayer(),
-                                            System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(TURN_TIMEOUT_MILLIS + GRACE_PERIOD_MILLIS)
-                                    );
-                                }
-                            })
-                            .then();
-
-
-                });
+        return turnFlowService.processFloorSelection(
+                roomId, gameState, player, event.getData().cardIndex(),
+                () -> autoPlayScheduler.cancelAutoPlay(roomId), autoPlayScheduler);
     }
 
     private Mono<Void> handleGoStopChoice(RequestEvent<GoStopReq> event, GameState gameState, Player player) {
@@ -140,14 +83,13 @@ public class WsGameHandler {
                 })
                 .doOnNext(nextState -> {
                     if (nextState.getPhase() == IN_PROGRESS) {
-                  //      log.info("[AutoPlay Schedule] 스케줄링 등록! roomId: {}, 예약된 턴: ({}, {}), 대상 플레이어: {}",
-                  //              roomId, nextState.getRound(), nextState.getCurrentTurn(), nextState.getCurrentPlayer());
                         autoPlayScheduler.scheduleAutoPlay(
                                 roomId,
                                 nextState.getRound(),
                                 nextState.getCurrentTurn(),
                                 nextState.getCurrentPlayer(),
-                                System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(TURN_TIMEOUT_MILLIS + GRACE_PERIOD_MILLIS)
+                                nextDeadlineNanos(),
+                                IN_PROGRESS
                         );
                     }
                 })

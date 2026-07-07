@@ -2,7 +2,6 @@ package com.pomingmatgo.gameservice.domain.service.matgo;
 
 import com.pomingmatgo.gameservice.api.handler.event.RequestEvent;
 import com.pomingmatgo.gameservice.api.request.websocket.GoStopReq;
-import com.pomingmatgo.gameservice.api.request.websocket.NormalSubmitReq;
 import com.pomingmatgo.gameservice.domain.GamePhase;
 import com.pomingmatgo.gameservice.domain.GameState;
 import com.pomingmatgo.gameservice.domain.Player;
@@ -51,7 +50,7 @@ public class GamePlayService {
     }
 
     @GameLock(key = "'floor:' + #roomId + ':' + #gameState.round + ':' + #gameState.currentTurn")
-    public Mono<FloorSelectionResult> executeFloorSelection(long roomId, GameState gameState, Player player, RequestEvent<NormalSubmitReq> event, Runnable onLockAcquired) {
+    public Mono<FloorSelectionResult> executeFloorSelection(long roomId, GameState gameState, Player player, int cardIdx, Runnable onLockAcquired) {
         return Mono.defer(() -> {
             if (onLockAcquired != null) {
                 onLockAcquired.run();
@@ -61,7 +60,7 @@ public class GamePlayService {
                         if (freshState.getPhase() != GamePhase.AWAITING_FLOOR_CARD_CHOICE) {
                             return Mono.error(new WebSocketBusinessException(INVALID_GAME_PHASE));
                         }
-                        return gameService.selectFloorCard(freshState, player, event)
+                        return gameService.selectFloorCard(freshState, player, cardIdx)
                                 .flatMap(result -> {
                                     if (result.isChoiceRequired()) {
                                         return Mono.just(new FloorSelectionResult(result, freshState, true));

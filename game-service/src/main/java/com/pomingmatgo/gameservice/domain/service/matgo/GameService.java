@@ -1,7 +1,5 @@
 package com.pomingmatgo.gameservice.domain.service.matgo;
 
-import com.pomingmatgo.gameservice.api.handler.event.RequestEvent;
-import com.pomingmatgo.gameservice.api.request.websocket.NormalSubmitReq;
 import com.pomingmatgo.gameservice.domain.*;
 import com.pomingmatgo.gameservice.domain.card.Card;
 import com.pomingmatgo.gameservice.domain.card.CardType;
@@ -222,8 +220,7 @@ public class GameService {
     }
 
 
-    public Mono<ProcessCardResult> selectFloorCard(GameState gameState, Player player, RequestEvent<NormalSubmitReq> event) {
-        int cardIndex = event.getData().cardIndex();
+    public Mono<ProcessCardResult> selectFloorCard(GameState gameState, Player player, int cardIndex) {
         validateFloorCardSelection(gameState, player, cardIndex);
 
         ChoiceInfo choiceInfo = gameState.getChoiceInfo();
