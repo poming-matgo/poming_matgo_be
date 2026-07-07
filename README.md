@@ -43,19 +43,19 @@ Client ──WS──▶ GameWebSocketHandler
   RoomService    PreGameService                   TurnFlowService ◀── 실행 위임 ──┐
        │             │                        (유저/자동 공통 후처리:               │
        ▼             ▼                         메시지 전송 → 턴 전환                │
-  2) RoomLock    2) AtomicTrigger              → 타이머 재등록)                    │
-     Manager        (LeadingPlayer,                     │                        │
-     (방 단위        putIfAbsent로                       ▼                        │
+  2) RoomLock    2) AtomicTrigger              → 타이머 재등록)                     │
+     Manager        (LeadingPlayer,                     │                          │
+     (방 단위        putIfAbsent로                       ▼                         │
       Semaphore,     선플레이어 결정 후속           GamePlayService                 │
       Ready/Join     트리거 1회 보장)                    │                         │
-      직렬화)                                            ▼                        │
-                                                  2) @GameLock AOP               │
-                                                  (round:turn 단위 Semaphore,    │
-                                                   race final guard)            │
-                                                        │                       │
+      직렬화)                                            ▼                         │ 
+                                                  2) @GameLock AOP                │
+                                                  (round:turn 단위 Semaphore,     │
+                                                   race final guard)             │
+                                                        │                        │
             ConcurrentHashMap (In-Memory Game State) ── 등록 ────────────────────┤
-                                                                                │
-              3) AutoPlayScheduler ── 타이머 발사 (Game 액션) ─────────────────────┘
+                                                                                 │
+              3) AutoPlayScheduler ── 타이머 발사 (Game 액션) ────────────────────┘
 ```
 
 **동시성 3레이어 요약:**
