@@ -1,6 +1,7 @@
 package com.pomingmatgo.gameservice.scheduler;
 
 import com.pomingmatgo.gameservice.domain.GamePhase;
+import com.pomingmatgo.gameservice.domain.GameState;
 import com.pomingmatgo.gameservice.domain.Player;
 import com.pomingmatgo.gameservice.domain.service.matgo.RoomService;
 import com.pomingmatgo.gameservice.domain.service.matgo.TurnFlowService;
@@ -22,10 +23,11 @@ import static com.pomingmatgo.gameservice.domain.GamePhase.AWAITING_FLOOR_CARD_C
 /**
  * 자동플레이 스케줄러.
  *
- * 타이머는 expectedPhase를 함께 기억한다:
+ * 타이머의 정체성은 TurnStep(round, turn, phase) 하나로 표현한다:
  * - IN_PROGRESS: 턴 타임아웃 시 카드 자동 제출
  * - AWAITING_FLOOR_CARD_CHOICE: 선택 타임아웃 시 바닥 카드 자동 선택
- * 발사 시점의 실제 phase가 expectedPhase와 다르면 낡은 타이머로 판단하고 물러난다.
+ * 등록 시점엔 TurnStep의 순서 비교로 낡은 등록이 유효한 타이머를 교체(파괴)하지 못하게 막고,
+ * 발사 시점엔 실제 게임 상태가 TurnStep과 일치하는지 재검증해 낡은 타이머가 스스로 물러나게 한다.
  * 실행 자체는 TurnFlowService에 위임하므로 후처리(타이머 재등록 포함)는 사용자 요청 경로와 동일하다.
  *
  * 제약: scheduled 맵과 reactor.core.Disposable 기반 타이머는 모두 인스턴스 로컬이다.
@@ -49,17 +51,41 @@ public class AutoPlayScheduler implements TurnScheduler {
     private final RoomService roomService;
     private final TurnFlowService turnFlowService;
 
-    private record Scheduled(int sequence, Disposable task) {}
+    /**
+     * 타이머가 속한 턴 단계의 정체성. 등록 시점의 교체 판정(순서 비교)과
+     * 발사 시점의 상태 재검증(matches)이 같은 값을 공유한다.
+     * 같은 턴 안에서는 제출(IN_PROGRESS) < 선택(AWAITING_FLOOR_CARD_CHOICE) 순 —
+     * 낡은 제출 타이머 등록이 먼저 등록된 선택 타이머를 교체(파괴)하지 못하게 한다.
+     */
+    private record TurnStep(int round, int turn, GamePhase phase) implements Comparable<TurnStep> {
+
+        private static int phaseOrder(GamePhase phase) {
+            return phase == AWAITING_FLOOR_CARD_CHOICE ? 1 : 0;
+        }
+
+        @Override
+        public int compareTo(TurnStep other) {
+            int c = Integer.compare(this.round, other.round);
+            if (c != 0) return c;
+            c = Integer.compare(this.turn, other.turn);
+            if (c != 0) return c;
+            return Integer.compare(phaseOrder(this.phase), phaseOrder(other.phase));
+        }
+
+        boolean matches(GameState gameState) {
+            return gameState.getRound() == round
+                    && gameState.getCurrentTurn() == turn
+                    && gameState.getPhase() == phase;
+        }
+    }
+
+    private record Scheduled(TurnStep step, Disposable task) {}
 
     private final Map<Long, Scheduled> scheduled = new ConcurrentHashMap<>();
 
-    private int getTurnSequence(int round, int turn) {
-        return (round * 10000) + turn;
-    }
-
     @Override
     public void scheduleAutoPlay(long roomId, int round, int currentTurn, Player currentPlayer, long deadlineNanos, GamePhase expectedPhase) {
-        int newSequence = getTurnSequence(round, currentTurn);
+        TurnStep newStep = new TurnStep(round, currentTurn, expectedPhase);
 
         long delayMillis = TimeUnit.NANOSECONDS.toMillis(deadlineNanos - System.nanoTime());
         if (delayMillis <= 0) delayMillis = MIN_DELAY_MILLIS;
@@ -67,23 +93,23 @@ public class AutoPlayScheduler implements TurnScheduler {
         // 취소(dispose) 대상은 "대기 중인 타이머"로 한정한다. 발사 이후의 실행은 독립 구독으로 분리 —
         // 실행 도중 cancelAutoPlay가 호출되는 경우(자동플레이 자신의 게임 종료 cleanup, 고/스톱 분기 등)
         // 실행 체인을 중단시키면 아직 전송되지 않은 GAME_OVER/GO_STOP_CHOICE 메시지가 유실된다.
-        // 발사 이후의 경합은 (round, turn, phase) 재검증 + InFlight + @GameLock이 방어한다.
+        // 발사 이후의 경합은 TurnStep 재검증 + InFlight + @GameLock이 방어한다.
         Disposable newTask = Mono.delay(Duration.ofMillis(delayMillis))
-                .subscribe(v -> attemptAutoPlay(roomId, round, currentTurn, currentPlayer, expectedPhase)
+                .subscribe(v -> attemptAutoPlay(roomId, newStep, currentPlayer)
                         .subscribe(
                                 success -> {},
                                 error -> log.error("[AutoPlay] 룸({}) 자동플레이 실행 중 에러 발생!", roomId, error)
                         ));
 
-        // 같은 (round, turn)의 재등록(제출 타이머 → 선택 타이머)은 교체를 허용해야 하므로 초과 비교
+        // 같은 단계의 재등록(연속 바닥 카드 선택)은 교체를 허용해야 하므로 초과(>)일 때만 기존 유지
         Disposable[] toDispose = new Disposable[1];
         scheduled.compute(roomId, (k, prev) -> {
-            if (prev != null && prev.sequence > newSequence) {
+            if (prev != null && prev.step.compareTo(newStep) > 0) {
                 toDispose[0] = newTask;
                 return prev;
             }
             toDispose[0] = (prev != null) ? prev.task : null;
-            return new Scheduled(newSequence, newTask);
+            return new Scheduled(newStep, newTask);
         });
 
         if (toDispose[0] != null && !toDispose[0].isDisposed()) {
@@ -99,10 +125,10 @@ public class AutoPlayScheduler implements TurnScheduler {
         }
     }
 
-    private Mono<Void> attemptAutoPlay(long roomId, int round, int currentTurn, Player currentPlayer, GamePhase expectedPhase) {
+    private Mono<Void> attemptAutoPlay(long roomId, TurnStep step, Player currentPlayer) {
         return roomService.getGameState(roomId)
                 .flatMap(gameState -> {
-                    if (gameState.getRound() != round || gameState.getCurrentTurn() != currentTurn || gameState.getPhase() != expectedPhase) {
+                    if (!step.matches(gameState)) {
                         return Mono.empty();
                     }
 
@@ -113,15 +139,15 @@ public class AutoPlayScheduler implements TurnScheduler {
                             .flatMap(isDelayed -> {
                                 if (isDelayed) {
                                     return Mono.delay(Duration.ofSeconds(1))
-                                            .then(Mono.defer(() -> attemptAutoPlay(roomId, round, currentTurn, currentPlayer, expectedPhase)));
+                                            .then(Mono.defer(() -> attemptAutoPlay(roomId, step, currentPlayer)));
                                 } else {
-                                    return executeAutoPlayLogic(roomId, round, currentTurn, currentPlayer, expectedPhase);
+                                    return executeAutoPlayLogic(roomId, step, currentPlayer);
                                 }
                             });
                 });
     }
 
-    private Mono<Void> executeAutoPlayLogic(long roomId, int round, int turnNumber, Player currentPlayer, GamePhase expectedPhase) {
+    private Mono<Void> executeAutoPlayLogic(long roomId, TurnStep step, Player currentPlayer) {
         // AUTOPLAY 키는 자동플레이끼리의 동시 시작 방지용 (정상 요청과는 키 분리)
         String autoplayFlagKey = "IN_FLIGHT:AUTOPLAY:ROOM:" + roomId + ":PLAYER:" + currentPlayer.getNumber();
         String normalFlagKey = "IN_FLIGHT:NORMAL:ROOM:" + roomId + ":PLAYER:" + currentPlayer.getNumber();
@@ -137,11 +163,11 @@ public class AutoPlayScheduler implements TurnScheduler {
                                 if (normalInProgress) return Mono.<Void>empty();
                                 return roomService.getGameState(roomId)
                                         .flatMap(gameState -> {
-                                            if (gameState.getRound() != round || gameState.getCurrentTurn() != turnNumber || gameState.getPhase() != expectedPhase) {
+                                            if (!step.matches(gameState)) {
                                                 return Mono.empty();
                                             }
 
-                                            if (expectedPhase == AWAITING_FLOOR_CARD_CHOICE) {
+                                            if (step.phase() == AWAITING_FLOOR_CARD_CHOICE) {
                                                 return turnFlowService.processFloorSelection(roomId, gameState, currentPlayer, AUTO_PLAY_CARD_INDEX, null, this);
                                             }
                                             return turnFlowService.processNormalSubmit(roomId, gameState, currentPlayer, AUTO_PLAY_CARD_INDEX, null, this);

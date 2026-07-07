@@ -159,6 +159,25 @@ class AutoPlayFloorSelectionTest {
         assertTrue(floorFeb.contains(Card.FEB_3), "2월 바닥: " + floorFeb);
     }
 
+    @Test
+    @DisplayName("지연 도착한 제출 타이머 '등록'이 이미 등록된 선택 타이머를 파괴하지 못한다")
+    void staleSubmitRegistrationCannotReplaceChoiceTimer() throws Exception {
+        roomId = 910_005L;
+        seedChoicePendingRoom();
+
+        // 선택 타이머가 정상 등록된 상태 (3초 뒤 발사 예정)
+        long choiceDeadline = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(3000);
+        autoPlayScheduler.scheduleAutoPlay(roomId, 1, 1, Player.PLAYER_1, choiceDeadline, GamePhase.AWAITING_FLOOR_CARD_CHOICE);
+
+        // 같은 (round, turn)의 제출 타이머 등록이 뒤늦게 도착 — 같은 턴 안에서 제출 < 선택 순서이므로 교체되면 안 된다
+        autoPlayScheduler.scheduleAutoPlay(roomId, 1, 1, Player.PLAYER_1, System.nanoTime(), GamePhase.IN_PROGRESS);
+
+        // 선택 타이머가 살아남아 3초 뒤 자동 선택이 실행돼야 한다
+        GameState result = awaitState(gs -> gs.getPhase() == GamePhase.IN_PROGRESS && gs.getCurrentTurn() == 2, 6000);
+        assertNotNull(result);
+        assertEquals(2, result.getCurrentTurn());
+    }
+
     private void seedChoicePendingRoom() {
         GameState state = GameState.builder()
                 .roomId(roomId)
