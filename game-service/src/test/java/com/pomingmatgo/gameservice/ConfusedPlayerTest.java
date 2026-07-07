@@ -56,7 +56,7 @@ class ConfusedPlayerTest {
     @DisplayName("플레이어의 패를 보고 총통 여부를 정확히 판정해야 한다")
     @ParameterizedTest(name = "[{index}] {0}")
     @MethodSource("chongtongTestCases")
-    void isConfusedPlayer_shouldReturnCorrectState(Player player, List<Card> cards, boolean expectedResult) {
+    void isConfusedPlayer_shouldReturnCorrectState(String description, Player player, List<Card> cards, boolean expectedResult) {
         Mono<List<Card>> playerCards = Mono.just(cards);
         given(installedCardRepository.getPlayerCards(ROOM_ID, player))
                 .willReturn(playerCards);
