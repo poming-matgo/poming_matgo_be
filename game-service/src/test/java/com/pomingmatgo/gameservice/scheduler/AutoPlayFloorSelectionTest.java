@@ -106,7 +106,7 @@ class AutoPlayFloorSelectionTest {
         roomId = 910_003L;
         seedChoicePendingRoom();
 
-        String normalKey = "IN_FLIGHT:NORMAL:ROOM:" + roomId + ":PLAYER:1";
+        String normalKey = InFlightManager.normalKey(roomId, 1);
         String token = "test-token";
         inFlightManager.trySetFlag(normalKey, token, Duration.ofSeconds(30)).block();
 

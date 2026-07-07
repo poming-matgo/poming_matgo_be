@@ -145,7 +145,7 @@ public class AutoPlayScheduler implements TurnScheduler {
                     }
 
                     // 정상 요청 진행 여부는 NORMAL 키로 체크 (양보)
-                    String normalFlagKey = "IN_FLIGHT:NORMAL:ROOM:" + roomId + ":PLAYER:" + currentPlayer.getNumber();
+                    String normalFlagKey = InFlightManager.normalKey(roomId, currentPlayer.getNumber());
 
                     return inFlightManager.isSet(normalFlagKey)
                             .flatMap(isDelayed -> {
@@ -161,8 +161,8 @@ public class AutoPlayScheduler implements TurnScheduler {
 
     private Mono<Void> executeAutoPlayLogic(long roomId, TurnStep step, Player currentPlayer) {
         // AUTOPLAY 키는 자동플레이끼리의 동시 시작 방지용 (정상 요청과는 키 분리)
-        String autoplayFlagKey = "IN_FLIGHT:AUTOPLAY:ROOM:" + roomId + ":PLAYER:" + currentPlayer.getNumber();
-        String normalFlagKey = "IN_FLIGHT:NORMAL:ROOM:" + roomId + ":PLAYER:" + currentPlayer.getNumber();
+        String autoplayFlagKey = InFlightManager.autoplayKey(roomId, currentPlayer.getNumber());
+        String normalFlagKey = InFlightManager.normalKey(roomId, currentPlayer.getNumber());
         // 발사별 소유 토큰: TTL 만료 후 다른 발사가 플래그를 재획득해도 내 정리가 남의 플래그를 지우지 않게 함
         String autoplayToken = Long.toHexString(ThreadLocalRandom.current().nextLong());
         return inFlightManager.trySetFlag(autoplayFlagKey, autoplayToken, Duration.ofSeconds(2))

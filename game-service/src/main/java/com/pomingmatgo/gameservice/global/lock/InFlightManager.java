@@ -5,6 +5,16 @@ import reactor.core.publisher.Mono;
 import java.time.Duration;
 
 public interface InFlightManager {
+    /** 정상 요청 경로의 in-flight 키. AUTOPLAY 키와의 분리가 자동플레이 양보/차단 판정의 전제다. */
+    static String normalKey(long roomId, int playerNum) {
+        return "IN_FLIGHT:NORMAL:ROOM:" + roomId + ":PLAYER:" + playerNum;
+    }
+
+    /** 자동플레이 경로의 in-flight 키. 자동플레이끼리의 동시 시작 방지에만 쓴다. */
+    static String autoplayKey(long roomId, int playerNum) {
+        return "IN_FLIGHT:AUTOPLAY:ROOM:" + roomId + ":PLAYER:" + playerNum;
+    }
+
     /**
      * @param token 요청별 고유 소유 토큰. deleteFlag에서 소유자 검증에 사용된다.
      *              TTL 만료 후 다른 요청이 플래그를 재획득한 경우, 뒤늦게 끝난 원 소유자의
