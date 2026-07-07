@@ -18,14 +18,13 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.TimeUnit;
 
-import static com.pomingmatgo.gameservice.domain.GamePhase.AWAITING_FLOOR_CARD_CHOICE;
-
 /**
  * 자동플레이 스케줄러.
  *
  * 타이머의 정체성은 TurnStep(round, turn, phase) 하나로 표현한다:
  * - IN_PROGRESS: 턴 타임아웃 시 카드 자동 제출
  * - AWAITING_FLOOR_CARD_CHOICE: 선택 타임아웃 시 바닥 카드 자동 선택
+ * - AWAITING_GO_STOP_CHOICE: 선택 타임아웃 시 자동 STOP (확정된 승리를 가져가는 안전한 기본값 + 게임 종료 보장)
  * 등록 시점엔 TurnStep의 순서 비교로 낡은 등록이 유효한 타이머를 교체(파괴)하지 못하게 막고,
  * 발사 시점엔 실제 게임 상태가 TurnStep과 일치하는지 재검증해 낡은 타이머가 스스로 물러나게 한다.
  * 실행 자체는 TurnFlowService에 위임하므로 후처리(타이머 재등록 포함)는 사용자 요청 경로와 동일하다.
@@ -44,6 +43,8 @@ public class AutoPlayScheduler implements TurnScheduler {
 
     // 자동 액션은 항상 첫 번째 카드(손패/선택지)를 사용
     private static final int AUTO_PLAY_CARD_INDEX = 0;
+    // 고/스톱 타임아웃 시 자동 선택 — STOP(false): 확정 승리로 즉시 종료 (GO는 AFK 플레이어의 리스크를 키움)
+    private static final boolean AUTO_GO_STOP_IS_GO = false;
     // 타이머 발사 시점이 이미 deadline을 지났을 때 즉시 실행 대신 주는 최소 지연
     private static final long MIN_DELAY_MILLIS = 100;
 
@@ -54,14 +55,11 @@ public class AutoPlayScheduler implements TurnScheduler {
     /**
      * 타이머가 속한 턴 단계의 정체성. 등록 시점의 교체 판정(순서 비교)과
      * 발사 시점의 상태 재검증(matches)이 같은 값을 공유한다.
-     * 같은 턴 안에서는 제출(IN_PROGRESS) < 선택(AWAITING_FLOOR_CARD_CHOICE) 순 —
-     * 낡은 제출 타이머 등록이 먼저 등록된 선택 타이머를 교체(파괴)하지 못하게 한다.
+     * 같은 턴 안의 단계 순서는 GamePhase.turnStepOrder가 정의한다
+     * (제출 < 바닥 선택 < 고/스톱 선택) — 낡은 앞 단계 타이머 등록이
+     * 먼저 등록된 뒤 단계 타이머를 교체(파괴)하지 못하게 한다.
      */
     private record TurnStep(int round, int turn, GamePhase phase) implements Comparable<TurnStep> {
-
-        private static int phaseOrder(GamePhase phase) {
-            return phase == AWAITING_FLOOR_CARD_CHOICE ? 1 : 0;
-        }
 
         @Override
         public int compareTo(TurnStep other) {
@@ -69,7 +67,7 @@ public class AutoPlayScheduler implements TurnScheduler {
             if (c != 0) return c;
             c = Integer.compare(this.turn, other.turn);
             if (c != 0) return c;
-            return Integer.compare(phaseOrder(this.phase), phaseOrder(other.phase));
+            return Integer.compare(this.phase.getTurnStepOrder(), other.phase.getTurnStepOrder());
         }
 
         boolean matches(GameState gameState) {
@@ -167,10 +165,14 @@ public class AutoPlayScheduler implements TurnScheduler {
                                                 return Mono.empty();
                                             }
 
-                                            if (step.phase() == AWAITING_FLOOR_CARD_CHOICE) {
-                                                return turnFlowService.processFloorSelection(roomId, gameState, currentPlayer, AUTO_PLAY_CARD_INDEX, null, this);
-                                            }
-                                            return turnFlowService.processNormalSubmit(roomId, gameState, currentPlayer, AUTO_PLAY_CARD_INDEX, null, this);
+                                            return switch (step.phase()) {
+                                                case AWAITING_FLOOR_CARD_CHOICE ->
+                                                        turnFlowService.processFloorSelection(roomId, gameState, currentPlayer, AUTO_PLAY_CARD_INDEX, null, this);
+                                                case AWAITING_GO_STOP_CHOICE ->
+                                                        turnFlowService.processGoStopChoice(roomId, gameState, currentPlayer, AUTO_GO_STOP_IS_GO, null, this);
+                                                default ->
+                                                        turnFlowService.processNormalSubmit(roomId, gameState, currentPlayer, AUTO_PLAY_CARD_INDEX, null, this);
+                                            };
                                         });
                             }));
 

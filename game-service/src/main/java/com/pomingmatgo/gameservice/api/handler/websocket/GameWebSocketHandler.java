@@ -31,7 +31,6 @@ import reactor.core.scheduler.Schedulers;
 import java.time.Duration;
 import java.util.concurrent.ThreadLocalRandom;
 
-import static com.pomingmatgo.gameservice.domain.GamePhase.IN_PROGRESS;
 import static com.pomingmatgo.gameservice.global.exception.WebSocketErrorCode.*;
 
 
@@ -118,8 +117,8 @@ public class GameWebSocketHandler implements WebSocketHandler {
                eventType == SubCategory.FLOOR_SELECT ||
                eventType == SubCategory.GO_STOP_CHOICE;
 
-        // 바닥 카드 선택 대기 중에도 자동 선택 타이머와 경합하므로 InFlight 방어가 필요하다
-        boolean cond2 = (gameState.getPhase() == IN_PROGRESS || gameState.getPhase() == GamePhase.AWAITING_FLOOR_CARD_CHOICE) &&
+        // 행동 대기 phase(제출/바닥 선택/고스톱 선택)는 모두 자동플레이 타이머와 경합하므로 InFlight 방어가 필요하다
+        boolean cond2 = gameState.getPhase().isPlayerActionPhase() &&
                 player.equals(gameState.getCurrentPlayer());
 
         return cond1 && cond2;

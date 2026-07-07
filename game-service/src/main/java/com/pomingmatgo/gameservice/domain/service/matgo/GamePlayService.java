@@ -1,7 +1,5 @@
 package com.pomingmatgo.gameservice.domain.service.matgo;
 
-import com.pomingmatgo.gameservice.api.handler.event.RequestEvent;
-import com.pomingmatgo.gameservice.api.request.websocket.GoStopReq;
 import com.pomingmatgo.gameservice.domain.GamePhase;
 import com.pomingmatgo.gameservice.domain.GameState;
 import com.pomingmatgo.gameservice.domain.Player;
@@ -103,15 +101,24 @@ public class GamePlayService {
         return gameState.canGoStop(player);
     }
 
+    public Mono<GameState> enterGoStopChoice(GameState gameState) {
+        return gameService.enterGoStopChoice(gameState);
+    }
+
     @GameLock(key = "'game:' + #roomId + ':' + #gameState.round + ':' + #gameState.currentTurn")
-    public Mono<GameState> executeGoStop(long roomId, GameState gameState, Player player, RequestEvent<GoStopReq> event, Runnable onLockAcquired) {
+    public Mono<GameState> executeGoStop(long roomId, GameState gameState, Player player, boolean go, Runnable onLockAcquired) {
         return Mono.defer(() -> {
             if (onLockAcquired != null) {
                 onLockAcquired.run();
             }
             return gameService.findGameState(roomId)
                     .flatMap(freshState -> {
-                        boolean go = event.getData().go();
+                        if (freshState.getPhase() != GamePhase.AWAITING_GO_STOP_CHOICE) {
+                            return Mono.error(new WebSocketBusinessException(INVALID_GAME_PHASE));
+                        }
+                        if (!player.equals(freshState.getCurrentPlayer())) {
+                            return Mono.error(new WebSocketBusinessException(NOT_YOUR_TURN));
+                        }
                         return go ? gameService.executeGoStop(freshState, player)
                                 .flatMap(this::proceedToNextTurn)
                                 : Mono.just(freshState.toBuilder().phase(GamePhase.END).build());

@@ -14,7 +14,8 @@ public interface TurnScheduler {
 
     /**
      * @param expectedPhase 타이머 발사 시점에 기대하는 게임 phase.
-     *                      IN_PROGRESS → 카드 자동 제출, AWAITING_FLOOR_CARD_CHOICE → 바닥 카드 자동 선택.
+     *                      IN_PROGRESS → 카드 자동 제출, AWAITING_FLOOR_CARD_CHOICE → 바닥 카드 자동 선택,
+     *                      AWAITING_GO_STOP_CHOICE → 자동 STOP.
      *                      발사 시점의 실제 phase가 다르면 낡은 타이머로 판단하고 아무것도 하지 않는다.
      */
     void scheduleAutoPlay(long roomId, int round, int currentTurn, Player currentPlayer, long deadlineNanos, GamePhase expectedPhase);

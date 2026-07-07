@@ -15,7 +15,7 @@ public class GameNotificationService {
     private final GameMessageSender gameMessageSender;
     private final GamePlayService gamePlayService;
 
-    public Mono<GameState> broadcastTurnResult(long roomId, Player player, GameState gameState, ProcessCardResult result, Runnable onLockAcquired, long remainingMs) {
+    public Mono<GameState> broadcastTurnResult(long roomId, Player player, GameState gameState, ProcessCardResult result, long remainingMs) {
         Mono<Void> sendMoveCards = Flux.fromIterable(result.getMoveCards())
                 .concatMap(card -> gameMessageSender.sendMovingCardMessage(roomId, player, gameState.getOtherPlayer(), card))
                 .then();
@@ -38,15 +38,13 @@ public class GameNotificationService {
                         return processGameOver(gameState, player);
                     }
                     if (gamePlayService.canGoStop(gameState, player)) {
-                        if (onLockAcquired != null) {
-                            onLockAcquired.run();
-                        }
                         if(gameState.getRound() == 10) {
                             return processGameOver(gameState, player);
                         }
-                        return gameMessageSender.sendGoStopChoiceMessage(gameState, player)
-                                .thenReturn(gameState);
-
+                        // phase를 저장해 두면 선택 요청 검증과 자동플레이 타이머가 이 상태를 근거로 동작한다.
+                        // 타이머 등록은 반환된 phase를 보고 TurnFlowService가 수행 (이 턴의 낡은 타이머는 원자적으로 교체됨)
+                        return gamePlayService.enterGoStopChoice(gameState)
+                                .delayUntil(awaitingState -> gameMessageSender.sendGoStopChoiceMessage(awaitingState, player));
                     } else {
                         return gamePlayService.proceedToNextTurn(gameState)
                                 .flatMap(nextState -> gameMessageSender.sendTurnInfo(nextState, remainingMs)

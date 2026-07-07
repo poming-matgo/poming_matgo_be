@@ -310,6 +310,15 @@ public class GameService {
         return Mono.just(newGameState);
     }
 
+    /** 고/스톱 선택 대기 진입 — phase를 저장해 선택 요청 검증과 자동플레이 타이머(TurnStep)가 같은 상태를 공유하게 한다 */
+    public Mono<GameState> enterGoStopChoice(GameState gameState) {
+        GameState newState = gameState.toBuilder()
+                .phase(GamePhase.AWAITING_GO_STOP_CHOICE)
+                .build();
+        return gameStateRepository.save(newState)
+                .thenReturn(newState);
+    }
+
     public Mono<GameState> executeGoStop(GameState gameState, Player player) {
         GameState newState = gameState.updatePlayerState(player, ps -> ps.toBuilder()
                 .go(ps.getGo() + 1)

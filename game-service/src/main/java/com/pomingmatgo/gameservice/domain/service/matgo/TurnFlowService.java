@@ -12,12 +12,11 @@ import reactor.core.publisher.Mono;
 import java.util.List;
 
 import static com.pomingmatgo.gameservice.domain.GamePhase.AWAITING_FLOOR_CARD_CHOICE;
-import static com.pomingmatgo.gameservice.domain.GamePhase.IN_PROGRESS;
 import static com.pomingmatgo.gameservice.domain.TurnTiming.TURN_TIMEOUT_MILLIS;
 import static com.pomingmatgo.gameservice.domain.TurnTiming.nextDeadlineNanos;
 
 /**
- * 카드 제출/바닥 카드 선택의 실행 + 후처리(메시지 전송, 턴 진행, 자동플레이 타이머 재등록).
+ * 카드 제출/바닥 카드 선택/고스톱 선택의 실행 + 후처리(메시지 전송, 턴 진행, 자동플레이 타이머 재등록).
  *
  * 사용자 요청(WsGameHandler)과 자동플레이(AutoPlayScheduler)가 이 흐름을 공유하므로
  * 두 경로의 후처리 동작(선택 타이머 등록 여부 등)이 갈라질 수 없다.
@@ -39,14 +38,9 @@ public class TurnFlowService {
                             gameMessageSender.sendTopCardInfo(roomId, player, ctx.topCard())
                     );
 
-                    Mono<Void> handleResult;
-                    if (ctx.isChoiceRequired()) {
-                        handleResult = requestFloorChoice(roomId, gameState, player, ctx.cardResult().getSelectableCards(), scheduler);
-                    } else {
-                        handleResult = gameNotificationService.broadcastTurnResult(roomId, player, ctx.updatedGameState(), ctx.cardResult(), () -> scheduler.cancelAutoPlay(roomId), TURN_TIMEOUT_MILLIS)
-                                .doOnNext(nextState -> scheduleNextTurnIfNeeded(roomId, nextState, player, scheduler))
-                                .then();
-                    }
+                    Mono<Void> handleResult = ctx.isChoiceRequired()
+                            ? requestFloorChoice(roomId, gameState, player, ctx.cardResult().getSelectableCards(), scheduler)
+                            : finishTurn(roomId, player, ctx.updatedGameState(), ctx.cardResult(), scheduler);
 
                     return sendInfos.then(handleResult);
                 }).then();
@@ -54,18 +48,36 @@ public class TurnFlowService {
 
     public Mono<Void> processFloorSelection(long roomId, GameState gameState, Player player, int cardIdx, Runnable onLockAcquired, TurnScheduler scheduler) {
         return gamePlayService.executeFloorSelection(roomId, gameState, player, cardIdx, onLockAcquired)
-                .flatMap(ctx -> {
-                    if (ctx.isChoiceRequired()) {
+                .flatMap(ctx -> ctx.isChoiceRequired()
                         // 뒤집은 카드 처리 결과가 또 다른 선택을 요구한 경우: 선택지 재전송 + 선택 타이머 재등록
-                        return requestFloorChoice(roomId, gameState, player, ctx.cardResult().getSelectableCards(), scheduler);
-                    }
+                        ? requestFloorChoice(roomId, gameState, player, ctx.cardResult().getSelectableCards(), scheduler)
+                        : finishTurn(roomId, player, ctx.updatedGameState(), ctx.cardResult(), scheduler));
+    }
 
-                    return gameMessageSender.sendAcquiredCardMessage(roomId, player, ctx.cardResult().getAcquiredCards())
-                            .then(gamePlayService.proceedToNextTurn(ctx.updatedGameState()))
-                            .delayUntil(nextState -> gameNotificationService.broadcastNextTurnInfo(nextState, TURN_TIMEOUT_MILLIS))
-                            .doOnNext(nextState -> scheduleNextTurnIfNeeded(roomId, nextState, player, scheduler))
+    public Mono<Void> processGoStopChoice(long roomId, GameState gameState, Player player, boolean go, Runnable onLockAcquired, TurnScheduler scheduler) {
+        return gamePlayService.executeGoStop(roomId, gameState, player, go, onLockAcquired)
+                .flatMap(nextState -> {
+                    if (nextState.isPlaying()) {
+                        return gameMessageSender.sendGoResultMessage(nextState, player)
+                                .then(gameMessageSender.sendTurnInfo(nextState, TURN_TIMEOUT_MILLIS))
+                                .then(Mono.fromRunnable(() -> scheduleNextStep(roomId, nextState, scheduler)));
+                    }
+                    return gamePlayService.gameOver(nextState, player)
+                            .delayUntil(finalState -> gameMessageSender.sendGameOverMessage(finalState, player))
                             .then();
                 });
+    }
+
+    /**
+     * 턴 실행 결과의 공통 완료 처리: 결과 브로드캐스트 후 다음 단계(게임 종료/고스톱 대기/다음 턴) 결정은
+     * GameNotificationService에 위임하고, 도달한 phase에 맞는 자동플레이 타이머를 등록한다.
+     * 정상 제출/바닥 선택 완료가 모두 이 흐름을 거치므로 바닥 선택으로 끝난 턴에도
+     * 마지막 턴 판정과 고/스톱 선택 기회가 동일하게 적용된다.
+     */
+    private Mono<Void> finishTurn(long roomId, Player player, GameState updatedState, ProcessCardResult result, TurnScheduler scheduler) {
+        return gameNotificationService.broadcastTurnResult(roomId, player, updatedState, result, TURN_TIMEOUT_MILLIS)
+                .doOnNext(nextState -> scheduleNextStep(roomId, nextState, scheduler))
+                .then();
     }
 
     /**
@@ -79,10 +91,15 @@ public class TurnFlowService {
                         roomId, gameState.getRound(), gameState.getCurrentTurn(), player, nextDeadlineNanos(), AWAITING_FLOOR_CARD_CHOICE)));
     }
 
-    private void scheduleNextTurnIfNeeded(long roomId, GameState nextState, Player lastPlayer, TurnScheduler scheduler) {
-        // currentPlayer가 그대로면 고/스톱 선택 대기 상태 → 카드 제출 타이머를 걸면 같은 턴 중복 제출로 이어진다
-        if (nextState.getPhase() == IN_PROGRESS && !nextState.getCurrentPlayer().equals(lastPlayer)) {
-            scheduler.scheduleAutoPlay(roomId, nextState.getRound(), nextState.getCurrentTurn(), nextState.getCurrentPlayer(), nextDeadlineNanos(), IN_PROGRESS);
+    /**
+     * 도달한 phase가 행동 대기면 그 phase의 자동플레이 타이머를 등록한다.
+     * 대기 주체는 항상 currentPlayer — 고/스톱 대기는 (round, turn)이 유지되므로 방금 행동한 플레이어 자신이고,
+     * 다음 턴 진행이면 턴이 넘어간 상대다. 같은 턴의 낡은 타이머는 TurnStep 순서 비교로 원자적으로 교체된다.
+     */
+    private void scheduleNextStep(long roomId, GameState nextState, TurnScheduler scheduler) {
+        if (nextState.getPhase().isPlayerActionPhase()) {
+            scheduler.scheduleAutoPlay(roomId, nextState.getRound(), nextState.getCurrentTurn(),
+                    nextState.getCurrentPlayer(), nextDeadlineNanos(), nextState.getPhase());
         }
     }
 }
