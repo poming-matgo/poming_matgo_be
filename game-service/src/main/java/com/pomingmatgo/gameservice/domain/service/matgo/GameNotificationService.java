@@ -38,7 +38,8 @@ public class GameNotificationService {
                         return processGameOver(gameState, player);
                     }
                     if (gamePlayService.canGoStop(gameState, player)) {
-                        if(gameState.getRound() == 10) {
+                        // 마지막 라운드엔 GO 선택지가 없으므로 곧바로 게임 종료
+                        if (gameState.isFinalRound()) {
                             return processGameOver(gameState, player);
                         }
                         // phase를 저장해 두면 선택 요청 검증과 자동플레이 타이머가 이 상태를 근거로 동작한다.

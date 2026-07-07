@@ -80,9 +80,7 @@ public class GamePlayService {
     }
 
     public Mono<GameState> proceedToNextTurn(GameState gameState) {
-        return Mono.just(gameState)
-                .map(gameState::setNextTurn)
-                .flatMap(gameService::setGameInProgress);
+        return gameService.setGameInProgress(gameState.setNextTurn());
     }
 
     private Mono<Void> applyTurnEffects(long roomId, GameState gameState, ProcessCardResult result) {

@@ -18,7 +18,7 @@ import static com.pomingmatgo.gameservice.domain.Player.PLAYER_2;
 @NoArgsConstructor
 @Builder(toBuilder = true)
 public class GameState implements Serializable {
-    private static final int MIN_GO_STOP_SCORE = 7;
+    private static final int MAX_ROUND = 10;
     private static final long serialVersionUID = 1L;
     @Id
     private Long roomId;
@@ -34,6 +34,10 @@ public class GameState implements Serializable {
     private int leadingPlayer;
     private int currentTurn;
     private int round;
+
+    @Builder.Default
+    private GamePhase phase = GamePhase.IN_PROGRESS;
+    private ChoiceInfo choiceInfo; // phase가 await류일때만 의미 있다.
 
     public PlayerState getPlayerState(Player player) {
         return player == Player.PLAYER_1 ? this.player1 : this.player2;
@@ -57,10 +61,6 @@ public class GameState implements Serializable {
                 .build();
     }
 
-    @Builder.Default
-    private GamePhase phase = GamePhase.IN_PROGRESS;
-    private ChoiceInfo choiceInfo; // phase가 await류일때만 의미 있다.
-
     public Player getPlayerType(long userId) {
         if (Objects.equals(this.player1.getUserId(), userId)) return Player.PLAYER_1;
         if (Objects.equals(this.player2.getUserId(), userId)) return Player.PLAYER_2;
@@ -68,15 +68,7 @@ public class GameState implements Serializable {
     }
 
     public GameState withPlayerReady(Player player, boolean isReady) {
-        if (player == Player.PLAYER_1) {
-            return this.toBuilder()
-                    .player1(this.player1.toBuilder().ready(isReady).build())
-                    .build();
-        } else {
-            return this.toBuilder()
-                    .player2(this.player2.toBuilder().ready(isReady).build())
-                    .build();
-        }
+        return updatePlayerState(player, ps -> ps.toBuilder().ready(isReady).build());
     }
 
     public static GameState createEmptyRoom(Long roomId) {
@@ -134,21 +126,25 @@ public class GameState implements Serializable {
         return this.player1.isReady() && this.player2.isReady();
     }
 
-    public GameState setNextTurn(GameState gameState) {
-        int nextTurn = (gameState.getCurrentTurn() == 1) ? 2 : 1;
-        int nextRound = gameState.getRound() + (gameState.getCurrentTurn() == 2 ? 1 : 0);
-        GamePhase nextPhase = GamePhase.IN_PROGRESS;
+    public GameState setNextTurn() {
+        int nextTurn = (this.currentTurn == 1) ? 2 : 1;
+        int nextRound = this.round + (this.currentTurn == 2 ? 1 : 0);
 
-        return gameState.toBuilder()
+        return this.toBuilder()
                 .currentTurn(nextTurn)
                 .round(nextRound)
-                .phase(nextPhase)
+                .phase(GamePhase.IN_PROGRESS)
                 .choiceInfo(null)
                 .build();
     }
 
     @JsonIgnore
+    public boolean isFinalRound() {
+        return this.round == MAX_ROUND;
+    }
+
+    @JsonIgnore
     public boolean isLastTurn() {
-        return this.getRound() == 10 && this.getCurrentTurn() == 2;
+        return isFinalRound() && this.currentTurn == 2;
     }
 }
