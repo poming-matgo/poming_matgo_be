@@ -64,12 +64,16 @@ public class AutoPlayScheduler implements TurnScheduler {
         long delayMillis = TimeUnit.NANOSECONDS.toMillis(deadlineNanos - System.nanoTime());
         if (delayMillis <= 0) delayMillis = MIN_DELAY_MILLIS;
 
+        // 취소(dispose) 대상은 "대기 중인 타이머"로 한정한다. 발사 이후의 실행은 독립 구독으로 분리 —
+        // 실행 도중 cancelAutoPlay가 호출되는 경우(자동플레이 자신의 게임 종료 cleanup, 고/스톱 분기 등)
+        // 실행 체인을 중단시키면 아직 전송되지 않은 GAME_OVER/GO_STOP_CHOICE 메시지가 유실된다.
+        // 발사 이후의 경합은 (round, turn, phase) 재검증 + InFlight + @GameLock이 방어한다.
         Disposable newTask = Mono.delay(Duration.ofMillis(delayMillis))
-                .flatMap(v -> attemptAutoPlay(roomId, round, currentTurn, currentPlayer, expectedPhase))
-                .subscribe(
-                        success -> {},
-                        error -> log.error("[AutoPlay] 룸({}) 자동플레이 스케줄링 중 에러 발생!", roomId, error)
-                );
+                .subscribe(v -> attemptAutoPlay(roomId, round, currentTurn, currentPlayer, expectedPhase)
+                        .subscribe(
+                                success -> {},
+                                error -> log.error("[AutoPlay] 룸({}) 자동플레이 실행 중 에러 발생!", roomId, error)
+                        ));
 
         // 같은 (round, turn)의 재등록(제출 타이머 → 선택 타이머)은 교체를 허용해야 하므로 초과 비교
         Disposable[] toDispose = new Disposable[1];
