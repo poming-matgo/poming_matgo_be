@@ -1,6 +1,7 @@
 package com.pomingmatgo.gameservice.global;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.pomingmatgo.gameservice.global.metrics.ThroughputRecorder;
 import com.pomingmatgo.gameservice.global.session.SessionManager;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
@@ -13,6 +14,7 @@ import reactor.core.publisher.Mono;
 public class MessageSender {
     private final ObjectMapper objectMapper;
     private final SessionManager sessionManager;
+    private final ThroughputRecorder throughputRecorder;
     public <T> Mono<Void> sendMessageToSession(WebSocketSession session, WebSocketResDto<T> response) {
         //todo: 상세 예외처리 필요
         // session null: 상대 미접속 또는 방 정리와 동시 실행된 경우 → 전송 스킵
@@ -23,6 +25,8 @@ public class MessageSender {
         return Mono.fromCallable(() -> objectMapper.writeValueAsString(response))
                 .map(session::textMessage)
                 .flatMap(msg -> session.send(Mono.just(msg)))
+                // 전송 성공만 계측 — skip(null/closed 세션)·실패는 throughput에 포함하지 않는다
+                .doOnSuccess(v -> throughputRecorder.recordSent())
                 .onErrorResume(e -> Mono.empty());
     }
 
