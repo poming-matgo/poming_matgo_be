@@ -197,6 +197,11 @@ k6 run --out influxdb=http://localhost:8086/k6 gostop-test.js
   - 세션 경합 3단 방어: ⓐ 같은 슬롯의 낡은 세션은 매핑 제거 후 close — **중복 접속·좀비 TCP 모두 새 세션이 승리** ⓑ disconnect 정리는 그 세션이 아직 슬롯을 점유 중일 때만 수행 (identity guard) ⓒ 슬롯이 재점유됐으면 보존/teardown 판정 전에 disconnect 처리 자체를 중단해 **stale disconnect가 재접속 직후의 방을 파괴하는 TOCTOU 차단**
   - 검증: mock 세션으로 실제 핸들러 흐름을 구동하는 통합 테스트([`DisconnectReconnectTest`](game-service/src/test/java/com/pomingmatgo/gameservice/websocket/DisconnectReconnectTest.java)) 7건
 
+- **브로드캐스트 수신자 목록의 assembly 시점 eager 평가 — 접속 직후 첫 응답 유실 회귀**
+  - 문제: `sendMessageToAllUser`가 수신자 목록(`getAllUser`)을 리액티브 체인 **조립(assembly) 시점에 즉시 평가**. `addPlayer(...).then(broadcast)` 체인에서 자바의 인자 선평가 규칙상 세션 등록(runnable은 구독 시점 실행) **전에** 수신자를 캡처해, 접속 직후 첫 브로드캐스트(CONNECT 응답)가 유실됨 — 클라이언트는 응답 대기 상태로 정지해 게임이 시작되지 않는 회귀. 재접속 기능 도입 시 `handleJoinRoom` 재구성으로 유입
+  - 발견: 부하 테스트 재실행에서 throughput이 기대치의 1/400로 떨어진 것을 계기로, 서버 송신 시계열 → 2 VU 수신 메시지 전수 로깅("각 세션의 첫 수신 메시지만 유실" 패턴 식별) → 수신자 수 진단 로그(`recipients=0`)로 범위를 좁혀 특정. 단위 테스트는 전부 통과하는 유형이라 **E2E 부하 테스트가 유일한 검출 수단**이었음
+  - 해결: `Flux.defer`로 수신자 조회를 **구독 시점으로 지연**. "cold publisher 조립 시점에 상태를 캡처하지 않는다"는 리액티브 원칙을 코드 주석으로 명문화
+
 ### 3. 네트워크 지연 및 OS 시간 역전을 고려한 타임아웃 정밀도 향상
 
 - **문제:** 클라이언트-서버 간 네트워크 지연(Latency) 및 타이머 오차로 인해, 유저 입장에서는 턴 시간이 남았음에도 서버에서 타임아웃 처리되는 불일치가 발생했습니다.
@@ -209,33 +214,36 @@ k6 run --out influxdb=http://localhost:8086/k6 gostop-test.js
 
 ### 환경
 
-- **하드웨어:** Intel i7-14700 (20 코어 / 28 스레드), RAM 32GB, Windows *(단일 데스크톱 머신 기준 처리량 상한 측정값이며, 프로덕션 서버 환경의 절대 수치가 아닌 최적화 효과 비교용 지표)*
+- **하드웨어:** Intel i7-14700 (20 코어 / 28 스레드), RAM 32GB, Windows — **부하 도구(k6)와 서버가 동일 머신에서 실행** *(k6 자체의 CPU 사용이 포함된 단일 데스크톱 기준 처리량 상한 측정값으로, 프로덕션 서버 환경의 절대 수치가 아닌 최적화 효과 비교용 지표)*
 - **JVM:** Java 21 (G1GC, default)
 - **부하 도구:** [k6](https://k6.io/) v1.7.1 — 시나리오 코드: [`gostop-test.js`](gostop-test.js)
-- **시계열 모니터링:** InfluxDB 1.8 + Grafana 10.4 (Docker, 셋업 [`loadtest/`](loadtest/))
+- **서버 측 계측:** 초당 송신 WS 메시지를 서버가 직접 측정 — [`ThroughputRecorder`](game-service/src/main/java/com/pomingmatgo/gameservice/global/metrics/ThroughputRecorder.java) (`GET /internal/metrics/throughput`)
 
 ### 시나리오
 
 - 동시 게임 방 5,000개 × 2명 = **WebSocket 동접 10,000**
 - stages: 2분 ramp up → 7분 sustain (5,000 VU) → 1분 ramp down
 - 각 가상 유저는 방 생성 → 입장 → READY → 게임 진행(카드 제출/바닥 선택/GO·STOP) → 종료 후 재준비를 반복
+- 스크립트에 **thresholds 내장** (에러 0건, 무응답 타임아웃 0건, 게임 액션 RTT P95 < 1s, checks > 99%) — 매 run이 자체 합격/불합격 판정
 
-### 결과 (대표 측정값)
+### 결과 (2026-07 재측정, 전 thresholds 통과)
 
 | 지표 | 값 |
 | :--- | :--- |
-| 초당 WS 메시지 (수신, sustain 피크) | **약 68,600 msg/s** |
-| 초당 WS 메시지 (수신, 전체 평균) | 약 57,000 msg/s |
-| 초당 WS 메시지 (전송, 전체 평균) | 약 6,700 msg/s |
-| 총 수신 메시지 | 약 36,000,000 |
-| WS Handshake 시간 평균 | 약 11ms |
-| WS Handshake 시간 P95 | 약 61ms |
-| WS Handshake 시간 max | 약 340ms |
+| 초당 WS 송신 메시지 — sustain 평균 (서버 실측) | **약 88,700 msg/s** (중앙값 91,196) |
+| 초당 WS 송신 메시지 — 1초 피크 (서버 실측) | **95,310 msg/s** |
+| 초당 WS 메시지 (k6 수신, 10.5분 전체 평균) | 약 76,500 msg/s |
+| 총 송수신 메시지 | 약 48,210,000 |
+| **게임 액션 RTT** avg / med / P95 / P99 / max | **11.7ms / 1ms / 67ms / 125ms / 305ms** |
+| 완주된 게임 수 | 228,460 판 (약 363 games/s) |
+| 서버 에러 / 무응답 타임아웃 | **0건 / 0건** (checks 100%) |
+| WS Handshake P95 / P99 / max | 3.99ms / 8.6ms / 84.9ms |
 
-> 게임 메시지 단위 RTT는 k6 native 메트릭이 없어 본 측정엔 포함되지 않았습니다. 표의 Handshake 시간은 동시 5,000 VU의 connection establishment 부하에서 측정한 값입니다.
+> **게임 액션 RTT** = 카드 제출/바닥 선택/고·스톱 선택 전송 → 그 처리 결과를 서버가 처음 push할 때까지의 시간 (k6 custom `Trend`로 측정). 실시간 게임의 체감 품질을 대표하는 지표로, 부하 상태에서도 P99 125ms를 유지.
 
 ### 측정 방법론
 
-- **콘솔 평균 → sustain 피크 보정:** k6 콘솔의 평균값은 ramp up/down 구간이 희석한 값. 실제 실행 시간은 stages 10분 + k6 기본 graceful stop 30초 = **10.5분**으로, effective sustain 시간을 `2 × 0.5 + 7 × 1.0 + 1.5 × 0.5 = 8.75분 (525s)` 으로 보정 (ramp down 가중치 0.5 + graceful 30초 포함)하면 `36M / 525s ≈ 68,600 msg/s`로, sustain 구간 피크에 수렴.
-- **Run-to-run 변동성:** 동일 환경에서 여러 차례 측정 시 평균 throughput이 약 ±5% 변동 (54k ~ 58k msg/s 평균, 보정 후 약 64k ~ 69k 피크). 표의 값은 안정적으로 재현 가능한 대표 측정값.
-- **InfluxDB 시계열 측정의 한계:** 1초 단위 max를 시계열로 직접 측정하려 InfluxDB + Grafana를 도입했으나, **5,000 VU 부하에서 k6 → InfluxDB write가 backpressure로 sample의 약 1.5%만 적재**되어 정확한 시계열 max 측정엔 실패. 이는 k6 + InfluxDB 조합의 알려진 한계로, 대규모 부하 시 Prometheus remote write 등 고처리 sink가 필요. 본 프로젝트에선 Grafana 시계열은 **sustain 안정성 패턴 검증** 용도로만 활용하고, 정확한 throughput은 k6 in-memory 집계(콘솔 메트릭)를 신뢰.
+- **서버 측 1초 단위 실측:** 초기엔 k6 콘솔 평균(ramp up/down이 희석한 값)에 구간 가중치를 두어 sustain 피크를 *추정*했으나, 추정치는 방어가 어렵다고 판단해 **서버가 송신 메시지를 직접 세도록 계측을 추가**(`LongAdder` 카운트 + 1초 샘플링, hot path 비용은 increment 1회). 표의 sustain 평균/피크는 램프업 완료 후 7분 구간의 실측 시계열 통계
+- **클라이언트 측 RTT/에러 계측:** k6 custom `Trend`(액션 RTT) / `Counter`(서버 에러, 무응답 타임아웃, 완주 게임 수)를 스크립트에 내장. 에러율 없는 throughput 수치는 의미가 없으므로 결과표에 에러/타임아웃 건수를 함께 보고
+- **InfluxDB 시계열 측정의 한계 (서버 측 계측 전환의 계기):** 1초 단위 max를 측정하려 InfluxDB + Grafana를 도입했으나, 5,000 VU 부하에서 k6 → InfluxDB write가 backpressure로 **sample의 약 1.5%만 적재**되어 실패. 클라이언트 측 export가 병목이면 측정 대상(서버)이 직접 세는 것이 정확하다는 결론으로 위 서버 측 계측을 도입 (셋업은 [`loadtest/`](loadtest/)에 보존, Grafana는 sustain 안정성 패턴 확인 용도)
+- **Run-to-run 변동성:** 동일 환경 반복 측정 시 평균 throughput 약 ±5% 변동. 표의 값은 단일 대표 run의 실측값
