@@ -4,11 +4,13 @@ import com.pomingmatgo.gameservice.domain.GamePhase;
 import com.pomingmatgo.gameservice.domain.GameState;
 import com.pomingmatgo.gameservice.domain.Player;
 import com.pomingmatgo.gameservice.domain.TurnTiming;
+import com.pomingmatgo.gameservice.domain.event.RoomCleanedUpEvent;
 import com.pomingmatgo.gameservice.domain.service.matgo.RoomService;
 import com.pomingmatgo.gameservice.domain.service.matgo.TurnFlowService;
 import com.pomingmatgo.gameservice.global.lock.InFlightManager;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.log4j.Log4j2;
+import org.springframework.context.event.EventListener;
 import org.springframework.stereotype.Service;
 import reactor.core.Disposable;
 import reactor.core.publisher.Mono;
@@ -127,6 +129,15 @@ public class AutoPlayScheduler implements TurnScheduler {
         if (toDispose[0] != null && !toDispose[0].isDisposed()) {
             toDispose[0].dispose();
         }
+    }
+
+    /**
+     * 방 정리 이벤트 수신 시 예약된 타이머 취소. RoomCleanupService가 이 클래스를 직접 의존하면
+     * DI cycle(AutoPlayScheduler → TurnFlowService → ... → RoomCleanupService)이 생기므로 이벤트로 수신한다.
+     */
+    @EventListener
+    public void onRoomCleanedUp(RoomCleanedUpEvent event) {
+        cancelAutoPlay(event.roomId());
     }
 
     @Override
