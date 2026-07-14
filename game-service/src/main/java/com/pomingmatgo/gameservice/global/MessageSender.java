@@ -27,7 +27,10 @@ public class MessageSender {
     }
 
     public <T> Mono<Void> sendMessageToAllUser(long roomId, WebSocketResDto<T> response) {
-        return Flux.fromIterable(sessionManager.getAllUser(roomId))
+        // 수신자 조회는 구독 시점으로 지연(defer)해야 한다.
+        // assembly 시점에 getAllUser를 즉시 평가하면 addPlayer(...).then(broadcast) 체인에서
+        // 세션 등록 전에 수신자를 캡처해 접속 직후 첫 브로드캐스트가 유실된다 (CONNECT ack 미도달 버그).
+        return Flux.defer(() -> Flux.fromIterable(sessionManager.getAllUser(roomId)))
                 .flatMap(session -> sendMessageToSession(session, response))
                 .then();
     }
