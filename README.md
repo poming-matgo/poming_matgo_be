@@ -3,13 +3,13 @@
 # 🎴 웹 고스톱 게임 (Web Go-Stop)
 
 > **대규모 동시 접속 환경을 고려한 실시간 턴제 웹 고스톱 게임입니다.**
-> 불필요한 네트워크/스레드 오버헤드를 줄여 **단일 서버에서 초당 평균 약 57,000건(sustain 피크 약 68,600건)의 웹소켓 메시지를 안정적으로 처리**하도록 최적화했습니다.
+> 불필요한 네트워크/스레드 오버헤드를 줄여 **단일 서버에서 초당 평균 약 88,700건(1초 피크 95,310건)의 웹소켓 메시지를 안정적으로 처리**하도록 최적화했습니다.
 
 **이 프로젝트에서 증명하려는 것 3가지:**
 
 1. **WebFlux EventLoop를 멈추지 않는 락 설계** — 방 단위 `Semaphore` + `boundedElastic` 격리 + `Mono.usingWhen` 해제 보장
 2. **자동플레이 ↔ 유저 요청 race의 layered defense** — In-Flight fail-fast → `@GameLock` 직렬화 → 락 내부 상태 재검증
-3. **검증 가능한 성능 수치** — WS 동접 10,000에서 평균 57k / 피크 68.6k msg/s. 보정 계산과 측정 한계까지 [방법론](#측정-방법론)으로 공개
+3. **검증 가능한 성능 수치** — WS 동접 10,000에서 sustain 평균 88.7k / 1초 피크 95.3k msg/s (서버 실측). 계측 설계와 측정 한계까지 [방법론](#측정-방법론)으로 공개
 
 **목차:** [기술 스택](#-기술-스택) · [아키텍처](#-아키텍처) · [Getting Started](#-getting-started) · [아키텍처 의사결정](#-기술-스택-선택-이유-및-아키텍처-의사결정) · [트러블슈팅](#-주요-트러블슈팅-및-성능-최적화) · [부하 테스트 결과](#-부하-테스트-결과)
 
@@ -27,36 +27,10 @@
 
 게임 도메인 특성상 **단일 서비스 (`game-service`)** 가 모든 게임 로직과 동시성 제어를 담당합니다. 이벤트는 카테고리별 핸들러로 분기되고, 각 단계에 맞는 동시성 레이어가 적용됩니다.
 
-```text
-Client ──WS──▶ GameWebSocketHandler
-                     │
-       ┌─────────────┼──────────────────────────────────┐
-       │             │                                   │
-       │             │      1) InFlightManager (Game 액션 경로 한정:
-       │             │         자동플레이 ↔ 정상 요청 race 1차 fail-fast,
-       │             │         NORMAL / AUTOPLAY 키 분리)
-       │             │                                   │
-       ▼             ▼                                   ▼
-  WsRoomHandler  WsPreGameHandler                  WsGameHandler
-       │             │                                   │
-       ▼             ▼                                   ▼
-  RoomService    PreGameService                   TurnFlowService ◀── 실행 위임 ──┐
-       │             │                        (유저/자동 공통 후처리:               │
-       ▼             ▼                         메시지 전송 → 턴 전환                │
-  2) RoomLock    2) AtomicTrigger              → 타이머 재등록)                     │
-     Manager        (LeadingPlayer,                     │                          │
-     (방 단위        putIfAbsent로                       ▼                         │
-      Semaphore,     선플레이어 결정 후속           GamePlayService                 │
-      Ready/Join     트리거 1회 보장)                    │                         │
-      직렬화)                                            ▼                         │ 
-                                                  2) @GameLock AOP                │
-                                                  (round:turn 단위 Semaphore,     │
-                                                   race final guard)             │
-                                                        │                        │
-            ConcurrentHashMap (In-Memory Game State) ── 등록 ────────────────────┤
-                                                                                 │
-              3) AutoPlayScheduler ── 타이머 발사 (Game 액션) ────────────────────┘
-```
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/architecture-dark.svg">
+  <img alt="game-service 아키텍처: GameWebSocketHandler가 이벤트를 세 핸들러로 분기하고, 각 경로에 InFlightManager(①), RoomLockManager/AtomicTrigger/@GameLock(②), AutoPlayScheduler(③) 동시성 레이어가 적용되는 구조" src="docs/architecture-light.svg" width="900">
+</picture>
 
 **동시성 3레이어 요약:**
 
@@ -136,7 +110,7 @@ k6 run --out influxdb=http://localhost:8086/k6 gostop-test.js
 
 `ConcurrentHashMap` 기반의 인메모리 구조로 전환하여 **TCP 통신 및 직렬화/역직렬화 비용을 완전히 제거**했습니다. *(Redis 프로파일은 그대로 유지해 분산 배포 시 전환 가능)*
 
- **결과:** I/O 병목을 해소하여 단일 서버에서 **초당 평균 약 57,000건(sustain 피크 약 68,600건)** 의 웹소켓 메시지를 처리하며, 동일 부하 시나리오에서 Redis 프로파일로 측정한 처리량 대비 **약 6.6배** 향상되었습니다.
+ **결과:** I/O 병목을 해소하여 단일 서버에서 **초당 평균 약 88,700건(1초 피크 95,310건)** 의 웹소켓 메시지를 처리합니다([부하 테스트 결과](#-부하-테스트-결과) 참조). 전환 시점의 동일 부하 시나리오 비교 측정에서는 Redis 프로파일 대비 **약 6.6배** 의 처리량 향상을 확인했습니다.
 
 <br/>
 

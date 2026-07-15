@@ -1,0 +1,101 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 950 710" font-family="Pretendard, 'Noto Sans KR', 'Malgun Gothic', 'Apple SD Gothic Neo', 'Segoe UI', sans-serif">
+  <defs>
+    <marker id="arw" markerWidth="9" markerHeight="8" refX="7" refY="4" orient="auto" markerUnits="userSpaceOnUse">
+      <path d="M0,0 L8,4 L0,8 Z" fill="#59636e"/>
+    </marker>
+  </defs>
+  <style>
+    .box{fill:#ffffff;stroke:#d0d7de;stroke-width:1.5}
+    .a1{fill:#ddf4ff;stroke:#0969da;stroke-width:1.5}
+    .a2{fill:#fff1e5;stroke:#bc4c00;stroke-width:1.5}
+    .a3{fill:#dafbe1;stroke:#1a7f37;stroke-width:1.5}
+    .store{fill:#f6f8fa;stroke:#d0d7de;stroke-width:1.5;stroke-dasharray:5 3}
+    .t{fill:#1f2328;font-size:13.5px;font-weight:600;text-anchor:middle}
+    .c1{fill:#0969da}
+    .c2{fill:#bc4c00}
+    .c3{fill:#1a7f37}
+    .s{fill:#59636e;font-size:11px;text-anchor:middle}
+    .lbl{fill:#59636e;font-size:11px}
+    .edge{stroke:#59636e;stroke-width:1.5;fill:none;marker-end:url(#arw)}
+  </style>
+
+  <!-- edges -->
+  <path class="edge" d="M150,44 H280"/>
+  <text class="lbl" x="205" y="37">WS</text>
+  <path class="edge" d="M400,64 V80 H150 V185"/>
+  <path class="edge" d="M400,64 V185"/>
+  <path class="edge" d="M400,64 V80 H680 V95"/>
+  <path class="edge" d="M680,164 V185"/>
+  <path class="edge" d="M150,230 V265"/>
+  <path class="edge" d="M400,230 V265"/>
+  <path class="edge" d="M680,230 V265"/>
+  <path class="edge" d="M150,310 V373"/>
+  <path class="edge" d="M400,310 V373"/>
+  <path class="edge" d="M680,338 V373"/>
+  <path class="edge" d="M680,418 V441"/>
+  <path class="edge" d="M680,512 V535"/>
+  <path class="edge" d="M680,625 V597"/>
+  <text class="lbl" x="690" y="611">발사 시 상태 재검증</text>
+  <path class="edge" d="M810,322 H860 V640 H826"/>
+  <text class="lbl" x="848" y="480" text-anchor="middle" transform="rotate(-90 848 480)">타이머 등록</text>
+  <path class="edge" d="M820,653 H890 V304 H816"/>
+  <text class="lbl" x="906" y="480" text-anchor="middle" transform="rotate(-90 906 480)">타이머 발사 → 실행 위임</text>
+
+  <!-- top row -->
+  <rect class="box" x="40" y="24" width="110" height="40" rx="6"/>
+  <text class="t" x="95" y="49">Client</text>
+  <rect class="box" x="285" y="24" width="230" height="40" rx="6"/>
+  <text class="t" x="400" y="49">GameWebSocketHandler</text>
+
+  <!-- ① InFlightManager -->
+  <rect class="a1" x="540" y="100" width="280" height="64" rx="6"/>
+  <text class="t c1" x="680" y="122">① InFlightManager</text>
+  <text class="s" x="680" y="140">자동플레이 ↔ 정상 요청 race 1차 fail-fast</text>
+  <text class="s" x="680" y="155">NORMAL / AUTOPLAY 키 분리</text>
+
+  <!-- handlers -->
+  <rect class="box" x="75" y="190" width="150" height="40" rx="6"/>
+  <text class="t" x="150" y="215">WsRoomHandler</text>
+  <rect class="box" x="315" y="190" width="170" height="40" rx="6"/>
+  <text class="t" x="400" y="215">WsPreGameHandler</text>
+  <rect class="box" x="605" y="190" width="150" height="40" rx="6"/>
+  <text class="t" x="680" y="215">WsGameHandler</text>
+
+  <!-- services -->
+  <rect class="box" x="80" y="270" width="140" height="40" rx="6"/>
+  <text class="t" x="150" y="295">RoomService</text>
+  <rect class="box" x="325" y="270" width="150" height="40" rx="6"/>
+  <text class="t" x="400" y="295">PreGameService</text>
+  <rect class="box" x="550" y="270" width="260" height="68" rx="6"/>
+  <text class="t" x="680" y="292">TurnFlowService</text>
+  <text class="s" x="680" y="310">유저/자동 공통 후처리: 메시지 전송</text>
+  <text class="s" x="680" y="325">→ 턴 전환 → 타이머 재등록</text>
+
+  <!-- ② concurrency layer -->
+  <rect class="a2" x="40" y="378" width="220" height="66" rx="6"/>
+  <text class="t c2" x="150" y="400">② RoomLockManager</text>
+  <text class="s" x="150" y="418">방 단위 Semaphore</text>
+  <text class="s" x="150" y="433">Ready/Join 직렬화</text>
+  <rect class="a2" x="285" y="378" width="230" height="66" rx="6"/>
+  <text class="t c2" x="400" y="400">② AtomicTrigger</text>
+  <text class="s" x="400" y="418">LeadingPlayer putIfAbsent</text>
+  <text class="s" x="400" y="433">후속 트리거 1회 발사 보장</text>
+
+  <!-- game path -->
+  <rect class="box" x="595" y="378" width="170" height="40" rx="6"/>
+  <text class="t" x="680" y="403">GamePlayService</text>
+  <rect class="a2" x="560" y="446" width="240" height="66" rx="6"/>
+  <text class="t c2" x="680" y="468">② @GameLock AOP</text>
+  <text class="s" x="680" y="486">round:turn 단위 Semaphore</text>
+  <text class="s" x="680" y="501">race final guard</text>
+
+  <!-- state store -->
+  <rect class="store" x="540" y="540" width="280" height="52" rx="6"/>
+  <text class="t" x="680" y="562">ConcurrentHashMap</text>
+  <text class="s" x="680" y="580">In-Memory Game State</text>
+
+  <!-- ③ AutoPlayScheduler -->
+  <rect class="a3" x="540" y="625" width="280" height="56" rx="6"/>
+  <text class="t c3" x="680" y="648">③ AutoPlayScheduler</text>
+  <text class="s" x="680" y="666">턴 타임아웃 시 자동 액션 발사</text>
+</svg>
