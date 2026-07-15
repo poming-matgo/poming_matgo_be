@@ -2,6 +2,7 @@ package com.pomingmatgo.gameservice.global.metrics;
 
 import jakarta.annotation.PostConstruct;
 import jakarta.annotation.PreDestroy;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;
 
 import java.util.ArrayDeque;
@@ -17,8 +18,10 @@ import java.util.concurrent.atomic.LongAdder;
  * k6(클라이언트) 집계는 대규모 부하에서 시계열 sink의 backpressure 한계(InfluxDB 적재 유실)가 있어,
  * 1초 단위 throughput 시계열은 서버가 직접 센다 — README 부하 테스트 방법론 참조.
  * hot path 비용은 LongAdder.increment() 1회. 방 단위 상태가 아니므로 RoomCleanupService 대상 아님.
+ * metrics.throughput.enabled=false로 끄면 샘플러 스레드/조회 엔드포인트/계측이 모두 비활성화된다.
  */
 @Component
+@ConditionalOnProperty(name = "metrics.throughput.enabled", havingValue = "true", matchIfMissing = true)
 public class ThroughputRecorder {
     private static final int MAX_SAMPLES = 2 * 60 * 60; // 초 단위 샘플 최대 2시간 보관
 

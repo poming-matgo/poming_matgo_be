@@ -3,18 +3,27 @@ package com.pomingmatgo.gameservice.global;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.pomingmatgo.gameservice.global.metrics.ThroughputRecorder;
 import com.pomingmatgo.gameservice.global.session.SessionManager;
-import lombok.RequiredArgsConstructor;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.stereotype.Component;
 import org.springframework.web.reactive.socket.WebSocketSession;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 
 @Component
-@RequiredArgsConstructor
 public class MessageSender {
     private final ObjectMapper objectMapper;
     private final SessionManager sessionManager;
+    // metrics.throughput.enabled=false면 bean이 없어 null — hot path라 기동 시 1회만 조회해 둔다
     private final ThroughputRecorder throughputRecorder;
+
+    public MessageSender(ObjectMapper objectMapper,
+                         SessionManager sessionManager,
+                         ObjectProvider<ThroughputRecorder> throughputRecorderProvider) {
+        this.objectMapper = objectMapper;
+        this.sessionManager = sessionManager;
+        this.throughputRecorder = throughputRecorderProvider.getIfAvailable();
+    }
+
     public <T> Mono<Void> sendMessageToSession(WebSocketSession session, WebSocketResDto<T> response) {
         //todo: 상세 예외처리 필요
         // session null: 상대 미접속 또는 방 정리와 동시 실행된 경우 → 전송 스킵
@@ -26,7 +35,11 @@ public class MessageSender {
                 .map(session::textMessage)
                 .flatMap(msg -> session.send(Mono.just(msg)))
                 // 전송 성공만 계측 — skip(null/closed 세션)·실패는 throughput에 포함하지 않는다
-                .doOnSuccess(v -> throughputRecorder.recordSent())
+                .doOnSuccess(v -> {
+                    if (throughputRecorder != null) {
+                        throughputRecorder.recordSent();
+                    }
+                })
                 .onErrorResume(e -> Mono.empty());
     }
 
