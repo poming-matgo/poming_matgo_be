@@ -140,17 +140,20 @@ public class GameService {
     }
 
     private Mono<ProcessCardResult> handleDifferentMonthCards(GameState gameState, Card submittedCard, Card turnedCard) {
-        return processCardByMonth(gameState, submittedCard, turnedCard)
+        return processCardByMonth(gameState, submittedCard, turnedCard, null)
                 .flatMap(submittedResult -> {
                     if (submittedResult.isChoiceRequired()) {
                         return Mono.just(submittedResult);
                     }
-                    return processCardByMonth(gameState, turnedCard, null)
+                    // 뒤집은 카드가 선택 대기를 만들면 낸 카드의 획득분이 result 흐름에서 끊기므로
+                    // choiceInfo.prev*로 이월한다 (finalizeTurn에서 복원)
+                    return processCardByMonth(gameState, turnedCard, null, submittedResult)
                             .map(submittedResult::merge);
                 });
     }
 
-    private Mono<ProcessCardResult> processCardByMonth(GameState gameState, Card card, Card nextCard) {
+    /** @param prevResult 이 턴에서 앞서 확정된 획득/피 뺏기. 이 카드가 선택 대기를 만들 때 choiceInfo로 이월된다 (없으면 null) */
+    private Mono<ProcessCardResult> processCardByMonth(GameState gameState, Card card, Card nextCard, ProcessCardResult prevResult) {
         int month = card.getMonth();
         long roomId = gameState.getRoomId();
 
@@ -158,7 +161,7 @@ public class GameService {
                 .flatMap(cardStack -> switch (cardStack.size()) {
                     case 0 -> handleZeroCardsOnFloor(card, roomId);
                     case 1 -> handleOneCardOnFloor(gameState, card, cardStack);
-                    case 2 -> handleTwoCardsOnFloor(gameState, card, cardStack, nextCard);
+                    case 2 -> handleTwoCardsOnFloor(gameState, card, cardStack, nextCard, prevResult);
                     case 3 -> handleThreeCardsOnFloor(gameState, card, cardStack);
                     default -> Mono.just(ProcessCardResult.immediate(Collections.emptyList()));
                 });
@@ -204,12 +207,15 @@ public class GameService {
         );
     }
 
-    private Mono<ProcessCardResult> handleTwoCardsOnFloor(GameState gameState, Card submittedCard, List<Card> selectableCards, Card turnedCard) {
+    private Mono<ProcessCardResult> handleTwoCardsOnFloor(GameState gameState, Card submittedCard, List<Card> selectableCards, Card turnedCard, ProcessCardResult prevResult) {
         ChoiceInfo choiceInfo = ChoiceInfo.builder()
                 .playerNumToChoose(gameState.getCurrentPlayer())
                 .submittedCard(submittedCard)
                 .selectableCards(selectableCards)
                 .turnedCard(turnedCard)
+                // 앞서 확정된 획득/피 뺏기를 이월 — 선택 완료 시 finalizeTurn이 최종 결과에 복원한다
+                .prevCards(prevResult != null ? prevResult.getAcquiredCards() : null)
+                .prevMoveCards(prevResult != null ? prevResult.getMoveCards() : null)
                 .build();
 
         GameState newGameState = gameState.toBuilder()
@@ -236,7 +242,9 @@ public class GameService {
         if (turnedCard == null) {
             turnResultMono = Mono.just(baseResult);
         } else {
-            turnResultMono = processCardByMonth(gameState, turnedCard, null)
+            // 뒤집은 카드가 또 선택을 요구하면 새 choiceInfo가 기존 이월분 + 이번 선택 획득분을 물려받아야 한다
+            ProcessCardResult carryover = restorePrevResult(choiceInfo).merge(baseResult);
+            turnResultMono = processCardByMonth(gameState, turnedCard, null, carryover)
                     .map(baseResult::merge);
         }
 
@@ -249,7 +257,7 @@ public class GameService {
                     if (turnResult.isChoiceRequired()) {
                         return Mono.just(turnResult);
                     }
-                    return finalizeTurn(gameState, choiceInfo.getPrevCards(), turnResult.getAcquiredCards());
+                    return finalizeTurn(gameState, choiceInfo, turnResult);
                 });
     }
 
@@ -267,10 +275,9 @@ public class GameService {
         }
     }
 
-    private Mono<ProcessCardResult> finalizeTurn(GameState gameState, List<Card> prevCards, List<Card> newCards) {
-        List<Card> nonNullPrevCards = Optional.ofNullable(prevCards).orElse(Collections.emptyList());
-        List<Card> finalAcquiredCards = new ArrayList<>(nonNullPrevCards);
-        finalAcquiredCards.addAll(newCards);
+    /** 선택 대기 전에 확정돼 choiceInfo.prev*로 이월된 획득/피 뺏기를 최종 결과에 복원하고 선택 대기를 해제한다 */
+    private Mono<ProcessCardResult> finalizeTurn(GameState gameState, ChoiceInfo choiceInfo, ProcessCardResult turnResult) {
+        ProcessCardResult finalResult = restorePrevResult(choiceInfo).merge(turnResult);
 
         GameState newGameState = gameState.toBuilder()
                 .phase(GamePhase.IN_PROGRESS)
@@ -278,7 +285,19 @@ public class GameService {
                 .build();
 
         return gameStateRepository.save(newGameState)
-                .thenReturn(ProcessCardResult.immediate(finalAcquiredCards));
+                .thenReturn(finalResult);
+    }
+
+    /** choiceInfo에 이월된 prev* 목록을 ProcessCardResult로 되살린다 (merge로 이후 결과와 합치기 위함) */
+    private ProcessCardResult restorePrevResult(ChoiceInfo choiceInfo) {
+        return ProcessCardResult.builder()
+                .acquiredCards(new ArrayList<>(nullSafe(choiceInfo.getPrevCards())))
+                .moveCards(new ArrayList<>(nullSafe(choiceInfo.getPrevMoveCards())))
+                .build();
+    }
+
+    private static List<Card> nullSafe(List<Card> cards) {
+        return cards != null ? cards : Collections.emptyList();
     }
 
     public Mono<Card> determineCardToMove(Player fromPlayer, long roomId) {

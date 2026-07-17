@@ -31,7 +31,9 @@ public class ProcessCardResult {
 
     public ProcessCardResult merge(ProcessCardResult other) {
         if (other == null) return this;
-        if (other.isChoiceRequired()) return other; // 선택이 필요한 결과가 있다면 병합이 의미없음
+        // 선택 대기 결과면 그대로 반환 — this(앞선 획득분)는 버려지지만, handleTwoCardsOnFloor가
+        // choiceInfo.prev*로 이월해 두었으므로 선택 완료 시 finalizeTurn이 복원한다
+        if (other.isChoiceRequired()) return other;
 
         List<Card> mergedAcquired = new ArrayList<>(this.acquiredCards);
         mergedAcquired.addAll(other.getAcquiredCards() != null ? other.getAcquiredCards() : Collections.emptyList());
