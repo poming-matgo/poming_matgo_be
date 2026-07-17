@@ -98,16 +98,6 @@ public class RoomService {
                 });
     }
 
-    public Mono<GameState> ready(GameState gameState, Player player, boolean isReady) {
-        if (gameState == null) {
-            return Mono.error(new WebSocketBusinessException(WebSocketErrorCode.NOT_EXISTED_ROOM));
-        }
-
-        GameState newState = gameState.withPlayerReady(player, isReady);
-        return gameStateRepository.save(newState)
-                .thenReturn(newState);
-    }
-
     public Mono<GameState> readyFresh(long roomId, Player player, boolean isReady) {
         return gameStateRepository.findById(roomId)
                 .switchIfEmpty(Mono.error(new WebSocketBusinessException(WebSocketErrorCode.NOT_EXISTED_ROOM)))
