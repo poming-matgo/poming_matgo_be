@@ -59,8 +59,7 @@ public class TurnFlowService {
                 .flatMap(nextState -> {
                     if (nextState.isPlaying()) {
                         return gameMessageSender.sendGoResultMessage(nextState, player)
-                                .then(gameMessageSender.sendTurnInfo(nextState, TURN_TIMEOUT_MILLIS))
-                                .then(Mono.fromRunnable(() -> scheduleNextStep(roomId, nextState, scheduler)));
+                                .then(startTurn(nextState, scheduler));
                     }
                     return processGameOver(nextState, player).then();
                 });
