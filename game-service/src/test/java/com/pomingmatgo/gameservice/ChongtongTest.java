@@ -21,9 +21,9 @@ import java.util.stream.Stream;
 
 import static org.mockito.BDDMockito.given;
 
-@DisplayName("GameService 총통(Chongtong) 판정 로직 테스트")
+@DisplayName("PreGameService 총통(Chongtong) 판정 로직 테스트")
 @ExtendWith(MockitoExtension.class)
-class ConfusedPlayerTest {
+class ChongtongTest {
 
     @Mock
     private InstalledCardRepository installedCardRepository;
@@ -56,12 +56,12 @@ class ConfusedPlayerTest {
     @DisplayName("플레이어의 패를 보고 총통 여부를 정확히 판정해야 한다")
     @ParameterizedTest(name = "[{index}] {0}")
     @MethodSource("chongtongTestCases")
-    void isConfusedPlayer_shouldReturnCorrectState(String description, Player player, List<Card> cards, boolean expectedResult) {
+    void hasChongtong_shouldReturnCorrectState(String description, Player player, List<Card> cards, boolean expectedResult) {
         Mono<List<Card>> playerCards = Mono.just(cards);
         given(installedCardRepository.getPlayerCards(ROOM_ID, player))
                 .willReturn(playerCards);
 
-        StepVerifier.create(preGameService.isConfusedPlayer(ROOM_ID, player))
+        StepVerifier.create(preGameService.hasChongtong(ROOM_ID, player))
                 .expectNext(expectedResult)
                 .verifyComplete();
     }

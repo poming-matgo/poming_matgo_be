@@ -35,8 +35,9 @@ public class GameState implements Serializable {
     private int currentTurn;
     private int round;
 
+    // 빌더 기본값은 "아무 것도 진행되지 않음" — 진행 중 상태는 명시적으로만 도달해야 한다
     @Builder.Default
-    private GamePhase phase = GamePhase.IN_PROGRESS;
+    private GamePhase phase = GamePhase.NONE;
     private ChoiceInfo choiceInfo; // phase가 await류일때만 의미 있다.
 
     public PlayerState getPlayerState(Player player) {

@@ -3,7 +3,6 @@ package com.pomingmatgo.gameservice.domain.repository;
 import com.pomingmatgo.gameservice.domain.ChooseLeadPlayer;
 import com.pomingmatgo.gameservice.domain.Player;
 import com.pomingmatgo.gameservice.domain.card.Card;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.data.redis.core.ReactiveRedisOperations;
 import org.springframework.stereotype.Repository;
@@ -17,9 +16,11 @@ import java.util.List;
 @Repository
 public class RedisLeadingPlayerRepository implements LeadingPlayerRepository {
 
-    @Qualifier("cardRedisTemplate")
-    @Autowired
-    private ReactiveRedisOperations<String, String> cardRedisOps;
+    private final ReactiveRedisOperations<String, String> cardRedisOps;
+
+    public RedisLeadingPlayerRepository(@Qualifier("cardRedisTemplate") ReactiveRedisOperations<String, String> cardRedisOps) {
+        this.cardRedisOps = cardRedisOps;
+    }
 
     private static final String SELECTED_FIVE_CARD_KEY_FORMAT = "game:%d:lead:select5";
     private static final String PLAYER1_MONTH_KEY_FORMAT = "game:%d:lead:p1Month";

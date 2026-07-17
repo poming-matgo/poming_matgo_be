@@ -3,7 +3,6 @@ package com.pomingmatgo.gameservice.domain.repository;
 import com.pomingmatgo.gameservice.domain.Player;
 import com.pomingmatgo.gameservice.domain.card.Card;
 import com.pomingmatgo.gameservice.global.exception.WebSocketBusinessException;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.data.redis.core.ReactiveRedisOperations;
 import org.springframework.data.redis.core.script.RedisScript;
@@ -22,9 +21,11 @@ import static com.pomingmatgo.gameservice.global.exception.WebSocketErrorCode.SY
 @Profile("redis")
 @Repository
 public class RedisInstalledCardRepository implements InstalledCardRepository {
-    @Qualifier("cardRedisTemplate")
-    @Autowired
-    private ReactiveRedisOperations<String, String> redisOps;
+    private final ReactiveRedisOperations<String, String> redisOps;
+
+    public RedisInstalledCardRepository(@Qualifier("cardRedisTemplate") ReactiveRedisOperations<String, String> redisOps) {
+        this.redisOps = redisOps;
+    }
     private static final String PLAYER1_CARD_KEY_FORMAT = "game:%d:cards:player1Card:";
     private static final String PLAYER2_CARD_KEY_FORMAT = "game:%d:cards:player2Card:";
     private static final String REVEALED_CARD_KEY_FORMAT = "game:%d:cards:revealed:%d";
@@ -113,7 +114,7 @@ public class RedisInstalledCardRepository implements InstalledCardRepository {
         return saveCards(cards, generateHiddenCardKey(roomId));
     }
 
-    public Mono<List<Card>> getRevealedCardByMonth(long roomId, long month) {
+    public Mono<List<Card>> getRevealedCardByMonth(long roomId, int month) {
         String redisKey = generateRevealedCardKey(roomId, month);
         return redisOps.opsForSet()
                 .members(redisKey)
@@ -143,7 +144,7 @@ public class RedisInstalledCardRepository implements InstalledCardRepository {
                 .collectList();
     }
 
-    public Mono<List<Card>> getPlayerCards(Long roomId, Player player) {
+    public Mono<List<Card>> getPlayerCards(long roomId, Player player) {
         return getCards(getKeyPrefixForPlayer(player, roomId));
     }
 

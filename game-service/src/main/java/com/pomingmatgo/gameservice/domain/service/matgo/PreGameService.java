@@ -56,7 +56,8 @@ public class PreGameService {
                 .flatMap(selectedCards -> leadingPlayerRepository.saveSelectedCard(selectedCards, roomId));
     }
 
-    public Mono<Boolean> isConfusedPlayer(long roomId, Player player) {
+    /** 총통(같은 월 4장) 보유 여부 */
+    public Mono<Boolean> hasChongtong(long roomId, Player player) {
         return installedCardRepository.getPlayerCards(roomId, player)
                 .map(cardList -> {
                     if (cardList.isEmpty()) {

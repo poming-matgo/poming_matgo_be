@@ -77,11 +77,11 @@ public class InMemoryInstalledCardRepository implements InstalledCardRepository 
     }
 
     @Override
-    public Mono<List<Card>> getRevealedCardByMonth(long roomId, long month) {
+    public Mono<List<Card>> getRevealedCardByMonth(long roomId, int month) {
         return Mono.fromCallable(() -> {
             ConcurrentHashMap<Integer, Set<Card>> room = revealedCards.get(roomId);
             return room != null
-                    ? new ArrayList<>(room.getOrDefault((int) month, Collections.emptySet()))
+                    ? new ArrayList<>(room.getOrDefault(month, Collections.emptySet()))
                     : Collections.emptyList();
         });
     }
@@ -106,7 +106,7 @@ public class InMemoryInstalledCardRepository implements InstalledCardRepository 
     }
 
     @Override
-    public Mono<List<Card>> getPlayerCards(Long roomId, Player player) {
+    public Mono<List<Card>> getPlayerCards(long roomId, Player player) {
         return Mono.fromCallable(() -> {
             ConcurrentHashMap<String, List<Card>> room = playerCards.get(roomId);
             return room != null

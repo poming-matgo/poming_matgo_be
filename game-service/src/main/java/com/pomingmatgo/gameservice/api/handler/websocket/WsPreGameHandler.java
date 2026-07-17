@@ -100,9 +100,9 @@ public class WsPreGameHandler {
     private Mono<GameState> checkChongtongAndProceed(GameState gameState) {
         Long roomId = gameState.getRoomId();
 
-        Mono<Boolean> p1HasChongtong = preGameService.isConfusedPlayer(roomId, PLAYER_1)
+        Mono<Boolean> p1HasChongtong = preGameService.hasChongtong(roomId, PLAYER_1)
                 .defaultIfEmpty(false);
-        Mono<Boolean> p2HasChongtong = preGameService.isConfusedPlayer(roomId, PLAYER_2)
+        Mono<Boolean> p2HasChongtong = preGameService.hasChongtong(roomId, PLAYER_2)
                 .defaultIfEmpty(false);
 
         return Mono.zip(p1HasChongtong, p2HasChongtong)

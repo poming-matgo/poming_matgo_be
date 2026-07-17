@@ -59,9 +59,9 @@ class FloorChoiceCarryoverTest {
     @DisplayName("낸 카드로 획득한 뒤 뒤집은 카드가 선택 대기를 만들면 획득분이 choiceInfo.prevCards로 이월된다")
     void carryAcquiredCardsIntoChoiceInfo() {
         // 낸 카드(JAN_1): 1월 바닥 1장 → 즉시 획득 / 뒤집은 카드(FEB_1): 2월 바닥 2장 → 선택 대기
-        given(installedCardRepository.getRevealedCardByMonth(ROOM_ID, 1L))
+        given(installedCardRepository.getRevealedCardByMonth(ROOM_ID, 1))
                 .willReturn(Mono.just(List.of(JAN_2)));
-        given(installedCardRepository.getRevealedCardByMonth(ROOM_ID, 2L))
+        given(installedCardRepository.getRevealedCardByMonth(ROOM_ID, 2))
                 .willReturn(Mono.just(List.of(FEB_2, FEB_3)));
         given(installedCardRepository.deleteAllRevealedCardByMonth(ROOM_ID, 1))
                 .willReturn(Mono.just(true));
@@ -131,7 +131,7 @@ class FloorChoiceCarryoverTest {
                 .build();
 
         // 뒤집어둔 카드(MAR_1): 3월 바닥 2장 → 두 번째 선택 대기
-        given(installedCardRepository.getRevealedCardByMonth(ROOM_ID, 3L))
+        given(installedCardRepository.getRevealedCardByMonth(ROOM_ID, 3))
                 .willReturn(Mono.just(List.of(MAR_2, MAR_3)));
         given(installedCardRepository.deleteRevealedCard(anyLong(), any()))
                 .willReturn(Mono.just(true));

@@ -14,9 +14,9 @@ public interface InstalledCardRepository {
     Mono<Boolean> saveHiddenCard(List<Card> cards, long roomId);
     Mono<Boolean> deleteAllRevealedCardByMonth(long roomId, int month);
     Mono<Boolean> deleteRevealedCard(long roomId, Card card);
-    Mono<List<Card>> getRevealedCardByMonth(long roomId, long month);
+    Mono<List<Card>> getRevealedCardByMonth(long roomId, int month);
     Mono<List<Card>> getAllRevealedCards(long roomId);
     Mono<Card> getTopCard(long roomId);
-    Mono<List<Card>> getPlayerCards(Long roomId, Player player);
+    Mono<List<Card>> getPlayerCards(long roomId, Player player);
     Mono<Void> updatePlayerCards(long roomId, Player player, List<Card> cards);
 }
