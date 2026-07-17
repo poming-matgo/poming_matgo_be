@@ -124,7 +124,9 @@ public class GameService {
                 .then(moveCardMono
                         .map(movedCard -> {
                             acquiredCards.add(movedCard);
-                            return cardStack.size() == 1
+                            // 같은 월 스택이 비어 있었다면 쪽(낸 카드+뒤집은 카드만 매치), 2장이었다면 따닥.
+                            // 1장(뻑)은 handleSameMonthCards에서 걸러져 여기 도달하지 않는다
+                            return cardStack.isEmpty()
                                     ? ProcessCardResult.jjok(acquiredCards, movedCard)
                                     : ProcessCardResult.ttadak(acquiredCards, movedCard);
                         })
