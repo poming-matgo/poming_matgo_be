@@ -14,12 +14,14 @@ import java.util.stream.Stream;
 @Component
 public final class ScoreCalculator {
     public int calculatePiScore(List<Card> cards) {
-        int piCnt = cards.stream().reduce(0, (acc, card) -> {
-            if (!CardType.PI.equals(card.getType())) {
-                throw new IllegalArgumentException("피 카드가 아닙니다.");
-            }
-            return acc + (Objects.equals(card.getSpecialType(), SpecialType.SSANG_PI) ? 2 : 1);
-        }, Integer::sum);
+        int piCnt = cards.stream()
+                .mapToInt(card -> {
+                    if (!CardType.PI.equals(card.getType())) {
+                        throw new IllegalArgumentException("피 카드가 아닙니다.");
+                    }
+                    return card.getSpecialType() == SpecialType.SSANG_PI ? 2 : 1;
+                })
+                .sum();
         return piCnt < 10 ? 0 : piCnt - 9;
     }
 

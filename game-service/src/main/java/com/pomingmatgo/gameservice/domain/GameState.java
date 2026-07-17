@@ -89,7 +89,7 @@ public class GameState implements Serializable {
     }
 
     public boolean canGoStop(Player player) {
-        return player == Player.PLAYER_1 ? player1.canGoStop() : player2.canGoStop();
+        return getPlayerState(player).canGoStop();
     }
 
     @JsonIgnore

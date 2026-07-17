@@ -98,7 +98,7 @@ public class InMemoryInstalledCardRepository implements InstalledCardRepository 
     }
 
     @Override
-    public Mono<Card> getTopCard(long roomId) {
+    public Mono<Card> drawTopCard(long roomId) {
         return Mono.fromCallable(() -> {
             ArrayDeque<Card> deck = hiddenDeck.get(roomId);
             return deck != null ? deck.poll() : null;

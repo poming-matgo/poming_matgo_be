@@ -22,7 +22,7 @@ public class GamePlayService {
     public Mono<TurnExecutionResult> executeNormalSubmit(long roomId, GameState gameState, Player player, int cardIdx, Runnable onLockAcquired) {
         return validatedFreshState(roomId, GamePhase.IN_PROGRESS, player, onLockAcquired)
                 .flatMap(freshState ->
-                        Mono.zip(gameService.submitCardEvent(roomId, player, cardIdx), gameService.getTopCard(roomId))
+                        Mono.zip(gameService.takeCardFromHand(roomId, player, cardIdx), gameService.drawTopCard(roomId))
                                 .flatMap(tuple -> {
                                     Card submittedCard = tuple.getT1();
                                     Card topCard = tuple.getT2();
@@ -82,11 +82,7 @@ public class GamePlayService {
     }
 
     public Mono<GameState> proceedToNextTurn(GameState gameState) {
-        return gameService.setGameInProgress(gameState.setNextTurn());
-    }
-
-    public boolean canGoStop(GameState gameState, Player player) {
-        return gameState.canGoStop(player);
+        return gameService.saveState(gameState.setNextTurn());
     }
 
     public Mono<GameState> enterGoStopChoice(GameState gameState) {

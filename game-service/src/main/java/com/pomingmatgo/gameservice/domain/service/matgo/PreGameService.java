@@ -145,9 +145,9 @@ public class PreGameService {
     }
 
     public Mono<GameState> setFirstTurn(GameState gameState) {
-        GameState.GameStateBuilder builder = gameState.toBuilder();
-        GameState newState = builder.round(1).currentTurn(1).phase(IN_PROGRESS).build();
-
+        GameState newState = gameState.toBuilder()
+                .round(1).currentTurn(1).phase(IN_PROGRESS)
+                .build();
         return gameStateRepository.save(newState)
                 .thenReturn(newState);
     }

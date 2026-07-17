@@ -33,7 +33,7 @@ public class GameService {
         return gameStateRepository.findById(roomId);
     }
 
-    public Mono<GameState> setGameInProgress(GameState gameState) {
+    public Mono<GameState> saveState(GameState gameState) {
         return gameStateRepository.save(gameState)
                 .thenReturn(gameState);
     }
@@ -63,12 +63,12 @@ public class GameService {
         return acquiredCardRepository.removeCard(roomId, player.getNumber(), lostCard).then();
     }
 
-    public Mono<Card> getTopCard(long roomId) {
-        return installedCardRepository.getTopCard(roomId);
+    public Mono<Card> drawTopCard(long roomId) {
+        return installedCardRepository.drawTopCard(roomId);
     }
 
-
-    public Mono<Card> submitCardEvent(long roomId, Player player, int cardIndex) {
+    /** 제출할 카드를 손패에서 꺼낸다(손패에서 제거 후 반환) */
+    public Mono<Card> takeCardFromHand(long roomId, Player player, int cardIndex) {
         return installedCardRepository.getPlayerCards(roomId, player)
                 .flatMap(playerCards -> {
                     if (cardIndex < 0 || cardIndex >= playerCards.size()) {
@@ -249,10 +249,9 @@ public class GameService {
         }
 
         return turnResultMono
+                // 낸 카드는 선택 대기 진입 시 바닥에 저장되지 않고 choiceInfo로만 이월되므로 바닥 삭제 대상은 선택된 카드뿐
                 .delayUntil(result ->
-                        installedCardRepository.deleteRevealedCard(gameState.getRoomId(), chosenFloorCard)
-                                .then(installedCardRepository.deleteRevealedCard(gameState.getRoomId(), submittedCard))
-                )
+                        installedCardRepository.deleteRevealedCard(gameState.getRoomId(), chosenFloorCard))
                 .flatMap(turnResult -> {
                     if (turnResult.isChoiceRequired()) {
                         return Mono.just(turnResult);

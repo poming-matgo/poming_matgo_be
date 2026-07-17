@@ -16,7 +16,8 @@ public interface InstalledCardRepository {
     Mono<Boolean> deleteRevealedCard(long roomId, Card card);
     Mono<List<Card>> getRevealedCardByMonth(long roomId, int month);
     Mono<List<Card>> getAllRevealedCards(long roomId);
-    Mono<Card> getTopCard(long roomId);
+    /** 더미 맨 위 카드를 꺼낸다(소모). 더미가 비어 있으면 empty */
+    Mono<Card> drawTopCard(long roomId);
     Mono<List<Card>> getPlayerCards(long roomId, Player player);
     Mono<Void> updatePlayerCards(long roomId, Player player, List<Card> cards);
 }

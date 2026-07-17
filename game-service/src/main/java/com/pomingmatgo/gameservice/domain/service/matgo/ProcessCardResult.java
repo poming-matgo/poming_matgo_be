@@ -50,8 +50,9 @@ public class ProcessCardResult {
     }
 
     public static ProcessCardResult immediate(List<Card> cards) {
+        // 호출자 리스트를 그대로 참조하지 않도록 복사 (choicePending과 동일한 방어)
         return ProcessCardResult.builder()
-                .acquiredCards(cards)
+                .acquiredCards(new ArrayList<>(cards))
                 .build();
     }
 

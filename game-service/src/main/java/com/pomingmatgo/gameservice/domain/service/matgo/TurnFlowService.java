@@ -93,7 +93,7 @@ public class TurnFlowService {
         if (gameState.isLastTurn()) {
             return processGameOver(gameState, player);
         }
-        if (gamePlayService.canGoStop(gameState, player)) {
+        if (gameState.canGoStop(player)) {
             // 마지막 라운드엔 GO 선택지가 없으므로 곧바로 게임 종료
             if (gameState.isFinalRound()) {
                 return processGameOver(gameState, player);

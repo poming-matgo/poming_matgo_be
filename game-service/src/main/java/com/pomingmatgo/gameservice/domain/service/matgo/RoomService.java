@@ -30,9 +30,9 @@ public class RoomService {
         return roomLockManager.withLock(roomId,
                 gameStateRepository.findById(roomId)
                         .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.NOT_EXISTED_ROOM)))
-                        .filter(gameState -> !isRoomFull(gameState))
+                        .filter(gameState -> !gameState.isRoomFull())
                         .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.FULL_ROOM)))
-                        .filter(gameState -> !isUserInRoom(gameState, userId))
+                        .filter(gameState -> !gameState.hasUser(userId))
                         .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.ALREADY_IN_ROOM)))
                         .flatMap(gameState -> saveWithUserId(gameState, userId))
                         .then(),
@@ -45,7 +45,7 @@ public class RoomService {
         return roomLockManager.withLock(roomId,
                 gameStateRepository.findById(roomId)
                         .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.NOT_EXISTED_ROOM)))
-                        .filter(gameState -> isUserInRoom(gameState, userId))
+                        .filter(gameState -> gameState.hasUser(userId))
                         .flatMap(gameState -> {
                             // 게임 시작 후의 이탈은 WS disconnect 흐름(보존/teardown)이 담당 —
                             // 진행 중 REST leave를 허용하면 PlayerState만 초기화된 어긋난 상태가 된다
@@ -62,17 +62,9 @@ public class RoomService {
         );
     }
 
-    private boolean isUserInRoom(GameState gameState, long userId) {
-        return gameState.hasUser(userId);
-    }
-
     public Mono<Void> deleteRoom(long roomId) {
         return roomCleanupService.cleanupRoomData(roomId)
                 .then(sessionManager.removeRoom(roomId));
-    }
-
-    private boolean isRoomFull(GameState gameState) {
-        return gameState.isRoomFull();
     }
 
     public Mono<GameState> getGameState(Long roomId) {
@@ -113,15 +105,7 @@ public class RoomService {
     }
 
 
-    public boolean checkAllPlayersReady(GameState gs) {
-        return gs.allPlayersReady();
-    }
-
     public Mono<GameState> startGame(GameState gameState) {
-        if (gameState == null) {
-            return Mono.error(new WebSocketBusinessException(WebSocketErrorCode.NOT_EXISTED_ROOM));
-        }
-
         GameState newState = gameState.toBuilder()
                 .phase(DETERMINING_STARTING_PLAYER)
                 .build();

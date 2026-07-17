@@ -130,7 +130,7 @@ public class RedisInstalledCardRepository implements InstalledCardRepository {
                 .collectList();
     }
 
-    public Mono<Card> getTopCard(long roomId) {
+    public Mono<Card> drawTopCard(long roomId) {
         String redisKey = generateHiddenCardKey(roomId);
         return redisOps.opsForList()
                 .leftPop(redisKey)
