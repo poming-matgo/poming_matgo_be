@@ -132,7 +132,6 @@ class DisconnectReconnectTest {
     private void seedInGameRoom() {
         GameState state = GameState.builder()
                 .roomId(roomId)
-                .gameStarted(true)
                 .leadingPlayer(1)
                 .currentTurn(1)   // currentPlayer = PLAYER_1
                 .round(1)

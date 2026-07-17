@@ -127,7 +127,7 @@ class AutoPlayFloorSelectionTest {
     void submitLeadingToChoiceSchedulesChoiceTimer() throws Exception {
         roomId = 910_004L;
         GameState state = GameState.builder()
-                .roomId(roomId).gameStarted(true).leadingPlayer(1).currentTurn(1).round(1)
+                .roomId(roomId).leadingPlayer(1).currentTurn(1).round(1)
                 .phase(GamePhase.IN_PROGRESS)
                 .build();
         gameStateRepository.create(state).block();
@@ -181,7 +181,6 @@ class AutoPlayFloorSelectionTest {
     private void seedChoicePendingRoom() {
         GameState state = GameState.builder()
                 .roomId(roomId)
-                .gameStarted(true)
                 .leadingPlayer(1)
                 .currentTurn(1)   // leadingPlayer == currentTurn → currentPlayer = PLAYER_1
                 .round(1)

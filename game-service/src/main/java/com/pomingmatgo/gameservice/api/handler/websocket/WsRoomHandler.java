@@ -2,6 +2,7 @@ package com.pomingmatgo.gameservice.api.handler.websocket;
 
 import com.pomingmatgo.gameservice.api.handler.event.RequestEvent;
 import com.pomingmatgo.gameservice.api.handler.event.category.SubCategory;
+import com.pomingmatgo.gameservice.domain.GamePhase;
 import com.pomingmatgo.gameservice.domain.GameState;
 import com.pomingmatgo.gameservice.domain.Player;
 import com.pomingmatgo.gameservice.domain.service.matgo.PreGameService;
@@ -68,10 +69,10 @@ public class WsRoomHandler {
     }
 
     private Mono<Void> checkAndProceedIfAllReady(GameState updatedGameState) {
-        long roomId = updatedGameState.getRoomId();
         return Mono.just(updatedGameState)
                 .filter(roomService::checkAllPlayersReady)
-                .filter(gs -> !gs.isGameStarted())
+                // 시작 전(NONE)에만 발화 — 시작됨 여부의 진실 원천은 phase 하나다
+                .filter(gs -> gs.getPhase() == GamePhase.NONE)
                 .flatMap(gs -> roomService.startGame(gs))
                 .flatMap(state -> preGameService.pickFiveCardsAndSave(state.getRoomId())
                         .then(handleAllReadyEvent(state.getRoomId()))

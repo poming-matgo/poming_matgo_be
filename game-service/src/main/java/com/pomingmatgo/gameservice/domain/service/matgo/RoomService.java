@@ -66,10 +66,6 @@ public class RoomService {
         return gameState.hasUser(userId);
     }
 
-    /**
-     * 방 삭제는 phase와 무관한 강제 teardown — 게임 상태만 지우면 세션 매핑·카드·락·
-     * 자동플레이 타이머가 잔존하므로 disconnect teardown과 동일한 전체 정리 경로를 탄다.
-     */
     public Mono<Void> deleteRoom(long roomId) {
         return roomCleanupService.cleanupRoomData(roomId)
                 .then(sessionManager.removeRoom(roomId));
@@ -126,11 +122,9 @@ public class RoomService {
             return Mono.error(new WebSocketBusinessException(WebSocketErrorCode.NOT_EXISTED_ROOM));
         }
 
-        GameState.GameStateBuilder builder = gameState.toBuilder();
-        builder.gameStarted(true)
-                .phase(DETERMINING_STARTING_PLAYER);
-
-        GameState newState = builder.build();
+        GameState newState = gameState.toBuilder()
+                .phase(DETERMINING_STARTING_PLAYER)
+                .build();
         return gameStateRepository.save(newState)
                 .thenReturn(newState);
     }

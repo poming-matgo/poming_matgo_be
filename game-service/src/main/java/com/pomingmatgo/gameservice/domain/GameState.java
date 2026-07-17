@@ -30,7 +30,6 @@ public class GameState implements Serializable {
     private PlayerState player2 = new PlayerState();
 
     //game phase
-    private boolean gameStarted;
     private int leadingPlayer;
     private int currentTurn;
     private int round;

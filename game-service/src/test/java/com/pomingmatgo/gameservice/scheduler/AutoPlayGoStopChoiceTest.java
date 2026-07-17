@@ -67,7 +67,7 @@ class AutoPlayGoStopChoiceTest {
     void submitReachingGoStopEntersChoicePhaseAndAutoStops() throws Exception {
         roomId = 920_001L;
         GameState state = GameState.builder()
-                .roomId(roomId).gameStarted(true).leadingPlayer(1).currentTurn(1).round(1)
+                .roomId(roomId).leadingPlayer(1).currentTurn(1).round(1)
                 .phase(GamePhase.IN_PROGRESS)
                 .build();
         gameStateRepository.create(state).block();
@@ -136,7 +136,7 @@ class AutoPlayGoStopChoiceTest {
     void rejectsChoiceOutsideGoStopPhase() {
         roomId = 920_004L;
         GameState state = GameState.builder()
-                .roomId(roomId).gameStarted(true).leadingPlayer(1).currentTurn(1).round(1)
+                .roomId(roomId).leadingPlayer(1).currentTurn(1).round(1)
                 .phase(GamePhase.IN_PROGRESS)
                 .build();
         gameStateRepository.create(state).block();
@@ -149,7 +149,6 @@ class AutoPlayGoStopChoiceTest {
     private void seedGoStopPendingRoom() {
         GameState state = GameState.builder()
                 .roomId(roomId)
-                .gameStarted(true)
                 .leadingPlayer(1)
                 .currentTurn(1)   // leadingPlayer == currentTurn → currentPlayer = PLAYER_1
                 .round(1)
