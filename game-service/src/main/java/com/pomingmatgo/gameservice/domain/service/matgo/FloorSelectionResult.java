@@ -4,6 +4,9 @@ import com.pomingmatgo.gameservice.domain.GameState;
 
 public record FloorSelectionResult(
         ProcessCardResult cardResult,
-        GameState updatedGameState,
-        boolean isChoiceRequired
-) {}
+        GameState updatedGameState
+) {
+    public boolean isChoiceRequired() {
+        return cardResult.isChoiceRequired();
+    }
+}

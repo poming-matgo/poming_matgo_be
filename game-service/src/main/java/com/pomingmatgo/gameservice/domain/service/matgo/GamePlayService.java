@@ -39,11 +39,11 @@ public class GamePlayService {
                 .flatMap(freshState -> gameService.selectFloorCard(freshState, player, cardIdx)
                         .flatMap(result -> {
                             if (result.isChoiceRequired()) {
-                                return Mono.just(new FloorSelectionResult(result, freshState, true));
+                                return Mono.just(new FloorSelectionResult(result, freshState));
                             }
                             return applyTurnEffects(roomId, freshState, result)
                                     .then(gameService.calculateAndApplyScores(roomId, freshState))
-                                    .map(nextState -> new FloorSelectionResult(result, nextState, false));
+                                    .map(nextState -> new FloorSelectionResult(result, nextState));
                         }));
     }
 
@@ -71,12 +71,12 @@ public class GamePlayService {
 
     private Mono<TurnExecutionResult> buildNormalSubmitResult(long roomId, GameState gameState, Card submittedCard, Card topCard, ProcessCardResult processResult) {
         if (processResult.isChoiceRequired()) {
-            return Mono.just(new TurnExecutionResult(submittedCard, topCard, processResult, gameState, true));
+            return Mono.just(new TurnExecutionResult(submittedCard, topCard, processResult, gameState));
         }
 
         return applyTurnEffects(roomId, gameState, processResult)
                 .then(gameService.calculateAndApplyScores(roomId, gameState))
-                .map(newGs -> new TurnExecutionResult(submittedCard, topCard, processResult, newGs, false));
+                .map(newGs -> new TurnExecutionResult(submittedCard, topCard, processResult, newGs));
     }
 
     public Mono<GameState> proceedToNextTurn(GameState gameState) {

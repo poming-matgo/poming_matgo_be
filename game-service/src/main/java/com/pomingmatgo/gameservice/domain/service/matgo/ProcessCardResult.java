@@ -5,9 +5,7 @@ import lombok.Builder;
 import lombok.Getter;
 
 import java.util.ArrayList;
-import java.util.Collections;
 import java.util.List;
-import java.util.Optional;
 
 @Getter
 @Builder(toBuilder = true)
@@ -30,83 +28,70 @@ public class ProcessCardResult {
     private final List<Card> moveCards = new ArrayList<>();
 
     public ProcessCardResult merge(ProcessCardResult other) {
-        if (other == null) return this;
         // 선택 대기 결과면 그대로 반환 — this(앞선 획득분)는 버려지지만, handleTwoCardsOnFloor가
         // choiceInfo.prev*로 이월해 두었으므로 선택 완료 시 finalizeTurn이 복원한다
         if (other.isChoiceRequired()) return other;
 
         List<Card> mergedAcquired = new ArrayList<>(this.acquiredCards);
-        mergedAcquired.addAll(other.getAcquiredCards() != null ? other.getAcquiredCards() : Collections.emptyList());
+        mergedAcquired.addAll(other.acquiredCards);
 
         List<SpecialEvent> mergedEvents = new ArrayList<>(this.specialEvents);
-        mergedEvents.addAll(other.getSpecialEvents() != null ? other.getSpecialEvents() : Collections.emptyList());
+        mergedEvents.addAll(other.specialEvents);
 
         List<Card> mergedMoveCards = new ArrayList<>(this.moveCards);
-        mergedMoveCards.addAll(other.getMoveCards() != null ? other.getMoveCards() : Collections.emptyList());
+        mergedMoveCards.addAll(other.moveCards);
 
         return this.toBuilder()
                 .acquiredCards(mergedAcquired)
                 .specialEvents(mergedEvents)
                 .moveCards(mergedMoveCards)
                 .claimOpponentPi(this.claimOpponentPi || other.isClaimOpponentPi()) // 둘 중 하나라도 피를 뺏으면 true
-                .choiceRequired(this.choiceRequired || other.isChoiceRequired())
                 .build();
     }
 
-
     public static ProcessCardResult immediate(List<Card> cards) {
         return ProcessCardResult.builder()
-                .acquiredCards(cards != null ? cards : new ArrayList<>())
-                .choiceRequired(false)
-                .claimOpponentPi(false)
+                .acquiredCards(cards)
                 .build();
     }
 
     public static ProcessCardResult choicePending(List<Card> cards) {
-        List<Card> safeCards = Optional.ofNullable(cards).orElseGet(ArrayList::new);
-
         return ProcessCardResult.builder()
-                .selectableCards(new ArrayList<>(safeCards))
-                .acquiredCards(new ArrayList<>(safeCards))
+                .selectableCards(new ArrayList<>(cards))
                 .choiceRequired(true)
-                .claimOpponentPi(false)
                 .build();
     }
-    public static ProcessCardResult claimOpponentPi(List<Card> cards, Card _moveCard) {
+
+    public static ProcessCardResult claimOpponentPi(List<Card> cards, Card moveCard) {
         return ProcessCardResult.builder()
-                .acquiredCards(cards != null ? cards : new ArrayList<>())
-                .choiceRequired(false)
+                .acquiredCards(cards)
                 .claimOpponentPi(true)
-                .moveCards(_moveCard != null ? List.of(_moveCard) : new ArrayList<>())
+                .moveCards(List.of(moveCard))
                 .build();
     }
 
     public static ProcessCardResult ppeok(List<Card> cards) {
         return ProcessCardResult.builder()
-                .acquiredCards(cards != null ? cards : new ArrayList<>())
-                .choiceRequired(false)
-                .claimOpponentPi(false)
+                .acquiredCards(cards)
                 .specialEvents(List.of(SpecialEvent.PPEOK))
                 .build();
     }
 
-    public static ProcessCardResult ttadak(List<Card> cards, Card _moveCard) {
+    public static ProcessCardResult ttadak(List<Card> cards, Card moveCard) {
         return ProcessCardResult.builder()
-                .acquiredCards(cards != null ? cards : new ArrayList<>())
-                .choiceRequired(false)
+                .acquiredCards(cards)
                 .claimOpponentPi(true)
                 .specialEvents(List.of(SpecialEvent.TTADAK))
-                .moveCards(_moveCard != null ? List.of(_moveCard) : new ArrayList<>())
+                .moveCards(List.of(moveCard))
                 .build();
     }
 
-    public static ProcessCardResult jjok(List<Card> cards, Card _moveCard) {
+    public static ProcessCardResult jjok(List<Card> cards, Card moveCard) {
         return ProcessCardResult.builder()
-                .acquiredCards(cards != null ? cards : new ArrayList<>())
-                .choiceRequired(false)
+                .acquiredCards(cards)
                 .claimOpponentPi(true)
                 .specialEvents(List.of(SpecialEvent.JJOK))
-                .moveCards(_moveCard != null ? List.of(_moveCard) : new ArrayList<>())
+                .moveCards(List.of(moveCard))
                 .build();
     }
 }
