@@ -1,5 +1,6 @@
 package com.pomingmatgo.gameservice.domain.service.matgo;
 
+import com.pomingmatgo.gameservice.domain.GamePhase;
 import com.pomingmatgo.gameservice.domain.GameState;
 import com.pomingmatgo.gameservice.domain.Player;
 import com.pomingmatgo.gameservice.domain.PlayerState;
@@ -23,6 +24,7 @@ public class RoomService {
     private final GameStateRepository gameStateRepository;
     private final SessionManager sessionManager;
     private final RoomLockManager roomLockManager;
+    private final RoomCleanupService roomCleanupService;
 
     public Mono<Void> joinRoom(long userId, long roomId) {
         return roomLockManager.withLock(roomId,
@@ -45,6 +47,11 @@ public class RoomService {
                         .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.NOT_EXISTED_ROOM)))
                         .filter(gameState -> isUserInRoom(gameState, userId))
                         .flatMap(gameState -> {
+                            // 게임 시작 후의 이탈은 WS disconnect 흐름(보존/teardown)이 담당 —
+                            // 진행 중 REST leave를 허용하면 PlayerState만 초기화된 어긋난 상태가 된다
+                            if (gameState.getPhase() != GamePhase.NONE) {
+                                return Mono.error(new BusinessException(ErrorCode.GAME_IN_PROGRESS));
+                            }
                             Player player = gameState.getPlayerType(userId);
 
                             GameState newState = gameState.updatePlayerState(player, new PlayerState());
@@ -59,9 +66,13 @@ public class RoomService {
         return gameState.hasUser(userId);
     }
 
+    /**
+     * 방 삭제는 phase와 무관한 강제 teardown — 게임 상태만 지우면 세션 매핑·카드·락·
+     * 자동플레이 타이머가 잔존하므로 disconnect teardown과 동일한 전체 정리 경로를 탄다.
+     */
     public Mono<Void> deleteRoom(long roomId) {
-        return gameStateRepository.delete(roomId)
-                .then();
+        return roomCleanupService.cleanupRoomData(roomId)
+                .then(sessionManager.removeRoom(roomId));
     }
 
     private boolean isRoomFull(GameState gameState) {

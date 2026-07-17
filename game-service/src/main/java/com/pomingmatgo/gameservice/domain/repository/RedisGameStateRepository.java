@@ -45,17 +45,6 @@ public class RedisGameStateRepository implements GameStateRepository {
                 });
     }
 
-    public Mono<Long> delete(long roomId) {
-        String redisKey = generateKey(roomId);
-        return redisOps.hasKey(redisKey)
-                .flatMap(exists -> {
-                    if (Boolean.TRUE.equals(exists)) {
-                        return redisOps.delete(redisKey);
-                    }
-                    return Mono.just(roomId);
-                });
-    }
-
     public Mono<Long> save(GameState gameState) {
         String redisKey = generateKey(gameState.getRoomId());
 

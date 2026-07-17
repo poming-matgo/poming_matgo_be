@@ -12,6 +12,7 @@ public enum ErrorCode {
     FULL_ROOM(409, "방이 꽉 찼습니다."),
     ALREADY_IN_ROOM(409, "이미 방에 입장했습니다."),
     NOT_IN_ROOM(404, "방에 입장하지 않았습니다."),
+    GAME_IN_PROGRESS(409, "게임이 진행 중인 방입니다."),
 
     //입력 값 에러
     INVALID_FORM_INPUT(400, "폼의 입력 데이터가 유효하지 않습니다."),

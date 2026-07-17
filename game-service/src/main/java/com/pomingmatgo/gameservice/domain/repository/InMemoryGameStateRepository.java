@@ -32,14 +32,6 @@ public class InMemoryGameStateRepository implements GameStateRepository {
     }
 
     @Override
-    public Mono<Long> delete(long roomId) {
-        return Mono.fromCallable(() -> {
-            store.remove(roomId);
-            return roomId;
-        });
-    }
-
-    @Override
     public Mono<Long> save(GameState gameState) {
         return Mono.fromCallable(() -> {
             // 게임 액션 경로의 save는 RoomLockManager를 타지 않으므로 cleanup(remove)과 동시 실행될 수 있다.
