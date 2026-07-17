@@ -1,7 +1,6 @@
 package com.pomingmatgo.gameservice.api.handler.websocket;
 
 import com.pomingmatgo.gameservice.api.handler.event.RequestEvent;
-import com.pomingmatgo.gameservice.api.handler.event.category.SubCategory;
 import com.pomingmatgo.gameservice.domain.GamePhase;
 import com.pomingmatgo.gameservice.domain.GameState;
 import com.pomingmatgo.gameservice.domain.Player;
@@ -30,9 +29,7 @@ public class WsRoomHandler {
 
 
     public Mono<Void> handleRoomEvent(RequestEvent<?> event, GameState gameState, Player player) {
-        SubCategory eventType = SubCategory.from(event.getEventType().getSubType());
-
-        return switch (eventType) {
+        return switch (event.getSubCategory()) {
             case READY -> handleReadyEvent(gameState, player);
             case UNREADY -> handleUnreadyEvent(gameState, player);
             default -> Mono.error(new IllegalArgumentException("Invalid GAME event type"));
@@ -70,7 +67,7 @@ public class WsRoomHandler {
 
     private Mono<Void> checkAndProceedIfAllReady(GameState updatedGameState) {
         return Mono.just(updatedGameState)
-                .filter(roomService::checkAllPlayersReady)
+                .filter(GameState::allPlayersReady)
                 // 시작 전(NONE)에만 발화 — 시작됨 여부의 진실 원천은 phase 하나다
                 .filter(gs -> gs.getPhase() == GamePhase.NONE)
                 .flatMap(gs -> roomService.startGame(gs))

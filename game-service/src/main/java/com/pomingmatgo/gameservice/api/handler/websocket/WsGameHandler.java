@@ -1,7 +1,6 @@
 package com.pomingmatgo.gameservice.api.handler.websocket;
 
 import com.pomingmatgo.gameservice.api.handler.event.RequestEvent;
-import com.pomingmatgo.gameservice.api.handler.event.category.SubCategory;
 import com.pomingmatgo.gameservice.api.request.websocket.GoStopReq;
 import com.pomingmatgo.gameservice.api.request.websocket.NormalSubmitReq;
 import com.pomingmatgo.gameservice.domain.GameState;
@@ -31,9 +30,7 @@ public class WsGameHandler {
             return Mono.error(new WebSocketBusinessException(NOT_YOUR_TURN));
         }
 
-        SubCategory eventType = SubCategory.from(event.getEventType().getSubType());
-
-        return switch (eventType) {
+        return switch (event.getSubCategory()) {
             case NORMAL_SUBMIT -> handleNormalSubmit(event.as(), gameState, player);
             case FLOOR_SELECT -> handleFloorSelect(event.as(), gameState, player);
             case GO_STOP_CHOICE -> handleGoStopChoice(event.as(), gameState, player);

@@ -69,15 +69,17 @@ public class GameWebSocketHandler implements WebSocketHandler {
                     SubCategory subType = SubCategory.from(subTypeStr);
                     JavaType type = objectMapper.getTypeFactory().constructParametricType(RequestEvent.class, subType.getPayloadClass());
 
-                    return objectMapper.convertValue(rootNode, type);
+                    RequestEvent<?> event = objectMapper.convertValue(rootNode, type);
+                    event.setSubCategory(subType);
+                    return event;
                 })
                 .flatMap(event -> processEvent(event, session))
                 .onErrorResume(error -> handleWebSocketError(session, error));
     }
 
     private Mono<Void> processEvent(RequestEvent<?> event, WebSocketSession session) {
-        if (SubCategory.CONNECT.name().equals(event.getEventType().getSubType())) {
-            return handleJoinRoom((RequestEvent<JoinRoomReq>) event, session);
+        if (event.getSubCategory() == SubCategory.CONNECT) {
+            return handleJoinRoom(event.as(), session);
         }
 
         return sessionManager.getPlayerContext(session)
@@ -113,7 +115,7 @@ public class GameWebSocketHandler implements WebSocketHandler {
     }
 
     private boolean isGameAction(RequestEvent<?> event, GameState gameState, Player player) {
-        SubCategory eventType = SubCategory.from(event.getEventType().getSubType());
+        SubCategory eventType = event.getSubCategory();
 
         boolean cond1 =  eventType == SubCategory.NORMAL_SUBMIT ||
                eventType == SubCategory.FLOOR_SELECT ||
@@ -176,7 +178,6 @@ public class GameWebSocketHandler implements WebSocketHandler {
 
         WebSocketErrorResDto errorDto = new WebSocketErrorResDto(errorCode);
 
-        // 닫힌 세션이거나 전송이 실패해도 receive 체인을 죽이지 않는다 — 세션 수습은 disconnect 처리 몫
         if (!session.isOpen()) {
             return Mono.empty();
         }

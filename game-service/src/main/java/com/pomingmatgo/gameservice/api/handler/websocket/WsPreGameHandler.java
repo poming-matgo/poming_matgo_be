@@ -1,7 +1,6 @@
 package com.pomingmatgo.gameservice.api.handler.websocket;
 
 import com.pomingmatgo.gameservice.api.handler.event.RequestEvent;
-import com.pomingmatgo.gameservice.api.handler.event.category.SubCategory;
 import com.pomingmatgo.gameservice.api.request.websocket.LeadSelectionReq;
 import com.pomingmatgo.gameservice.api.response.websocket.LeadSelectionRes;
 import com.pomingmatgo.gameservice.domain.GameState;
@@ -42,9 +41,7 @@ public class WsPreGameHandler {
             return Mono.error(new WebSocketBusinessException(INVALID_GAME_PHASE));
         }
 
-        SubCategory eventType = SubCategory.from(event.getEventType().getSubType());
-
-        return switch (eventType) {
+        return switch (event.getSubCategory()) {
             case LEADER_SELECTION -> handleLeaderSelectionEvent(event.as(), gameState, player);
             default -> Mono.error(new IllegalArgumentException("Invalid GAME event type"));
         };
