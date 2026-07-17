@@ -55,7 +55,8 @@ public class WsPreGameHandler {
         long roomId = gameState.getRoomId();
         int cardIndex = event.getData().cardIndex();
 
-        return preGameService.selectCardAndCheckAllSelected(cardIndex, gameState, player)
+        return preGameService.selectLeaderCard(roomId, player, cardIndex)
+                .then(preGameService.checkAllSelected(roomId))
                 .flatMap(allSelected -> sendLeaderSelectionMessage(roomId, player, cardIndex)
                         .then(allSelected
                                 ? afterleaderSelectionCardAllSelection(gameState)

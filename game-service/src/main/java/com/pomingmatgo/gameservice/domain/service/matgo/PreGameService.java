@@ -7,6 +7,7 @@ import com.pomingmatgo.gameservice.domain.repository.GameStateRepository;
 import com.pomingmatgo.gameservice.domain.repository.InstalledCardRepository;
 import com.pomingmatgo.gameservice.domain.repository.LeadingPlayerRepository;
 import com.pomingmatgo.gameservice.global.exception.WebSocketBusinessException;
+import com.pomingmatgo.gameservice.global.lock.RoomLockManager;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -19,6 +20,7 @@ import java.util.stream.Collectors;
 
 import static com.pomingmatgo.gameservice.domain.GamePhase.IN_PROGRESS;
 import static com.pomingmatgo.gameservice.global.exception.WebSocketErrorCode.INVALID_GAME_PHASE;
+import static com.pomingmatgo.gameservice.global.exception.WebSocketErrorCode.TOO_MANY_REQUESTS;
 
 @Service
 @RequiredArgsConstructor
@@ -27,6 +29,7 @@ public class PreGameService {
     private final LeadingPlayerRepository leadingPlayerRepository;
     private final InstalledCardRepository installedCardRepository;
     private final GameStateRepository gameStateRepository;
+    private final RoomLockManager roomLockManager;
 
     private static final int CARDS_TO_PICK = 5;
     private static final int PLAYER_CARD_COUNT = 10;
@@ -66,18 +69,30 @@ public class PreGameService {
                 });
     }
 
-    public Mono<Boolean> selectCardAndCheckAllSelected(int cardIndex, GameState gameState, Player player) {
-        Long roomId = gameState.getRoomId();
-        return leadingPlayerRepository.getCardByIndex(roomId, cardIndex)
-                .switchIfEmpty(Mono.error(new WebSocketBusinessException(INVALID_GAME_PHASE)))
-                .flatMap(card -> leadingPlayerRepository.savePlayerMonth(roomId, player, card.getMonth()))
-                .then(leadingPlayerRepository.getPlayerSelectedCard(roomId))
-                .flatMap(choice -> {
-                    if (choice.getPlayer1Month() != 0 && choice.getPlayer2Month() != 0) {
-                        return leadingPlayerRepository.tryClaimLeaderSelectionTrigger(roomId);
-                    }
-                    return Mono.just(false);
-                });
+    /**
+     * 선 선택 카드 저장. 선택 현황 조회(read)→검증→저장(write) 사이에 상대 선택이 끼어들면
+     * 중복 월 검증이 뚫리므로 그 구간을 방 단위 락으로 직렬화한다 (joinRoom/leaveRoom과 같은 패턴).
+     */
+    public Mono<Void> selectLeaderCard(long roomId, Player player, int cardIndex) {
+        return roomLockManager.withLock(roomId,
+                leadingPlayerRepository.getCardByIndex(roomId, cardIndex)
+                        .switchIfEmpty(Mono.error(new WebSocketBusinessException(INVALID_GAME_PHASE)))
+                        .flatMap(card -> leadingPlayerRepository.getPlayerSelectedCard(roomId)
+                                .doOnNext(choice -> choice.validateSelection(player, card.getMonth()))
+                                .then(leadingPlayerRepository.savePlayerMonth(roomId, player, card.getMonth()))),
+                () -> new WebSocketBusinessException(TOO_MANY_REQUESTS));
+    }
+
+    /**
+     * 두 플레이어 모두 선택을 마쳤으면 후속 트리거를 claim한다 (true = 이 호출이 후속 진행 담당).
+     * 락 불필요 — 월은 한 번 저장되면 불변이고, 동시 선택 완료로 둘 다 여기 도달해도
+     * putIfAbsent 기반 트리거가 1회 발사를 보장한다.
+     */
+    public Mono<Boolean> checkAllSelected(long roomId) {
+        return leadingPlayerRepository.getPlayerSelectedCard(roomId)
+                .flatMap(choice -> choice.getPlayer1Month() != 0 && choice.getPlayer2Month() != 0
+                        ? leadingPlayerRepository.tryClaimLeaderSelectionTrigger(roomId)
+                        : Mono.just(false));
     }
 
     public Mono<LeadSelectionRes> getLeadSelectionRes(Long roomId) {
