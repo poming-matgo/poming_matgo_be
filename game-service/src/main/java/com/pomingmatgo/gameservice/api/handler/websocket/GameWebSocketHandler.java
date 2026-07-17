@@ -176,9 +176,17 @@ public class GameWebSocketHandler implements WebSocketHandler {
 
         WebSocketErrorResDto errorDto = new WebSocketErrorResDto(errorCode);
 
+        // 닫힌 세션이거나 전송이 실패해도 receive 체인을 죽이지 않는다 — 세션 수습은 disconnect 처리 몫
+        if (!session.isOpen()) {
+            return Mono.empty();
+        }
         return Mono.fromCallable(() -> objectMapper.writeValueAsString(errorDto))
                 .map(session::textMessage)
-                .flatMap(message -> session.send(Mono.just(message)));
+                .flatMap(message -> session.send(Mono.just(message)))
+                .onErrorResume(sendError -> {
+                    log.debug("에러 응답 전송 실패 — 세션 [{}] 스킵", session.getId(), sendError);
+                    return Mono.empty();
+                });
     }
 
     private Mono<Void> handleDisconnect(WebSocketSession session) {
