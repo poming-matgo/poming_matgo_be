@@ -62,22 +62,56 @@ public class TurnFlowService {
                                 .then(gameMessageSender.sendTurnInfo(nextState, TURN_TIMEOUT_MILLIS))
                                 .then(Mono.fromRunnable(() -> scheduleNextStep(roomId, nextState, scheduler)));
                     }
-                    return gamePlayService.gameOver(nextState)
-                            .delayUntil(finalState -> gameMessageSender.sendGameOverMessage(finalState, player))
-                            .then();
+                    return processGameOver(nextState, player).then();
                 });
     }
 
     /**
-     * 턴 실행 결과의 공통 완료 처리: 결과 브로드캐스트 후 다음 단계(게임 종료/고스톱 대기/다음 턴) 결정은
-     * GameNotificationService에 위임하고, 도달한 phase에 맞는 자동플레이 타이머를 등록한다.
+     * 턴 정보 공지 + 도달한 phase의 자동플레이 타이머 등록.
+     * 첫 턴 시작(WsPreGameHandler)이 이후 턴 전환과 같은 경로를 타게 하는 공개 진입점 —
+     * 핸들러가 공지/타이머 등록을 직접 작성하면 유저/자동 경로의 동작이 갈라진다.
+     */
+    public Mono<Void> startTurn(GameState state, TurnScheduler scheduler) {
+        return gameMessageSender.sendTurnInfo(state, TURN_TIMEOUT_MILLIS)
+                .then(Mono.fromRunnable(() -> scheduleNextStep(state.getRoomId(), state, scheduler)));
+    }
+
+    /**
+     * 턴 실행 결과의 공통 완료 처리: 결과 브로드캐스트(GameNotificationService) 후 다음 단계
+     * (게임 종료/고스톱 대기/다음 턴)를 결정하고, 도달한 phase에 맞는 자동플레이 타이머를 등록한다.
      * 정상 제출/바닥 선택 완료가 모두 이 흐름을 거치므로 바닥 선택으로 끝난 턴에도
      * 마지막 턴 판정과 고/스톱 선택 기회가 동일하게 적용된다.
      */
     private Mono<Void> finishTurn(long roomId, Player player, GameState updatedState, ProcessCardResult result, TurnScheduler scheduler) {
-        return gameNotificationService.broadcastTurnResult(roomId, player, updatedState, result, TURN_TIMEOUT_MILLIS)
+        return gameNotificationService.broadcastTurnResult(roomId, player, updatedState, result)
+                .then(proceedAfterTurn(updatedState, player))
                 .doOnNext(nextState -> scheduleNextStep(roomId, nextState, scheduler))
                 .then();
+    }
+
+    /** 턴 완료 후 다음 단계 결정: 마지막 턴/최종 라운드의 점수 달성 → 게임 종료, 점수 달성 → 고/스톱 대기, 그 외 → 다음 턴 */
+    private Mono<GameState> proceedAfterTurn(GameState gameState, Player player) {
+        if (gameState.isLastTurn()) {
+            return processGameOver(gameState, player);
+        }
+        if (gamePlayService.canGoStop(gameState, player)) {
+            // 마지막 라운드엔 GO 선택지가 없으므로 곧바로 게임 종료
+            if (gameState.isFinalRound()) {
+                return processGameOver(gameState, player);
+            }
+            // phase를 저장해 두면 선택 요청 검증과 자동플레이 타이머가 이 상태를 근거로 동작한다.
+            // 타이머 등록은 반환된 phase를 보고 finishTurn의 scheduleNextStep이 수행
+            return gamePlayService.enterGoStopChoice(gameState)
+                    .delayUntil(awaitingState -> gameMessageSender.sendGoStopChoiceMessage(awaitingState, player));
+        }
+        return gamePlayService.proceedToNextTurn(gameState)
+                .flatMap(nextState -> gameMessageSender.sendTurnInfo(nextState, TURN_TIMEOUT_MILLIS)
+                        .thenReturn(nextState));
+    }
+
+    private Mono<GameState> processGameOver(GameState gameState, Player player) {
+        return gamePlayService.gameOver(gameState)
+                .delayUntil(finalState -> gameMessageSender.sendGameOverMessage(finalState, player));
     }
 
     /**
