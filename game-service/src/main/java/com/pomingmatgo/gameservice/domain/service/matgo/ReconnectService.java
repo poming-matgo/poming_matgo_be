@@ -41,7 +41,7 @@ public class ReconnectService {
     private final AutoPlayScheduler autoPlayScheduler;
 
     public Mono<ReconnectStateRes> buildSnapshot(long roomId, Player me) {
-        Player opponent = (me == Player.PLAYER_1) ? Player.PLAYER_2 : Player.PLAYER_1;
+        Player opponent = me.opponent();
 
         return gameStateRepository.findById(roomId)
                 .switchIfEmpty(Mono.error(new WebSocketBusinessException(NOT_EXISTED_ROOM)))

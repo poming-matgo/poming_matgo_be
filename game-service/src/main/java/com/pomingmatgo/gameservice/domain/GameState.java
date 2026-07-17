@@ -85,7 +85,7 @@ public class GameState implements Serializable {
 
     @JsonIgnore
     public Player getOtherPlayer() {
-        return this.getLeadingPlayer() == this.getCurrentTurn() ? PLAYER_2 : PLAYER_1;
+        return getCurrentPlayer().opponent();
     }
 
     public boolean canGoStop(Player player) {

@@ -204,8 +204,8 @@ public class GameWebSocketHandler implements WebSocketHandler {
                                     sessionManager.removeRoom(roomId).then(Mono.<GameState>empty())))
                             .flatMap(gameState -> {
                                 GamePhase phase = gameState.getPhase();
-                                int opponentNum = (playerNum == 1) ? 2 : 1;
-                                boolean opponentConnected = sessionManager.getSession(roomId, opponentNum) != null;
+                                boolean opponentConnected =
+                                        sessionManager.getSession(roomId, disconnected.opponent().getNumber()) != null;
 
                                 // 행동 대기 phase는 자동플레이 타이머가 진행(liveness)을 보장하므로
                                 // 방을 보존해 재접속을 허용한다 — 이탈자의 턴은 기존 타이머가 그대로 대행.

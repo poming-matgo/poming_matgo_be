@@ -5,6 +5,7 @@ import lombok.Getter;
 
 import java.util.Arrays;
 
+import static com.pomingmatgo.gameservice.global.exception.WebSocketErrorCode.INVALID_PLAYER;
 import static com.pomingmatgo.gameservice.global.exception.WebSocketErrorCode.INVALID_USER;
 
 @Getter
@@ -24,5 +25,14 @@ public enum Player {
                 .filter(p -> p.number == number)
                 .findFirst()
                 .orElseThrow(() ->new WebSocketBusinessException(INVALID_USER));
+    }
+
+    /** 상대 플레이어. PLAYER_NOTHING엔 상대가 없다 */
+    public Player opponent() {
+        return switch (this) {
+            case PLAYER_1 -> PLAYER_2;
+            case PLAYER_2 -> PLAYER_1;
+            default -> throw new WebSocketBusinessException(INVALID_PLAYER);
+        };
     }
 }
