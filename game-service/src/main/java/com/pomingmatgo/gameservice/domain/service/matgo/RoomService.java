@@ -87,11 +87,10 @@ public class RoomService {
                 .then(gameStateRepository.create(gameState))
                 .thenReturn(roomId)
                 .onErrorResume(ex -> {
-                    if (ex instanceof WebSocketBusinessException) {
-                        BusinessException businessEx = (BusinessException) ex;
-                        if (businessEx.getErrorCode() == ErrorCode.ALREADY_EXISTED_ROOM) {
-                            return Mono.error(ex);
-                        }
+                    // 이미 존재하는 방이면 롤백(removeRoom) 금지 — 진행 중인 그 방의 세션 매핑이 파괴된다
+                    if (ex instanceof BusinessException businessEx
+                            && businessEx.getErrorCode() == ErrorCode.ALREADY_EXISTED_ROOM) {
+                        return Mono.error(ex);
                     }
 
                     return sessionManager.removeRoom(roomId)
