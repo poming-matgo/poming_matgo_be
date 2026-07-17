@@ -27,9 +27,9 @@ public class GamePlayService {
                                     Card submittedCard = tuple.getT1();
                                     Card topCard = tuple.getT2();
                                     return gameService.submitCard(freshState, submittedCard, topCard)
-                                            .flatMap(processResult -> buildNormalSubmitResult(
-                                                    roomId, freshState, submittedCard, topCard, processResult
-                                            ));
+                                            .flatMap(processResult -> settleTurn(roomId, freshState, processResult)
+                                                    .map(settledState -> new TurnExecutionResult(
+                                                            submittedCard, topCard, processResult, settledState)));
                                 }));
     }
 
@@ -37,14 +37,8 @@ public class GamePlayService {
     public Mono<FloorSelectionResult> executeFloorSelection(long roomId, GameState gameState, Player player, int cardIdx, Runnable onLockAcquired) {
         return validatedFreshState(roomId, GamePhase.AWAITING_FLOOR_CARD_CHOICE, player, onLockAcquired)
                 .flatMap(freshState -> gameService.selectFloorCard(freshState, player, cardIdx)
-                        .flatMap(result -> {
-                            if (result.isChoiceRequired()) {
-                                return Mono.just(new FloorSelectionResult(result, freshState));
-                            }
-                            return applyTurnEffects(roomId, freshState, result)
-                                    .then(gameService.calculateAndApplyScores(roomId, freshState))
-                                    .map(nextState -> new FloorSelectionResult(result, nextState));
-                        }));
+                        .flatMap(result -> settleTurn(roomId, freshState, result)
+                                .map(settledState -> new FloorSelectionResult(result, settledState))));
     }
 
     /**
@@ -69,28 +63,26 @@ public class GamePlayService {
         });
     }
 
-    private Mono<TurnExecutionResult> buildNormalSubmitResult(long roomId, GameState gameState, Card submittedCard, Card topCard, ProcessCardResult processResult) {
-        if (processResult.isChoiceRequired()) {
-            return Mono.just(new TurnExecutionResult(submittedCard, topCard, processResult, gameState));
+    /**
+     * 턴 확정 공통 후처리: 피 뺏기/획득 반영 후 점수를 재계산한 상태를 반환한다.
+     * 선택 대기(choiceRequired)면 아직 턴이 끝나지 않았으므로 아무것도 반영하지 않고 기존 상태 그대로 반환.
+     * 정상 제출/바닥 선택 완료가 모두 이 경로를 거친다.
+     */
+    private Mono<GameState> settleTurn(long roomId, GameState gameState, ProcessCardResult result) {
+        if (result.isChoiceRequired()) {
+            return Mono.just(gameState);
         }
+        Mono<Void> loseCards = Flux.fromIterable(result.getMoveCards())
+                .concatMap(card -> gameService.loseCard(roomId, gameState.getOtherPlayer(), card))
+                .then();
 
-        return applyTurnEffects(roomId, gameState, processResult)
-                .then(gameService.calculateAndApplyScores(roomId, gameState))
-                .map(newGs -> new TurnExecutionResult(submittedCard, topCard, processResult, newGs));
+        return loseCards
+                .then(gameService.acquireCards(roomId, gameState.getCurrentPlayer(), result.getAcquiredCards()))
+                .then(gameService.calculateAndApplyScores(roomId, gameState));
     }
 
     public Mono<GameState> proceedToNextTurn(GameState gameState) {
         return gameService.setGameInProgress(gameState.setNextTurn());
-    }
-
-    private Mono<Void> applyTurnEffects(long roomId, GameState gameState, ProcessCardResult result) {
-        if (result.isChoiceRequired()) return Mono.empty();
-        Mono<Void> precedingOperation = Flux.fromIterable(result.getMoveCards())
-                .concatMap(card -> gameService.loseCard(roomId, gameState.getOtherPlayer(), card))
-                .then();
-
-        return precedingOperation
-                .then(gameService.acquireCards(roomId, gameState.getCurrentPlayer(), result.getAcquiredCards()));
     }
 
     public boolean canGoStop(GameState gameState, Player player) {
