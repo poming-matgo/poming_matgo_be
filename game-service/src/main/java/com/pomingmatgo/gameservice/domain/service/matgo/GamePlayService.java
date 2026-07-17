@@ -20,19 +20,9 @@ public class GamePlayService {
 
     @GameLock(key = "'game:' + #roomId + ':' + #gameState.round + ':' + #gameState.currentTurn")
     public Mono<TurnExecutionResult> executeNormalSubmit(long roomId, GameState gameState, Player player, int cardIdx, Runnable onLockAcquired) {
-        return Mono.defer(() -> {
-            if (onLockAcquired != null) {
-                onLockAcquired.run();
-            }
-            return gameService.findGameState(roomId)
-                    .flatMap(freshState -> {
-                        if (freshState.getPhase() != GamePhase.IN_PROGRESS) {
-                            return Mono.error(new WebSocketBusinessException(INVALID_GAME_PHASE));
-                        }
-                        if (!player.equals(freshState.getCurrentPlayer())) {
-                            return Mono.error(new WebSocketBusinessException(NOT_YOUR_TURN));
-                        }
-                        return Mono.zip(gameService.submitCardEvent(roomId, player, cardIdx), gameService.getTopCard(roomId))
+        return validatedFreshState(roomId, GamePhase.IN_PROGRESS, player, onLockAcquired)
+                .flatMap(freshState ->
+                        Mono.zip(gameService.submitCardEvent(roomId, player, cardIdx), gameService.getTopCard(roomId))
                                 .flatMap(tuple -> {
                                     Card submittedCard = tuple.getT1();
                                     Card topCard = tuple.getT2();
@@ -40,32 +30,42 @@ public class GamePlayService {
                                             .flatMap(processResult -> buildNormalSubmitResult(
                                                     roomId, freshState, submittedCard, topCard, processResult
                                             ));
-                                });
-                    });
-        });
+                                }));
     }
 
     @GameLock(key = "'floor:' + #roomId + ':' + #gameState.round + ':' + #gameState.currentTurn")
     public Mono<FloorSelectionResult> executeFloorSelection(long roomId, GameState gameState, Player player, int cardIdx, Runnable onLockAcquired) {
+        return validatedFreshState(roomId, GamePhase.AWAITING_FLOOR_CARD_CHOICE, player, onLockAcquired)
+                .flatMap(freshState -> gameService.selectFloorCard(freshState, player, cardIdx)
+                        .flatMap(result -> {
+                            if (result.isChoiceRequired()) {
+                                return Mono.just(new FloorSelectionResult(result, freshState, true));
+                            }
+                            return applyTurnEffects(roomId, freshState, result)
+                                    .then(gameService.calculateAndApplyScores(roomId, freshState))
+                                    .map(nextState -> new FloorSelectionResult(result, nextState, false));
+                        }));
+    }
+
+    /**
+     * @GameLock 획득 직후의 공통 전처리: 자동플레이 타이머 취소 콜백 실행 → fresh 상태 재조회 →
+     * phase/차례 재검증. 락 통과 후에도 자동플레이와의 race로 상태가 이미 진행됐을 수 있어
+     * 세 게임 액션(제출/바닥 선택/고스톱) 모두 fresh 상태 기준으로 검증한다.
+     */
+    private Mono<GameState> validatedFreshState(long roomId, GamePhase expectedPhase, Player player, Runnable onLockAcquired) {
         return Mono.defer(() -> {
             if (onLockAcquired != null) {
                 onLockAcquired.run();
             }
-            return gameService.findGameState(roomId)
-                    .flatMap(freshState -> {
-                        if (freshState.getPhase() != GamePhase.AWAITING_FLOOR_CARD_CHOICE) {
-                            return Mono.error(new WebSocketBusinessException(INVALID_GAME_PHASE));
-                        }
-                        return gameService.selectFloorCard(freshState, player, cardIdx)
-                                .flatMap(result -> {
-                                    if (result.isChoiceRequired()) {
-                                        return Mono.just(new FloorSelectionResult(result, freshState, true));
-                                    }
-                                    return applyTurnEffects(roomId, freshState, result)
-                                            .then(gameService.calculateAndApplyScores(roomId, freshState))
-                                            .map(nextState -> new FloorSelectionResult(result, nextState, false));
-                                });
-                    });
+            return gameService.findGameState(roomId);
+        }).flatMap(freshState -> {
+            if (freshState.getPhase() != expectedPhase) {
+                return Mono.error(new WebSocketBusinessException(INVALID_GAME_PHASE));
+            }
+            if (!player.equals(freshState.getCurrentPlayer())) {
+                return Mono.error(new WebSocketBusinessException(NOT_YOUR_TURN));
+            }
+            return Mono.just(freshState);
         });
     }
 
@@ -103,23 +103,10 @@ public class GamePlayService {
 
     @GameLock(key = "'game:' + #roomId + ':' + #gameState.round + ':' + #gameState.currentTurn")
     public Mono<GameState> executeGoStop(long roomId, GameState gameState, Player player, boolean go, Runnable onLockAcquired) {
-        return Mono.defer(() -> {
-            if (onLockAcquired != null) {
-                onLockAcquired.run();
-            }
-            return gameService.findGameState(roomId)
-                    .flatMap(freshState -> {
-                        if (freshState.getPhase() != GamePhase.AWAITING_GO_STOP_CHOICE) {
-                            return Mono.error(new WebSocketBusinessException(INVALID_GAME_PHASE));
-                        }
-                        if (!player.equals(freshState.getCurrentPlayer())) {
-                            return Mono.error(new WebSocketBusinessException(NOT_YOUR_TURN));
-                        }
-                        return go ? gameService.executeGoStop(freshState, player)
-                                .flatMap(this::proceedToNextTurn)
-                                : Mono.just(freshState.toBuilder().phase(GamePhase.END).build());
-                    });
-        });
+        return validatedFreshState(roomId, GamePhase.AWAITING_GO_STOP_CHOICE, player, onLockAcquired)
+                .flatMap(freshState -> go
+                        ? gameService.executeGoStop(freshState, player).flatMap(this::proceedToNextTurn)
+                        : Mono.just(freshState.toBuilder().phase(GamePhase.END).build()));
     }
 
     public Mono<GameState> gameOver(GameState gameState) {
