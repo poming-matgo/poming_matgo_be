@@ -1,7 +1,8 @@
 rootProject.name = 'poming-matgo'
 
-include 'config-server'
-include 'user-service'
+// 폐기 모듈 — 빌드/사용 안 함 (디렉토리는 보존)
+//include 'config-server'
+//include 'user-service'
 //include 'api-gateway'
-include 'auth-service'
+//include 'auth-service'
 include 'game-service'
