@@ -136,12 +136,16 @@ public class PreGameService {
     }
 
     private Mono<InstalledCard> persistAllCards(InstalledCard installedCard, long roomId) {
-        return Mono.zip(
-                installedCardRepository.savePlayerCards(installedCard.getPlayer1(), roomId, Player.PLAYER_1),
-                installedCardRepository.savePlayerCards(installedCard.getPlayer2(), roomId, Player.PLAYER_2),
-                installedCardRepository.saveRevealedCard(installedCard.getRevealedCard(), roomId),
-                installedCardRepository.saveHiddenCard(installedCard.getHiddenCard(), roomId)
-        ).thenReturn(installedCard).retry(3);
+        // 저장이 append 방식이라 부분 성공 후 재시도 시 중복됨 → 매 시도 전 초기화로 멱등 보장
+        return installedCardRepository.cleanup(roomId)
+                .then(Mono.zip(
+                        installedCardRepository.savePlayerCards(installedCard.getPlayer1(), roomId, Player.PLAYER_1),
+                        installedCardRepository.savePlayerCards(installedCard.getPlayer2(), roomId, Player.PLAYER_2),
+                        installedCardRepository.saveRevealedCard(installedCard.getRevealedCard(), roomId),
+                        installedCardRepository.saveHiddenCard(installedCard.getHiddenCard(), roomId)
+                ))
+                .thenReturn(installedCard)
+                .retry(3);
     }
 
     public Mono<GameState> setFirstTurn(GameState gameState) {
