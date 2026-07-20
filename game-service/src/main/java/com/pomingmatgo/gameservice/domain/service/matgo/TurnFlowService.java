@@ -88,13 +88,10 @@ public class TurnFlowService {
                 .then();
     }
 
-    /** 턴 완료 후 다음 단계 결정: 마지막 턴/최종 라운드의 점수 달성 → 게임 종료, 점수 달성 → 고/스톱 대기, 그 외 → 다음 턴 */
+    /** 턴 완료 후 다음 단계 결정: 최종 라운드의 점수 달성 → 자동 스톱 종료, 점수 달성 → 고/스톱 대기, 마지막 턴 미달성 → 무승부, 그 외 → 다음 턴 */
     private Mono<GameState> proceedAfterTurn(GameState gameState, Player player) {
-        if (gameState.isLastTurn()) {
-            return processGameOver(gameState, player);
-        }
         if (gameState.canGoStop(player)) {
-            // 마지막 라운드엔 GO 선택지가 없으므로 곧바로 게임 종료
+            // 마지막 라운드엔 GO 선택지가 없으므로 자동 스톱으로 곧바로 게임 종료
             if (gameState.isFinalRound()) {
                 return processGameOver(gameState, player);
             }
@@ -103,14 +100,19 @@ public class TurnFlowService {
             return gamePlayService.enterGoStopChoice(gameState)
                     .delayUntil(awaitingState -> gameMessageSender.sendGoStopChoiceMessage(awaitingState, player));
         }
+        // 상대는 직전 턴(자동 스톱 판정)에서 이미 미달이었고 이번 턴에 점수가 오를 수 없으므로 둘 다 스톱 불가 → 무승부
+        if (gameState.isLastTurn()) {
+            return processGameOver(gameState, Player.PLAYER_NOTHING);
+        }
         return gamePlayService.proceedToNextTurn(gameState)
                 .flatMap(nextState -> gameMessageSender.sendTurnInfo(nextState, TURN_TIMEOUT_MILLIS)
                         .thenReturn(nextState));
     }
 
-    private Mono<GameState> processGameOver(GameState gameState, Player player) {
+    /** winner가 PLAYER_NOTHING이면 무승부 */
+    private Mono<GameState> processGameOver(GameState gameState, Player winner) {
         return gamePlayService.gameOver(gameState)
-                .delayUntil(finalState -> gameMessageSender.sendGameOverMessage(finalState, player));
+                .delayUntil(finalState -> gameMessageSender.sendGameOverMessage(finalState, winner));
     }
 
     /**
