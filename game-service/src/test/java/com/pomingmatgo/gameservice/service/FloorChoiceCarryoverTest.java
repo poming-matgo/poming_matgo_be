@@ -3,8 +3,10 @@ package com.pomingmatgo.gameservice.service;
 import com.pomingmatgo.gameservice.domain.ChoiceInfo;
 import com.pomingmatgo.gameservice.domain.GamePhase;
 import com.pomingmatgo.gameservice.domain.GameState;
+import com.pomingmatgo.gameservice.domain.repository.AcquiredCardRepository;
 import com.pomingmatgo.gameservice.domain.repository.GameStateRepository;
 import com.pomingmatgo.gameservice.domain.repository.InstalledCardRepository;
+import com.pomingmatgo.gameservice.domain.service.matgo.CardMatchEngine;
 import com.pomingmatgo.gameservice.domain.service.matgo.GameService;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -12,6 +14,7 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
+import org.mockito.Spy;
 import org.mockito.junit.jupiter.MockitoExtension;
 import reactor.core.publisher.Mono;
 import reactor.test.StepVerifier;
@@ -39,6 +42,10 @@ class FloorChoiceCarryoverTest {
     private InstalledCardRepository installedCardRepository;
     @Mock
     private GameStateRepository gameStateRepository;
+    @Mock
+    private AcquiredCardRepository acquiredCardRepository;
+    @Spy
+    private CardMatchEngine cardMatchEngine = new CardMatchEngine();
 
     @InjectMocks
     private GameService gameService;
@@ -65,6 +72,7 @@ class FloorChoiceCarryoverTest {
                 .willReturn(Mono.just(List.of(FEB_2, FEB_3)));
         given(installedCardRepository.deleteAllRevealedCardByMonth(ROOM_ID, 1))
                 .willReturn(Mono.just(true));
+        given(acquiredCardRepository.getAllCards(ROOM_ID, 2)).willReturn(Mono.just(List.of()));
         given(gameStateRepository.save(any())).willReturn(Mono.just(ROOM_ID));
 
         StepVerifier.create(gameService.submitCard(inProgressState(), JAN_1, FEB_1))
@@ -97,6 +105,7 @@ class FloorChoiceCarryoverTest {
 
         given(installedCardRepository.deleteRevealedCard(anyLong(), any()))
                 .willReturn(Mono.just(true));
+        given(acquiredCardRepository.getAllCards(ROOM_ID, 2)).willReturn(Mono.just(List.of()));
         given(gameStateRepository.save(any())).willReturn(Mono.just(ROOM_ID));
 
         StepVerifier.create(gameService.selectFloorCard(state, PLAYER_1, 0))
@@ -135,6 +144,7 @@ class FloorChoiceCarryoverTest {
                 .willReturn(Mono.just(List.of(MAR_2, MAR_3)));
         given(installedCardRepository.deleteRevealedCard(anyLong(), any()))
                 .willReturn(Mono.just(true));
+        given(acquiredCardRepository.getAllCards(ROOM_ID, 2)).willReturn(Mono.just(List.of()));
         given(gameStateRepository.save(any())).willReturn(Mono.just(ROOM_ID));
 
         StepVerifier.create(gameService.selectFloorCard(state, PLAYER_1, 0))
