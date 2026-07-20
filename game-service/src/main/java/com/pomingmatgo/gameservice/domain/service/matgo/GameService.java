@@ -177,7 +177,7 @@ public class GameService {
                 .thenReturn(newState);
     }
 
-    public Mono<GameState> executeGoStop(GameState gameState, Player player) {
+    public Mono<GameState> applyGo(GameState gameState, Player player) {
         GameState newState = gameState.updatePlayerState(player, ps -> ps.toBuilder()
                 .go(ps.getGo() + 1)
                 .goScore(ps.getScore())

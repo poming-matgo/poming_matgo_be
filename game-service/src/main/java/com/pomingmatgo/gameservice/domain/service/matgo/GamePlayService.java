@@ -93,7 +93,7 @@ public class GamePlayService {
     public Mono<GameState> executeGoStop(long roomId, GameState gameState, Player player, boolean go, Runnable onLockAcquired) {
         return validatedFreshState(roomId, GamePhase.AWAITING_GO_STOP_CHOICE, player, onLockAcquired)
                 .flatMap(freshState -> go
-                        ? gameService.executeGoStop(freshState, player).flatMap(this::proceedToNextTurn)
+                        ? gameService.applyGo(freshState, player).flatMap(this::proceedToNextTurn)
                         : Mono.just(freshState.toBuilder().phase(GamePhase.END).build()));
     }
 
