@@ -3,12 +3,12 @@ package com.pomingmatgo.gameservice.api.handler.websocket;
 import com.fasterxml.jackson.databind.JavaType;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.pomingmatgo.gameservice.api.handler.event.RequestEvent;
-import com.pomingmatgo.gameservice.api.handler.event.category.EventCategory;
 import com.pomingmatgo.gameservice.api.handler.event.category.SubCategory;
 import com.pomingmatgo.gameservice.api.request.websocket.JoinRoomReq;
 import com.pomingmatgo.gameservice.domain.GamePhase;
 import com.pomingmatgo.gameservice.domain.GameState;
 import com.pomingmatgo.gameservice.domain.Player;
+import com.pomingmatgo.gameservice.domain.messaging.ResponseEvent;
 import com.pomingmatgo.gameservice.domain.service.matgo.ReconnectService;
 import com.pomingmatgo.gameservice.domain.service.matgo.RoomCleanupService;
 import com.pomingmatgo.gameservice.domain.service.matgo.RoomService;
@@ -148,7 +148,7 @@ public class GameWebSocketHandler implements WebSocketHandler {
                                 .then(gameState.getPhase().isPlayerActionPhase()
                                         ? handleReconnect(roomId, player, session)
                                         : messageSender.sendMessageToAllUser(
-                                                roomId, WebSocketResDto.of(player, "CONNECT", "접속했습니다.")))));
+                                                roomId, WebSocketResDto.of(player, ResponseEvent.CONNECT, "접속했습니다.")))));
     }
 
     /**
@@ -157,10 +157,10 @@ public class GameWebSocketHandler implements WebSocketHandler {
      */
     private Mono<Void> handleReconnect(long roomId, Player player, WebSocketSession session) {
         return messageSender.sendMessageToAllUser(
-                        roomId, WebSocketResDto.of(player, "RECONNECT", "재접속했습니다."))
+                        roomId, WebSocketResDto.of(player, ResponseEvent.RECONNECT, "재접속했습니다."))
                 .then(reconnectService.buildSnapshot(roomId, player))
                 .flatMap(snapshot -> messageSender.sendMessageToSession(
-                        session, WebSocketResDto.of(player, "RECONNECT_STATE", "재접속 상태 동기화", snapshot)));
+                        session, WebSocketResDto.of(player, ResponseEvent.RECONNECT_STATE, "재접속 상태 동기화", snapshot)));
     }
 
     private Mono<Void> handleWebSocketError(WebSocketSession session, Throwable error) {
@@ -221,7 +221,7 @@ public class GameWebSocketHandler implements WebSocketHandler {
                                 // 단, 마지막 접속자까지 나가면 버려진 방이므로 즉시 정리한다.
                                 if (phase.isPlayerActionPhase() && opponentConnected) {
                                     return messageSender.sendMessageToAllUser(roomId,
-                                            WebSocketResDto.of(disconnected, "OPPONENT_DISCONNECTED",
+                                            WebSocketResDto.of(disconnected, ResponseEvent.OPPONENT_DISCONNECTED,
                                                     "상대방의 연결이 끊겼습니다. 재접속할 때까지 자동플레이로 진행합니다."));
                                 }
 
@@ -229,7 +229,7 @@ public class GameWebSocketHandler implements WebSocketHandler {
 
                                 Mono<Void> notify = inProgress
                                         ? messageSender.sendMessageToAllUser(roomId,
-                                                WebSocketResDto.of(disconnected, "OPPONENT_DISCONNECTED",
+                                                WebSocketResDto.of(disconnected, ResponseEvent.OPPONENT_DISCONNECTED,
                                                         "상대방이 연결을 끊어 게임이 종료됩니다."))
                                         : Mono.empty();
 
@@ -245,13 +245,11 @@ public class GameWebSocketHandler implements WebSocketHandler {
     }
 
     private Mono<Void> routeEvent(RequestEvent<?> event, GameState gameState, Player player) {
-        EventCategory eventType = EventCategory.valueOf(event.getEventType().getType());
-
-        return switch (eventType) {
+        // SubCategory가 카테고리를 유일 결정 — 클라가 보낸 type 문자열은 라우팅에 쓰지 않는다
+        return switch (event.getSubCategory().getCategory()) {
             case ROOM -> wsRoomHandler.handleRoomEvent(event, gameState, player);
             case PREGAME -> wsPreGameHandler.handlePreGameEvent(event, gameState, player);
             case GAME -> wsGameHandler.handleGameEvent(event, gameState, player);
-            default -> Mono.empty();
         };
     }
 }

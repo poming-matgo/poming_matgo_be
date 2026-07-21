@@ -29,14 +29,14 @@ public class GameMessageSender {
     public Mono<Void> sendSubmitCardInfo(long roomId, Player player, Card card) {
         return messageSender.sendMessageToAllUser(
                 roomId,
-                WebSocketResDto.of(player, "SUBMIT_CARD", "카드 제출", card)
+                WebSocketResDto.of(player, ResponseEvent.SUBMIT_CARD, "카드 제출", card)
         );
     }
 
     public Mono<Void> sendTopCardInfo(long roomId, Player player, Card card) {
         return messageSender.sendMessageToAllUser(
                 roomId,
-                WebSocketResDto.of(player, "CARD_REVEALED", "상단 카드 정보", card)
+                WebSocketResDto.of(player, ResponseEvent.CARD_REVEALED, "상단 카드 정보", card)
         );
     }
 
@@ -46,7 +46,7 @@ public class GameMessageSender {
 
         return messageSender.sendMessageToAllUser(
                 roomId,
-                WebSocketResDto.of(player, "ACQUIRED_CARD", "카드 획득", classifiedCards)
+                WebSocketResDto.of(player, ResponseEvent.ACQUIRED_CARD, "카드 획득", classifiedCards)
         );
     }
 
@@ -58,14 +58,14 @@ public class GameMessageSender {
                 remainingMs
         );
         return messageSender.sendMessageToAllUser(gameState.getRoomId(),
-                WebSocketResDto.of(PLAYER_NOTHING, "ANNOUNCE_TURN_INFORMATION", "턴을 알립니다.", res));
+                WebSocketResDto.of(PLAYER_NOTHING, ResponseEvent.ANNOUNCE_TURN_INFORMATION, "턴을 알립니다.", res));
     }
 
     public Mono<Void> sendChooseFloorCardMessage(long roomId, Player player, List<Card> card) {
         WebSocketSession session = sessionManager.getSession(roomId, player.getNumber());
         return messageSender.sendMessageToSession(
                 session,
-                WebSocketResDto.of(player, "CHOOSE_FLOOR_CARD", "바닥 카드 선택", card));
+                WebSocketResDto.of(player, ResponseEvent.CHOOSE_FLOOR_CARD, "바닥 카드 선택", card));
     }
 
     public Mono<Void> sendMovingCardMessage(long roomId, Player player, Player otherPlayer, Card card) {
@@ -73,10 +73,10 @@ public class GameMessageSender {
         WebSocketSession otherSession = sessionManager.getSession(roomId, otherPlayer.getNumber());
         return messageSender.sendMessageToSession(
                 session,
-                WebSocketResDto.of(player, "OPPONENT_PI_CLAIMED", "상대방의 카드를 빼았습니다.", card)).then(
+                WebSocketResDto.of(player, ResponseEvent.OPPONENT_PI_CLAIMED, "상대방의 카드를 빼았습니다.", card)).then(
                 messageSender.sendMessageToSession(
                         otherSession,
-                        WebSocketResDto.of(otherPlayer, "OPPONENT_PI_CLAIMED", "상대방이 피를 뺏습니다.", card)
+                        WebSocketResDto.of(otherPlayer, ResponseEvent.OPPONENT_PI_CLAIMED, "상대방이 피를 뺏습니다.", card)
                 ));
     }
 
@@ -84,7 +84,7 @@ public class GameMessageSender {
         if (event != SpecialEvent.NONE) {
             return messageSender.sendMessageToAllUser(
                     roomId,
-                    WebSocketResDto.of(player, event.name(), event.getDisplayName())
+                    WebSocketResDto.of(player, event.getResponseEvent(), event.getDisplayName())
             );
         }
 
@@ -94,7 +94,7 @@ public class GameMessageSender {
     public Mono<Void> sendScoreInfo(long roomId, ScoreInfoRes scoreInfo) {
         return messageSender.sendMessageToAllUser(
                 roomId,
-                WebSocketResDto.of(PLAYER_NOTHING, "SCORE_UPDATE", "점수 정보 업데이트", scoreInfo)
+                WebSocketResDto.of(PLAYER_NOTHING, ResponseEvent.SCORE_UPDATE, "점수 정보 업데이트", scoreInfo)
         );
     }
 
@@ -106,11 +106,11 @@ public class GameMessageSender {
         WebSocketSession otherSession = sessionManager.getSession(roomId, otherPlayer.getNumber());
         return messageSender.sendMessageToSession(
                 session,
-                WebSocketResDto.of(player, "GO_STOP_CHOICE", "고/스톱 선택", nextGoNum)
+                WebSocketResDto.of(player, ResponseEvent.GO_STOP_CHOICE, "고/스톱 선택", nextGoNum)
         ).then(
                 messageSender.sendMessageToSession(
                         otherSession,
-                        WebSocketResDto.of(otherPlayer, "OPPONENT_GO_STOP_CHOICE", "상대방이 고/스톱을 선택합니다.", null)
+                        WebSocketResDto.of(otherPlayer, ResponseEvent.OPPONENT_GO_STOP_CHOICE, "상대방이 고/스톱을 선택합니다.", null)
                 )
         );
     }
@@ -120,7 +120,7 @@ public class GameMessageSender {
         long goNum = gameState.getPlayerState(player).getGo();
         return messageSender.sendMessageToAllUser(
                 roomId,
-                WebSocketResDto.of(player, "GO_RESULT", "고 횟수", goNum)
+                WebSocketResDto.of(player, ResponseEvent.GO_RESULT, "고 횟수", goNum)
         );
     }
 
@@ -130,7 +130,7 @@ public class GameMessageSender {
         String message = winner == PLAYER_NOTHING ? "무승부" : "게임 승리자";
         return messageSender.sendMessageToAllUser(
                 roomId,
-                WebSocketResDto.of(PLAYER_NOTHING, "GAME_OVER", message, winner)
+                WebSocketResDto.of(PLAYER_NOTHING, ResponseEvent.GAME_OVER, message, winner)
         );
     }
 }

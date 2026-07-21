@@ -4,6 +4,7 @@ import com.pomingmatgo.gameservice.api.handler.event.RequestEvent;
 import com.pomingmatgo.gameservice.domain.GamePhase;
 import com.pomingmatgo.gameservice.domain.GameState;
 import com.pomingmatgo.gameservice.domain.Player;
+import com.pomingmatgo.gameservice.domain.messaging.ResponseEvent;
 import com.pomingmatgo.gameservice.domain.service.matgo.PreGameService;
 import com.pomingmatgo.gameservice.domain.service.matgo.RoomService;
 import com.pomingmatgo.gameservice.global.MessageSender;
@@ -44,7 +45,7 @@ public class WsRoomHandler {
                         .flatMap(freshState ->
                                 messageSender.sendMessageToAllUser(
                                                 roomId,
-                                                WebSocketResDto.of(player, "READY", "Ready 했습니다.")
+                                                WebSocketResDto.of(player, ResponseEvent.READY, "Ready 했습니다.")
                                         )
                                         .then(checkAndProceedIfAllReady(freshState))
                         ),
@@ -59,7 +60,7 @@ public class WsRoomHandler {
                 roomService.readyFresh(roomId, player, false)
                         .then(messageSender.sendMessageToAllUser(
                                 roomId,
-                                WebSocketResDto.of(player, "UNREADY", "Ready 취소 했습니다.")
+                                WebSocketResDto.of(player, ResponseEvent.UNREADY, "Ready 취소 했습니다.")
                         )),
                 () -> new WebSocketBusinessException(WebSocketErrorCode.TOO_MANY_REQUESTS)
         );
@@ -79,7 +80,7 @@ public class WsRoomHandler {
     private Mono<Void> handleAllReadyEvent(long roomId) {
         WebSocketResDto<Void> startDto = new WebSocketResDto<>(
                 PLAYER_NOTHING,
-                "START",
+                ResponseEvent.START,
                 "게임이 시작됐습니다."
         );
         return messageSender.sendMessageToAllUser(roomId, startDto);

@@ -1,33 +1,34 @@
 package com.pomingmatgo.gameservice.global;
 
 import com.pomingmatgo.gameservice.domain.Player;
+import com.pomingmatgo.gameservice.domain.messaging.ResponseEvent;
 import lombok.Getter;
 
 @Getter
 public class WebSocketResDto<T> {
     private final Player player;
-    private final String status;
+    private final ResponseEvent status;
     private final String message;
     private T data;
 
-    public WebSocketResDto(Player player, String status, String message) {
+    public WebSocketResDto(Player player, ResponseEvent status, String message) {
         this.player = player;
         this.status = status;
         this.message = message;
     }
 
-    public WebSocketResDto(Player player, String status, String message, T data) {
+    public WebSocketResDto(Player player, ResponseEvent status, String message, T data) {
         this.player = player;
         this.status = status;
         this.message = message;
         this.data = data;
     }
 
-    public static <T> WebSocketResDto<T> of(Player player, String status, String message) {
+    public static <T> WebSocketResDto<T> of(Player player, ResponseEvent status, String message) {
         return new WebSocketResDto<>(player, status, message, null);
     }
 
-    public static <T> WebSocketResDto<T> of(Player player, String status, String message, T data) {
+    public static <T> WebSocketResDto<T> of(Player player, ResponseEvent status, String message, T data) {
         return new WebSocketResDto<>(player, status, message, data);
     }
 }

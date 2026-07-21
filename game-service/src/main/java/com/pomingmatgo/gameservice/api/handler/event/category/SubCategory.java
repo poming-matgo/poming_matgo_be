@@ -8,17 +8,19 @@ import lombok.Getter;
 
 @Getter
 public enum SubCategory {
-    CONNECT(JoinRoomReq.class),
-    READY(Void.class), // payload가 없는 경우
-    UNREADY(Void.class),
-    LEADER_SELECTION(LeadSelectionReq.class),
-    NORMAL_SUBMIT(NormalSubmitReq.class),
-    FLOOR_SELECT(NormalSubmitReq.class),
-    GO_STOP_CHOICE(GoStopReq.class);
+    CONNECT(EventCategory.ROOM, JoinRoomReq.class),
+    READY(EventCategory.ROOM, Void.class), // payload가 없는 경우
+    UNREADY(EventCategory.ROOM, Void.class),
+    LEADER_SELECTION(EventCategory.PREGAME, LeadSelectionReq.class),
+    NORMAL_SUBMIT(EventCategory.GAME, NormalSubmitReq.class),
+    FLOOR_SELECT(EventCategory.GAME, NormalSubmitReq.class),
+    GO_STOP_CHOICE(EventCategory.GAME, GoStopReq.class);
 
+    private final EventCategory category;
     private final Class<?> payloadClass;
 
-    SubCategory(Class<?> payloadClass) {
+    SubCategory(EventCategory category, Class<?> payloadClass) {
+        this.category = category;
         this.payloadClass = payloadClass;
     }
 

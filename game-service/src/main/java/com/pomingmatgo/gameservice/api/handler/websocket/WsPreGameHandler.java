@@ -3,6 +3,7 @@ package com.pomingmatgo.gameservice.api.handler.websocket;
 import com.pomingmatgo.gameservice.api.handler.event.RequestEvent;
 import com.pomingmatgo.gameservice.api.request.websocket.LeadSelectionReq;
 import com.pomingmatgo.gameservice.domain.messaging.LeadSelectionRes;
+import com.pomingmatgo.gameservice.domain.messaging.ResponseEvent;
 import com.pomingmatgo.gameservice.domain.GameState;
 import com.pomingmatgo.gameservice.domain.InstalledCard;
 import com.pomingmatgo.gameservice.domain.Player;
@@ -62,7 +63,7 @@ public class WsPreGameHandler {
     private Mono<Void> sendLeaderSelectionMessage(long roomId, Player player, int cardIndex) {
         return messageSender.sendMessageToAllUser(
                 roomId,
-                WebSocketResDto.of(player, "LEADER_SELECTION", "선두 플레이어 선택", cardIndex)
+                WebSocketResDto.of(player, ResponseEvent.LEADER_SELECTION, "선두 플레이어 선택", cardIndex)
         );
     }
 
@@ -127,13 +128,13 @@ public class WsPreGameHandler {
 
     private Mono<Void> sendAllSelectedEvent(long roomId, LeadSelectionRes leadSelectionRes) {
         return messageSender.sendMessageToAllUser(roomId,
-                WebSocketResDto.of(PLAYER_NOTHING, "LEADER_SELECTION_RESULT", "선을 정했습니다.", leadSelectionRes));
+                WebSocketResDto.of(PLAYER_NOTHING, ResponseEvent.LEADER_SELECTION_RESULT, "선을 정했습니다.", leadSelectionRes));
     }
 
     private Mono<Void> sendDistributedCardInfo(long roomId, InstalledCard installedCard) {
         WebSocketResDto<List<String>> ret1 =  WebSocketResDto.of(
                 PLAYER_1,
-                "DISTRIBUTE_CARD",
+                ResponseEvent.DISTRIBUTE_CARD,
                 "카드를 배분합니다.",
                 installedCard.getPlayer1()
                         .stream()
@@ -142,7 +143,7 @@ public class WsPreGameHandler {
 
         WebSocketResDto<List<String>> ret2 =  WebSocketResDto.of(
                 PLAYER_2,
-                "DISTRIBUTE_CARD",
+                ResponseEvent.DISTRIBUTE_CARD,
                 "카드를 배분합니다.",
                 installedCard.getPlayer2()
                         .stream()
@@ -160,7 +161,7 @@ public class WsPreGameHandler {
                 messageSender.sendMessageToSession(player2Session, ret2),
                 messageSender.sendMessageToAllUser(
                         roomId,
-                        WebSocketResDto.of(PLAYER_NOTHING, "DISTRIBUTED_FLOOR_CARD", "바닥패 정보", revealedCards)
+                        WebSocketResDto.of(PLAYER_NOTHING, ResponseEvent.DISTRIBUTED_FLOOR_CARD, "바닥패 정보", revealedCards)
                 )
         );
     }
