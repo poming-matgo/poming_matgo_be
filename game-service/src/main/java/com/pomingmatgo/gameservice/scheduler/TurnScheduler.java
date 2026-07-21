@@ -21,4 +21,7 @@ public interface TurnScheduler {
     void scheduleAutoPlay(long roomId, int round, int currentTurn, Player currentPlayer, long deadlineNanos, GamePhase expectedPhase);
 
     void cancelAutoPlay(long roomId);
+
+    /** 대기 중인 타이머 기준 남은 턴 시간(ms). 재접속 스냅샷 표시용 근사값 — 타이머가 없으면 턴 제한 전체를 반환 */
+    long getRemainingTurnMillis(long roomId);
 }

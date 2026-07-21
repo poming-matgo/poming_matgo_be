@@ -1,7 +1,7 @@
 package com.pomingmatgo.gameservice.domain.service.matgo;
 
-import com.pomingmatgo.gameservice.api.response.websocket.ReconnectStateRes;
-import com.pomingmatgo.gameservice.api.response.websocket.ScoreInfoRes;
+import com.pomingmatgo.gameservice.domain.messaging.ReconnectStateRes;
+import com.pomingmatgo.gameservice.domain.messaging.ScoreInfoRes;
 import com.pomingmatgo.gameservice.domain.ChoiceInfo;
 import com.pomingmatgo.gameservice.domain.GamePhase;
 import com.pomingmatgo.gameservice.domain.GameState;
@@ -11,7 +11,7 @@ import com.pomingmatgo.gameservice.domain.repository.AcquiredCardRepository;
 import com.pomingmatgo.gameservice.domain.repository.GameStateRepository;
 import com.pomingmatgo.gameservice.domain.repository.InstalledCardRepository;
 import com.pomingmatgo.gameservice.global.exception.WebSocketBusinessException;
-import com.pomingmatgo.gameservice.scheduler.AutoPlayScheduler;
+import com.pomingmatgo.gameservice.scheduler.TurnScheduler;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import reactor.core.publisher.Mono;
@@ -38,7 +38,7 @@ public class ReconnectService {
     private final GameStateRepository gameStateRepository;
     private final InstalledCardRepository installedCardRepository;
     private final AcquiredCardRepository acquiredCardRepository;
-    private final AutoPlayScheduler autoPlayScheduler;
+    private final TurnScheduler turnScheduler;
 
     public Mono<ReconnectStateRes> buildSnapshot(long roomId, Player me) {
         Player opponent = me.opponent();
@@ -65,7 +65,7 @@ public class ReconnectService {
                 .currentPlayer(gameState.getCurrentPlayer())
                 .phase(gameState.getPhase())
                 .leadingPlayer(gameState.getLeadingPlayer())
-                .remainingMs(autoPlayScheduler.getRemainingTurnMillis(gameState.getRoomId()))
+                .remainingMs(turnScheduler.getRemainingTurnMillis(gameState.getRoomId()))
                 .myCards(myCards)
                 .opponentCardCount(opponentCardCount)
                 .floorCards(floorCards.stream().collect(Collectors.groupingBy(Card::getMonth)))

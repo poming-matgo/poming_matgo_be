@@ -1,4 +1,4 @@
-package com.pomingmatgo.gameservice.api.response.websocket.dto;
+package com.pomingmatgo.gameservice.domain.messaging;
 
 import lombok.AllArgsConstructor;
 import lombok.Getter;

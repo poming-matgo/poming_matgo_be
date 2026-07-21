@@ -1,4 +1,4 @@
-package com.pomingmatgo.gameservice.api.response.websocket;
+package com.pomingmatgo.gameservice.domain.messaging;
 
 import com.pomingmatgo.gameservice.domain.GameState;
 import com.pomingmatgo.gameservice.domain.Player;

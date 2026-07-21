@@ -1,6 +1,5 @@
-package com.pomingmatgo.gameservice.api.response.websocket;
+package com.pomingmatgo.gameservice.domain.messaging;
 
-import com.pomingmatgo.gameservice.api.response.websocket.dto.PlayerScoreDto;
 import com.pomingmatgo.gameservice.domain.GamePhase;
 import com.pomingmatgo.gameservice.domain.Player;
 import com.pomingmatgo.gameservice.domain.card.Card;

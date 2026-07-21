@@ -1,6 +1,6 @@
 package com.pomingmatgo.gameservice.domain.service.matgo;
 
-import com.pomingmatgo.gameservice.api.response.websocket.LeadSelectionRes;
+import com.pomingmatgo.gameservice.domain.messaging.LeadSelectionRes;
 import com.pomingmatgo.gameservice.domain.*;
 import com.pomingmatgo.gameservice.domain.card.Card;
 import com.pomingmatgo.gameservice.domain.repository.GameStateRepository;

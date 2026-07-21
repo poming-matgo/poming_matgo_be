@@ -89,6 +89,7 @@ public class AutoPlayScheduler implements TurnScheduler {
      * deadline은 GRACE_PERIOD를 포함하므로 빼서 돌려준다. 타이머가 없으면(경합 틈) 턴 제한 전체를 반환 —
      * 재접속 스냅샷 표시용 근사값이며 실제 타임아웃 판정은 타이머 자신이 한다.
      */
+    @Override
     public long getRemainingTurnMillis(long roomId) {
         Scheduled current = scheduled.get(roomId);
         if (current == null) return TurnTiming.TURN_TIMEOUT_MILLIS;

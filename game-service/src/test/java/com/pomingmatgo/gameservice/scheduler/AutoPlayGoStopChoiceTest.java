@@ -1,6 +1,6 @@
 package com.pomingmatgo.gameservice.scheduler;
 
-import com.pomingmatgo.gameservice.api.response.websocket.GameMessageSender;
+import com.pomingmatgo.gameservice.domain.messaging.GameMessageSender;
 import com.pomingmatgo.gameservice.domain.GamePhase;
 import com.pomingmatgo.gameservice.domain.GameState;
 import com.pomingmatgo.gameservice.domain.Player;
