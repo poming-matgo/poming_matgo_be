@@ -9,9 +9,9 @@ import com.pomingmatgo.gameservice.domain.GamePhase;
 import com.pomingmatgo.gameservice.domain.GameState;
 import com.pomingmatgo.gameservice.domain.Player;
 import com.pomingmatgo.gameservice.domain.messaging.ResponseEvent;
+import com.pomingmatgo.gameservice.domain.service.matgo.GameService;
 import com.pomingmatgo.gameservice.domain.service.matgo.ReconnectService;
 import com.pomingmatgo.gameservice.domain.service.matgo.RoomCleanupService;
-import com.pomingmatgo.gameservice.domain.service.matgo.RoomService;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.pomingmatgo.gameservice.global.MessageSender;
 import com.pomingmatgo.gameservice.global.WebSocketResDto;
@@ -40,7 +40,7 @@ import static com.pomingmatgo.gameservice.global.exception.WebSocketErrorCode.*;
 @Slf4j
 public class GameWebSocketHandler implements WebSocketHandler {
     private final ObjectMapper objectMapper;
-    private final RoomService roomService;
+    private final GameService gameService;
     private final SessionManager sessionManager;
     private final WsRoomHandler wsRoomHandler;
     private final WsPreGameHandler wsPreGameHandler;
@@ -88,7 +88,7 @@ public class GameWebSocketHandler implements WebSocketHandler {
                     long roomId = context.roomId();
                     Player player = Player.fromNumber(context.playerNum());
 
-                    return roomService.getGameState(roomId)
+                    return gameService.findGameState(roomId)
                             .switchIfEmpty(Mono.error(new WebSocketBusinessException(NOT_EXISTED_ROOM)))
                             .flatMap(gameState -> {
                                 if (isGameAction(event, gameState, player)) {
@@ -140,7 +140,7 @@ public class GameWebSocketHandler implements WebSocketHandler {
         long userId = payload.userId();
         long roomId = payload.roomId();
 
-        return roomService.getGameState(roomId)
+        return gameService.findGameState(roomId)
                 .switchIfEmpty(Mono.error(new WebSocketBusinessException(NOT_EXISTED_ROOM)))
                 .flatMap(gameState -> Mono.fromCallable(() -> gameState.getPlayerType(userId))
                         .flatMap(player -> sessionManager.addPlayer(roomId, player, userId, session)
@@ -207,7 +207,7 @@ public class GameWebSocketHandler implements WebSocketHandler {
                         return Mono.empty();
                     }
 
-                    return roomService.getGameState(roomId)
+                    return gameService.findGameState(roomId)
                             // 방 상태가 이미 없으면(teardown과 교차한 재접속 등) 세션 매핑만 마저 정리 (roomSessions 누수 방지)
                             .switchIfEmpty(Mono.defer(() ->
                                     sessionManager.removeRoom(roomId).then(Mono.<GameState>empty())))

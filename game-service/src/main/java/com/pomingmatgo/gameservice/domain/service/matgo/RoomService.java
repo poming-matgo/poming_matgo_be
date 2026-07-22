@@ -67,10 +67,6 @@ public class RoomService {
                 .then(sessionManager.removeRoom(roomId));
     }
 
-    public Mono<GameState> getGameState(Long roomId) {
-        return gameStateRepository.findById(roomId);
-    }
-
     private Mono<Void> saveWithUserId(GameState gameState, long userId) {
         if (!gameState.canJoin()) {
             return Mono.error(new WebSocketBusinessException(WebSocketErrorCode.FULL_ROOM));

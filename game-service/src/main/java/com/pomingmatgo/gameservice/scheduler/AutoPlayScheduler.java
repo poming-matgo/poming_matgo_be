@@ -5,7 +5,7 @@ import com.pomingmatgo.gameservice.domain.GameState;
 import com.pomingmatgo.gameservice.domain.Player;
 import com.pomingmatgo.gameservice.domain.TurnTiming;
 import com.pomingmatgo.gameservice.domain.event.RoomCleanedUpEvent;
-import com.pomingmatgo.gameservice.domain.service.matgo.RoomService;
+import com.pomingmatgo.gameservice.domain.service.matgo.GameService;
 import com.pomingmatgo.gameservice.domain.service.matgo.TurnFlowService;
 import com.pomingmatgo.gameservice.global.lock.InFlightManager;
 import lombok.RequiredArgsConstructor;
@@ -52,7 +52,7 @@ public class AutoPlayScheduler implements TurnScheduler {
     private static final long MIN_DELAY_MILLIS = 100;
 
     private final InFlightManager inFlightManager;
-    private final RoomService roomService;
+    private final GameService gameService;
     private final TurnFlowService turnFlowService;
 
     /**
@@ -150,7 +150,7 @@ public class AutoPlayScheduler implements TurnScheduler {
     }
 
     private Mono<Void> attemptAutoPlay(long roomId, TurnStep step, Player currentPlayer) {
-        return roomService.getGameState(roomId)
+        return gameService.findGameState(roomId)
                 .flatMap(gameState -> {
                     if (!step.matches(gameState)) {
                         return Mono.empty();
@@ -185,7 +185,7 @@ public class AutoPlayScheduler implements TurnScheduler {
                             .flatMap(normalInProgress -> {
                                 // attempt 시점 이후 정상 요청이 막 도착했을 수 있음 → 게임 로직 진입 직전 한 번 더 체크 (race 좁힘)
                                 if (normalInProgress) return Mono.<Void>empty();
-                                return roomService.getGameState(roomId)
+                                return gameService.findGameState(roomId)
                                         .flatMap(gameState -> {
                                             if (!step.matches(gameState)) {
                                                 return Mono.empty();
