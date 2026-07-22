@@ -10,9 +10,6 @@ import java.io.Serializable;
 import java.util.Objects;
 import java.util.function.UnaryOperator;
 
-import static com.pomingmatgo.gameservice.domain.Player.PLAYER_1;
-import static com.pomingmatgo.gameservice.domain.Player.PLAYER_2;
-
 @Getter
 @AllArgsConstructor
 @NoArgsConstructor
@@ -80,7 +77,8 @@ public class GameState implements Serializable {
 
     @JsonIgnore
     public Player getCurrentPlayer() {
-        return this.getLeadingPlayer() == this.getCurrentTurn() ? PLAYER_1 : PLAYER_2;
+        Player leader = Player.fromNumber(this.leadingPlayer);
+        return this.currentTurn == 1 ? leader : leader.opponent();
     }
 
     @JsonIgnore
