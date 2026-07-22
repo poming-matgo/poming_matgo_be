@@ -1,6 +1,7 @@
 package com.pomingmatgo.gameservice.domain.messaging;
 
 import com.pomingmatgo.gameservice.domain.GameState;
+import com.pomingmatgo.gameservice.domain.InstalledCard;
 import com.pomingmatgo.gameservice.domain.Player;
 import com.pomingmatgo.gameservice.domain.card.Card;
 import com.pomingmatgo.gameservice.domain.card.CardType;
@@ -16,6 +17,9 @@ import reactor.core.publisher.Mono;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
+
+import static com.pomingmatgo.gameservice.domain.Player.PLAYER_1;
+import static com.pomingmatgo.gameservice.domain.Player.PLAYER_2;
 import static com.pomingmatgo.gameservice.domain.Player.PLAYER_NOTHING;
 
 @Component
@@ -25,6 +29,45 @@ public class GameMessageSender {
     private final SessionManager sessionManager;
 
 
+
+    public Mono<Void> sendLeaderSelectionMessage(long roomId, Player player, int cardIndex) {
+        return messageSender.sendMessageToAllUser(
+                roomId,
+                WebSocketResDto.of(player, ResponseEvent.LEADER_SELECTION, "선두 플레이어 선택", cardIndex)
+        );
+    }
+
+    public Mono<Void> sendLeaderSelectionResult(long roomId, LeadSelectionRes leadSelectionRes) {
+        return messageSender.sendMessageToAllUser(
+                roomId,
+                WebSocketResDto.of(PLAYER_NOTHING, ResponseEvent.LEADER_SELECTION_RESULT, "선을 정했습니다.", leadSelectionRes)
+        );
+    }
+
+    public Mono<Void> sendDistributedCardInfo(long roomId, InstalledCard installedCard) {
+        Map<Integer, List<Card>> revealedCards = installedCard.getRevealedCard().stream()
+                .collect(Collectors.groupingBy(Card::getMonth));
+
+        return Mono.when(
+                messageSender.sendMessageToSession(
+                        sessionManager.getSession(roomId, PLAYER_1.getNumber()),
+                        distributedCardDto(PLAYER_1, installedCard.getPlayer1())),
+                messageSender.sendMessageToSession(
+                        sessionManager.getSession(roomId, PLAYER_2.getNumber()),
+                        distributedCardDto(PLAYER_2, installedCard.getPlayer2())),
+                messageSender.sendMessageToAllUser(
+                        roomId,
+                        WebSocketResDto.of(PLAYER_NOTHING, ResponseEvent.DISTRIBUTED_FLOOR_CARD, "바닥패 정보", revealedCards))
+        );
+    }
+
+    private WebSocketResDto<List<String>> distributedCardDto(Player player, List<Card> cards) {
+        return WebSocketResDto.of(
+                player,
+                ResponseEvent.DISTRIBUTE_CARD,
+                "카드를 배분합니다.",
+                cards.stream().map(Enum::name).toList());
+    }
 
     public Mono<Void> sendSubmitCardInfo(long roomId, Player player, Card card) {
         return messageSender.sendMessageToAllUser(

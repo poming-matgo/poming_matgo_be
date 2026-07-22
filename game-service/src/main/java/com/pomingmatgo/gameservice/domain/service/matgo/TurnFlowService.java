@@ -67,7 +67,7 @@ public class TurnFlowService {
 
     /**
      * 턴 정보 공지 + 도달한 phase의 자동플레이 타이머 등록.
-     * 첫 턴 시작(WsPreGameHandler)이 이후 턴 전환과 같은 경로를 타게 하는 공개 진입점 —
+     * 첫 턴 시작(PreGameFlowService)이 이후 턴 전환과 같은 경로를 타게 하는 공개 진입점 —
      * 핸들러가 공지/타이머 등록을 직접 작성하면 유저/자동 경로의 동작이 갈라진다.
      */
     public Mono<Void> startTurn(GameState state, TurnScheduler scheduler) {
