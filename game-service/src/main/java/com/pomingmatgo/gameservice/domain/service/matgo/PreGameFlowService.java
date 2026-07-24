@@ -92,7 +92,6 @@ public class PreGameFlowService {
     }
 
     private Mono<Void> startFirstTurn(GameState gameState) {
-        // 첫 턴도 이후 턴 전환과 동일한 공지+자동플레이 타이머 등록 경로(TurnFlowService)를 탄다
         return preGameService.setFirstTurn(gameState)
                 .flatMap(state -> turnFlowService.startTurn(state, turnScheduler));
     }

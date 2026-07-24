@@ -44,8 +44,8 @@ public class InMemoryGameLockAspect implements GameLockCleaner {
                 .computeIfAbsent(roomId, k -> new ConcurrentHashMap<>())
                 .computeIfAbsent(keyName, k -> new Semaphore(1));
 
-        // 정상 게임 흐름에서 같은 round:turn 락 경쟁은 발생하지 않음
-        // 경쟁이 발생했다면 버그 → 즉시 실패가 3초 대기보다 안전
+        // 정상 게임 흐름에서 같은 방의 게임 액션 락 경쟁은 발생하지 않음 (한 턴엔 한 행위자뿐)
+        // 경쟁이 발생했다면 자동플레이 race → 즉시 실패가 3초 대기보다 안전
         if (!semaphore.tryAcquire()) {
             return Mono.error(new WebSocketBusinessException(TRY_AGAIN));
         }

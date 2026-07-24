@@ -11,7 +11,7 @@ import reactor.core.publisher.Mono;
 
 /**
  * 턴 실행 결과 브로드캐스트(피 이동/획득/특수 이벤트/점수) — 순수 전송만 담당한다.
- * 다음 단계(게임 종료/고스톱 대기/다음 턴) 결정은 TurnFlowService.finishTurn의 책임.
+ * 다음 단계(게임 종료/고스톱 대기/다음 턴) 결정·저장은 GamePlayService, 후속 메시지/타이머는 TurnFlowService의 책임.
  */
 @Service
 @RequiredArgsConstructor
@@ -19,8 +19,9 @@ public class GameNotificationService {
     private final GameMessageSender gameMessageSender;
 
     public Mono<Void> broadcastTurnResult(long roomId, Player player, GameState gameState, ProcessCardResult result) {
+        // gameState는 턴 전환이 반영된 다음 상태일 수 있으므로 피를 잃는 쪽은 행위자(player) 기준으로 계산
         Mono<Void> sendMoveCards = Flux.fromIterable(result.getMoveCards())
-                .concatMap(card -> gameMessageSender.sendMovingCardMessage(roomId, player, gameState.getOtherPlayer(), card))
+                .concatMap(card -> gameMessageSender.sendMovingCardMessage(roomId, player, player.opponent(), card))
                 .then();
 
         // 뻑은 획득 없이 바닥에 쌓이므로 획득 메시지를 보내지 않는다

@@ -16,7 +16,9 @@ import static com.pomingmatgo.gameservice.domain.TurnTiming.TURN_TIMEOUT_MILLIS;
 import static com.pomingmatgo.gameservice.domain.TurnTiming.nextDeadlineNanos;
 
 /**
- * 카드 제출/바닥 카드 선택/고스톱 선택의 실행 + 후처리(메시지 전송, 턴 진행, 자동플레이 타이머 재등록).
+ * 카드 제출/바닥 카드 선택/고스톱 선택의 실행 + 후처리(메시지 전송, 자동플레이 타이머 재등록).
+ * 게임 상태 전이(턴 전환/고스톱 대기/종료 저장)는 GamePlayService가 @GameLock 안에서 끝내고,
+ * 여기서는 저장된 다음 상태를 근거로 메시지와 타이머만 처리한다.
  *
  * 사용자 요청(WsGameHandler)과 자동플레이(AutoPlayScheduler)가 이 흐름을 공유하므로
  * 두 경로의 후처리 동작(선택 타이머 등록 여부 등)이 갈라질 수 없다.
@@ -76,37 +78,28 @@ public class TurnFlowService {
     }
 
     /**
-     * 턴 실행 결과의 공통 완료 처리: 결과 브로드캐스트(GameNotificationService) 후 다음 단계
-     * (게임 종료/고스톱 대기/다음 턴)를 결정하고, 도달한 phase에 맞는 자동플레이 타이머를 등록한다.
-     * 정상 제출/바닥 선택 완료가 모두 이 흐름을 거치므로 바닥 선택으로 끝난 턴에도
-     * 마지막 턴 판정과 고/스톱 선택 기회가 동일하게 적용된다.
+     * 턴 실행 결과의 공통 완료 처리: 결과 브로드캐스트(GameNotificationService) 후,
+     * 락 안에서 이미 저장된 다음 단계(게임 종료/고스톱 대기/다음 턴)에 맞는 메시지를 보내고
+     * 자동플레이 타이머를 등록한다. 다음 단계의 결정·저장은 GamePlayService가 @GameLock 안에서 끝냈다.
+     * 정상 제출/바닥 선택 완료가 모두 이 흐름을 거치므로 두 경로의 후처리 동작이 갈라질 수 없다.
      */
-    private Mono<Void> finishTurn(long roomId, Player player, GameState updatedState, ProcessCardResult result, TurnScheduler scheduler) {
-        return gameNotificationService.broadcastTurnResult(roomId, player, updatedState, result)
-                .then(proceedAfterTurn(updatedState, player))
-                .doOnNext(nextState -> scheduleNextStep(roomId, nextState, scheduler))
+    private Mono<Void> finishTurn(long roomId, Player player, GameState nextState, ProcessCardResult result, TurnScheduler scheduler) {
+        return gameNotificationService.broadcastTurnResult(roomId, player, nextState, result)
+                .then(notifyNextStep(nextState, player))
+                .doOnNext(finalState -> scheduleNextStep(roomId, finalState, scheduler))
                 .then();
     }
 
-    /** 턴 완료 후 다음 단계 결정: 최종 라운드의 점수 달성 → 자동 스톱 종료, 점수 달성 → 고/스톱 대기, 마지막 턴 미달성 → 무승부, 그 외 → 다음 턴 */
-    private Mono<GameState> proceedAfterTurn(GameState gameState, Player player) {
-        if (gameState.canGoStop(player)) {
-            // 마지막 라운드엔 GO 선택지가 없으므로 자동 스톱으로 곧바로 게임 종료
-            if (gameState.isFinalRound()) {
-                return processGameOver(gameState, player);
-            }
-            // phase를 저장해 두면 선택 요청 검증과 자동플레이 타이머가 이 상태를 근거로 동작한다.
-            // 타이머 등록은 반환된 phase를 보고 finishTurn의 scheduleNextStep이 수행
-            return gamePlayService.enterGoStopChoice(gameState)
-                    .delayUntil(awaitingState -> gameMessageSender.sendGoStopChoiceMessage(awaitingState, player));
-        }
-        // 상대는 직전 턴(자동 스톱 판정)에서 이미 미달이었고 이번 턴에 점수가 오를 수 없으므로 둘 다 스톱 불가 → 무승부
-        if (gameState.isLastTurn()) {
-            return processGameOver(gameState, Player.PLAYER_NOTHING);
-        }
-        return gamePlayService.proceedToNextTurn(gameState)
-                .flatMap(nextState -> gameMessageSender.sendTurnInfo(nextState, TURN_TIMEOUT_MILLIS)
-                        .thenReturn(nextState));
+    /** 도달한 phase별 후처리 메시지: 고/스톱 선택지 전송, 게임 종료 정리(END는 승자/무승부 판정 포함), 다음 턴 공지 */
+    private Mono<GameState> notifyNextStep(GameState nextState, Player player) {
+        return switch (nextState.getPhase()) {
+            case AWAITING_GO_STOP_CHOICE -> gameMessageSender.sendGoStopChoiceMessage(nextState, player)
+                    .thenReturn(nextState);
+            // 점수 달성자가 있으면 그 승리(최종 라운드 자동 스톱), 없으면 마지막 턴 미달성 무승부
+            case END -> processGameOver(nextState, nextState.canGoStop(player) ? player : Player.PLAYER_NOTHING);
+            default -> gameMessageSender.sendTurnInfo(nextState, TURN_TIMEOUT_MILLIS)
+                    .thenReturn(nextState);
+        };
     }
 
     /** winner가 PLAYER_NOTHING이면 무승부 */

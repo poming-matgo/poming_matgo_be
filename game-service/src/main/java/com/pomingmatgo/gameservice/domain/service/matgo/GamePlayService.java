@@ -18,7 +18,7 @@ import static com.pomingmatgo.gameservice.global.exception.WebSocketErrorCode.NO
 public class GamePlayService {
     private final GameService gameService;
 
-    @GameLock(key = "'game:' + #roomId + ':' + #gameState.round + ':' + #gameState.currentTurn")
+    @GameLock(key = "'game:' + #roomId")
     public Mono<TurnExecutionResult> executeNormalSubmit(long roomId, GameState gameState, Player player, int cardIdx, Runnable onLockAcquired) {
         return validatedFreshState(roomId, GamePhase.IN_PROGRESS, player, onLockAcquired)
                 .flatMap(freshState ->
@@ -28,17 +28,17 @@ public class GamePlayService {
                                     Card topCard = tuple.getT2();
                                     return gameService.submitCard(freshState, submittedCard, topCard)
                                             .flatMap(processResult -> settleTurn(roomId, freshState, processResult)
-                                                    .map(settledState -> new TurnExecutionResult(
-                                                            submittedCard, topCard, processResult, settledState)));
+                                                    .map(nextState -> new TurnExecutionResult(
+                                                            submittedCard, topCard, processResult, nextState)));
                                 }));
     }
 
-    @GameLock(key = "'floor:' + #roomId + ':' + #gameState.round + ':' + #gameState.currentTurn")
+    @GameLock(key = "'game:' + #roomId")
     public Mono<FloorSelectionResult> executeFloorSelection(long roomId, GameState gameState, Player player, int cardIdx, Runnable onLockAcquired) {
         return validatedFreshState(roomId, GamePhase.AWAITING_FLOOR_CARD_CHOICE, player, onLockAcquired)
                 .flatMap(freshState -> gameService.selectFloorCard(freshState, player, cardIdx)
                         .flatMap(result -> settleTurn(roomId, freshState, result)
-                                .map(settledState -> new FloorSelectionResult(result, settledState))));
+                                .map(nextState -> new FloorSelectionResult(result, nextState))));
     }
 
     /**
@@ -64,9 +64,11 @@ public class GamePlayService {
     }
 
     /**
-     * 턴 확정 공통 후처리: 피 뺏기/획득 반영 후 점수를 재계산한 상태를 반환한다.
+     * 턴 확정 공통 후처리: 피 뺏기/획득 반영 후 점수를 재계산하고, 다음 상태
+     * (고스톱 대기/게임 종료/다음 턴)까지 결정해 저장한 상태를 반환한다.
+     * 다음 상태 저장은 반드시 @GameLock 안에서 끝나야 한다 — 락 해제 후로 미루면
+     * 그 사이(결과 브로드캐스트 등) 낡은 경쟁자가 phase/차례 재검증을 통과해 같은 턴을 중복 실행한다.
      * 선택 대기(choiceRequired)면 아직 턴이 끝나지 않았으므로 아무것도 반영하지 않고 기존 상태 그대로 반환.
-     * 정상 제출/바닥 선택 완료가 모두 이 경로를 거친다.
      */
     private Mono<GameState> settleTurn(long roomId, GameState gameState, ProcessCardResult result) {
         if (result.isChoiceRequired()) {
@@ -78,23 +80,38 @@ public class GamePlayService {
 
         return loseCards
                 .then(gameService.acquireCards(roomId, gameState.getCurrentPlayer(), result.getAcquiredCards()))
-                .then(gameService.calculateAndApplyScores(roomId, gameState));
+                .then(gameService.calculateAndApplyScores(roomId, gameState))
+                .flatMap(this::transitionAfterTurn);
     }
 
-    public Mono<GameState> proceedToNextTurn(GameState gameState) {
+    /** 턴 완료 후 다음 상태 결정+저장: 최종 라운드 점수 달성/마지막 턴 미달성 → 종료, 점수 달성 → 고/스톱 대기, 그 외 → 다음 턴 */
+    private Mono<GameState> transitionAfterTurn(GameState settled) {
+        Player player = settled.getCurrentPlayer();
+        if (settled.canGoStop(player)) {
+            // 마지막 라운드엔 GO 선택지가 없으므로 자동 스톱으로 곧바로 게임 종료
+            return settled.isFinalRound()
+                    ? markEnded(settled)
+                    : gameService.enterGoStopChoice(settled);
+        }
+        // 상대는 직전 턴(자동 스톱 판정)에서 이미 미달이었고 이번 턴에 점수가 오를 수 없으므로 둘 다 스톱 불가 → 무승부
+        return settled.isLastTurn() ? markEnded(settled) : proceedToNextTurn(settled);
+    }
+
+    private Mono<GameState> markEnded(GameState gameState) {
+        return gameService.saveState(gameState.toBuilder().phase(GamePhase.END).build());
+    }
+
+    private Mono<GameState> proceedToNextTurn(GameState gameState) {
         return gameService.saveState(gameState.setNextTurn());
     }
 
-    public Mono<GameState> enterGoStopChoice(GameState gameState) {
-        return gameService.enterGoStopChoice(gameState);
-    }
-
-    @GameLock(key = "'game:' + #roomId + ':' + #gameState.round + ':' + #gameState.currentTurn")
+    @GameLock(key = "'game:' + #roomId")
     public Mono<GameState> executeGoStop(long roomId, GameState gameState, Player player, boolean go, Runnable onLockAcquired) {
         return validatedFreshState(roomId, GamePhase.AWAITING_GO_STOP_CHOICE, player, onLockAcquired)
                 .flatMap(freshState -> go
                         ? gameService.applyGo(freshState, player).flatMap(this::proceedToNextTurn)
-                        : Mono.just(freshState.toBuilder().phase(GamePhase.END).build()));
+                        // STOP도 락 안에서 END를 저장 — 저장 없이 반환하면 락 해제~cleanup 사이 낡은 GO가 재검증을 통과한다
+                        : markEnded(freshState));
     }
 
     public Mono<GameState> gameOver(GameState gameState) {
