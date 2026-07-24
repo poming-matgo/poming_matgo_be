@@ -27,10 +27,11 @@
   <path class="edge" d="M400,64 V80 H680 V95"/>
   <path class="edge" d="M680,164 V185"/>
   <path class="edge" d="M150,230 V265"/>
-  <path class="edge" d="M400,230 V265"/>
+  <path class="edge" d="M400,230 V257"/>
+  <path class="edge" d="M400,298 V305"/>
   <path class="edge" d="M680,230 V265"/>
   <path class="edge" d="M150,310 V373"/>
-  <path class="edge" d="M400,310 V373"/>
+  <path class="edge" d="M400,346 V373"/>
   <path class="edge" d="M680,338 V373"/>
   <path class="edge" d="M680,418 V441"/>
   <path class="edge" d="M680,512 V535"/>
@@ -64,8 +65,10 @@
   <!-- services -->
   <rect class="box" x="80" y="270" width="140" height="40" rx="6"/>
   <text class="t" x="150" y="295">RoomService</text>
-  <rect class="box" x="315" y="270" width="170" height="40" rx="6"/>
-  <text class="t" x="400" y="295">PreGameFlowService</text>
+  <rect class="box" x="315" y="262" width="170" height="36" rx="6"/>
+  <text class="t" x="400" y="285">PreGameFlowService</text>
+  <rect class="box" x="325" y="310" width="150" height="36" rx="6"/>
+  <text class="t" x="400" y="333">PreGameService</text>
   <rect class="box" x="550" y="270" width="260" height="68" rx="6"/>
   <text class="t" x="680" y="292">TurnFlowService</text>
   <text class="s" x="680" y="310">유저/자동 공통 후처리: 메시지 전송</text>
