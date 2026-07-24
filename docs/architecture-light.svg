@@ -64,8 +64,8 @@
   <!-- services -->
   <rect class="box" x="80" y="270" width="140" height="40" rx="6"/>
   <text class="t" x="150" y="295">RoomService</text>
-  <rect class="box" x="325" y="270" width="150" height="40" rx="6"/>
-  <text class="t" x="400" y="295">PreGameService</text>
+  <rect class="box" x="315" y="270" width="170" height="40" rx="6"/>
+  <text class="t" x="400" y="295">PreGameFlowService</text>
   <rect class="box" x="550" y="270" width="260" height="68" rx="6"/>
   <text class="t" x="680" y="292">TurnFlowService</text>
   <text class="s" x="680" y="310">유저/자동 공통 후처리: 메시지 전송</text>
