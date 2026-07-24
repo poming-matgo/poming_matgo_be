@@ -37,9 +37,9 @@
 - **① In-Flight 플래그** — **자동플레이(③)와 정상 요청 사이의 race 1차 fail-fast** 가 본 목적. 같은 플레이어 단위로 `NORMAL` / `AUTOPLAY` 키를 분리해, 자동플레이는 `isSet(NORMAL)`로 양보하고 정상 요청은 자동플레이 진행 중에도 In-Flight 단계에서 막히지 않음. TTL 만료 엔트리는 `ConcurrentHashMap.replace(k, old, new)` 기반 원자적 비교-교체 loop로 자동 갱신, 해제는 요청별 소유 토큰 검증 후 조건부 삭제. *(InFlight 통과 후의 race window는 `@GameLock`(②)의 직렬화 + 락 내부 재검증이 final guard, 두 플레이어 동시 액션은 `currentPlayer` 체크로 차단 — 책임 분리)*
 - **② 직렬화 / atomic 제어 (역할 분리)** — **공유 객체 수정에는 락, 데이터가 player별로 분리된 곳에는 atomic 연산**으로 메커니즘 비용 최소화. 핸들러별로 본 목적이 다름:
   - **`RoomLockManager`** (방 단위 Semaphore): 단일 `GameState` 객체를 공유 수정하는 Ready/Join 작업의 직렬화
-  - **`@GameLock` AOP** (round:turn 단위 Semaphore): InFlight를 통과한 자동플레이 ↔ 정상 요청 race의 final guard. 정확히는 2단 구조 — **락이 같은 턴 경쟁을 직렬화하고, 락 획득 후 gameState를 fresh 재조회해 phase/currentPlayer를 재검증**해 이미 소비된 턴을 거름 (락 키가 요청 시점 스냅샷 기반이므로 직렬화만으론 불충분)
+  - **`@GameLock` AOP** (방 단위 게임 액션 Semaphore): InFlight를 통과한 자동플레이 ↔ 정상 요청 race의 final guard. 정확히는 2단 구조 — **락이 게임 액션을 직렬화하고, 락 획득 후 gameState를 fresh 재조회해 phase/currentPlayer를 재검증**해 이미 소비된 턴을 거름 (경쟁자마다 들고 온 상태 스냅샷이 다르므로 직렬화만으론 불충분). 이 재검증이 성립하도록 **턴 전환/고스톱 대기/종료 같은 상태 전이는 반드시 락 안에서 저장** — 락 해제 후로 미루면 그 사이 낡은 경쟁자가 재검증을 통과함
   - **`LeadingPlayer.tryClaimLeaderSelectionTrigger`** (`putIfAbsent` 기반 atomic): 데이터가 이미 player별로 분리되어 락이 불필요한 대신, 두 플레이어가 거의 동시에 선플레이어 카드를 선택해도 후속 처리 트리거가 1회만 발생되도록 atomic으로 보장
-- **③ AutoPlay 스케줄러** — 턴 타임아웃 시 자동으로 Game 액션 발사 (`NORMAL_SUBMIT` 카드 자동 제출 + `FLOOR_SELECT` 바닥 카드 자동 선택 + `GO_STOP_CHOICE` 자동 STOP). 타이머의 정체성을 **`TurnStep(round, turn, phase)`** 하나로 표현 — 등록 시점엔 TurnStep 순서 비교(같은 턴 안에서 제출 < 바닥 선택 < 고/스톱 선택) + `compute` 기반 atomic swap으로 낡은 등록이 유효한 타이머를 교체(파괴)하지 못하게 막고, 발사 시점엔 같은 TurnStep으로 게임 상태를 재검증해 낡은 타이머가 스스로 물러나게 함. 실행 자체는 사용자 요청과 동일한 **`TurnFlowService`** 후처리 흐름(메시지 전송 → 턴 전환 → 타이머 재등록)을 타므로 두 경로의 동작이 갈라질 수 없음
+- **③ AutoPlay 스케줄러** — 턴 타임아웃 시 자동으로 Game 액션 발사 (`NORMAL_SUBMIT` 카드 자동 제출 + `FLOOR_SELECT` 바닥 카드 자동 선택 + `GO_STOP_CHOICE` 자동 STOP). 타이머의 정체성을 **`TurnStep(round, turn, phase)`** 하나로 표현 — 등록 시점엔 TurnStep 순서 비교(같은 턴 안에서 제출 < 바닥 선택 < 고/스톱 선택) + `compute` 기반 atomic swap으로 낡은 등록이 유효한 타이머를 교체(파괴)하지 못하게 막고, 발사 시점엔 같은 TurnStep으로 게임 상태를 재검증해 낡은 타이머가 스스로 물러나게 함. 실행 자체는 사용자 요청과 동일한 **`TurnFlowService`** 흐름(상태 전이는 락 안에서 저장, 후처리는 메시지 전송 → 타이머 재등록)을 타므로 두 경로의 동작이 갈라질 수 없음
 
 > **MSA → 단일 서비스 통합:** 초기에는 `api-gateway` / `user-service` / `auth-service` / `game-service` 의 MSA로 기획했으나, **`game-service`의 동시성/성능 최적화에 집중**하기 위해 나머지 서비스는 폐기하고 단일 서비스로 통합했습니다.
 
@@ -152,6 +152,10 @@ k6 run --out influxdb=http://localhost:8086/k6 gostop-test.js
 - **GO/STOP 선택 대기의 상태·타임아웃 공백**
   - 문제: 고/스톱 대기가 명시적 상태 없이 진행되어 ⓐ 진입 phase 검증이 불가능해 고/스톱 국면이 아닐 때 도착한 STOP이 게임을 조기 종료시킬 수 있었고 ⓑ 대기 구간에 타이머가 없어 해당 플레이어 AFK 시 게임 정지 (마지막 남은 liveness 공백)
   - 해결: 두 문제의 뿌리가 같아 **명시적 phase(`AWAITING_GO_STOP_CHOICE`) 도입** 하나로 해소. 진입 시 상태를 저장해 락 내부 재검증(phase + currentPlayer)과 TurnStep 타이머 체계에 편입하고, 타임아웃 시 자동 STOP(확정 승리를 가져가는 안전한 기본값)으로 게임 종료를 보장
+
+- **락 해제 ~ 상태 전이 저장 사이의 중복 실행 창구**
+  - 문제: 카드 제출(선택 미유발)과 STOP이 턴 전환/END 저장을 `@GameLock` 해제 후의 후처리(결과 브로드캐스트 뒤)로 미뤄, 그 창구에 도착한 낡은 경쟁자가 락 내부 fresh 재검증(phase/turn 아직 그대로)을 통과할 수 있었음. 자동플레이 발사 직후 유저 제출이 겹치면 **같은 턴에 카드 2장 제출** → 손패 desync → 후속 자동플레이 실패로 게임 정지(liveness 상실)까지 증폭 가능. 유저의 마감 직전 클릭과 타이머 발사가 같은 deadline에 정렬되어 경합이 정확히 이 창구에 몰리는 유형
+  - 해결: 다음 상태(고스톱 대기/종료/다음 턴) **결정·저장을 락 안으로 이동**하고 후처리는 메시지/타이머만 담당하도록 분리. 락 키도 `round:turn`·액션 종류별 세분화에서 **방 단위 단일 키로 통합** — 턴제 도메인상 한 방의 게임 액션은 한 시점에 한 행위자뿐이라 세분화가 병렬성을 사지 못하고 액션 종류 간 빈틈만 만들었음(동시성 설계 과잉 제거). "락 구간만 직접 실행 후 낡은 요청 주입"으로 창구를 결정적으로 재현하는 회귀 테스트로 고정
 
 - **타이머 취소가 실행 중 체인을 중단시키던 메시지 유실**
   - 문제: 타이머(delay)와 실행이 한 구독으로 묶여 있어, 자동플레이 실행이 게임 종료 cleanup / 고·스톱 분기에서 `cancelAutoPlay`(= 자기 자신)를 호출하면 실행 중인 리액티브 체인이 dispose되어 **미전송 `GAME_OVER` / `GO_STOP_CHOICE` 메시지가 조용히 유실**. 위 AFK 완주 테스트에서 게임이 종반에 정지하는 현상으로 발견
