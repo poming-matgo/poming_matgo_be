@@ -32,6 +32,7 @@
   <path class="edge" d="M680,230 V265"/>
   <path class="edge" d="M150,310 V373"/>
   <path class="edge" d="M400,346 V373"/>
+  <path class="edge" d="M325,328 H200 V373"/>
   <path class="edge" d="M680,338 V373"/>
   <path class="edge" d="M680,418 V441"/>
   <path class="edge" d="M680,512 V535"/>
@@ -78,7 +79,7 @@
   <rect class="a2" x="40" y="378" width="220" height="66" rx="6"/>
   <text class="t c2" x="150" y="400">② RoomLockManager</text>
   <text class="s" x="150" y="418">방 단위 Semaphore</text>
-  <text class="s" x="150" y="433">Ready/Join 직렬화</text>
+  <text class="s" x="150" y="433">Ready/Join·선 선택 직렬화</text>
   <rect class="a2" x="285" y="378" width="230" height="66" rx="6"/>
   <text class="t c2" x="400" y="400">② AtomicTrigger</text>
   <text class="s" x="400" y="418">LeadingPlayer putIfAbsent</text>

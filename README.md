@@ -36,9 +36,9 @@
 
 - **① In-Flight 플래그** — **자동플레이(③)와 정상 요청 사이의 race 1차 fail-fast** 가 본 목적. 같은 플레이어 단위로 `NORMAL` / `AUTOPLAY` 키를 분리해, 자동플레이는 `isSet(NORMAL)`로 양보하고 정상 요청은 자동플레이 진행 중에도 In-Flight 단계에서 막히지 않음. TTL 만료 엔트리는 `ConcurrentHashMap.replace(k, old, new)` 기반 원자적 비교-교체 loop로 자동 갱신, 해제는 요청별 소유 토큰 검증 후 조건부 삭제. *(InFlight 통과 후의 race window는 `@GameLock`(②)의 직렬화 + 락 내부 재검증이 final guard, 두 플레이어 동시 액션은 `currentPlayer` 체크로 차단 — 책임 분리)*
 - **② 직렬화 / atomic 제어 (역할 분리)** — **공유 객체 수정에는 락, 데이터가 player별로 분리된 곳에는 atomic 연산**으로 메커니즘 비용 최소화. 핸들러별로 본 목적이 다름:
-  - **`RoomLockManager`** (방 단위 Semaphore): 단일 `GameState` 객체를 공유 수정하는 Ready/Join 작업의 직렬화
+  - **`RoomLockManager`** (방 단위 Semaphore): 단일 `GameState` 객체를 공유 수정하는 Ready/Join 작업과, 상대의 선택을 읽어 중복 월을 검증하는 선플레이어 카드 선택(read-검증-write)의 직렬화
   - **`@GameLock` AOP** (방 단위 게임 액션 Semaphore): InFlight를 통과한 자동플레이 ↔ 정상 요청 race의 final guard. 정확히는 2단 구조 — **락이 게임 액션을 직렬화하고, 락 획득 후 gameState를 fresh 재조회해 phase/currentPlayer를 재검증**해 이미 소비된 턴을 거름 (경쟁자마다 들고 온 상태 스냅샷이 다르므로 직렬화만으론 불충분). 이 재검증이 성립하도록 **턴 전환/고스톱 대기/종료 같은 상태 전이는 반드시 락 안에서 저장** — 락 해제 후로 미루면 그 사이 낡은 경쟁자가 재검증을 통과함
-  - **`LeadingPlayer.tryClaimLeaderSelectionTrigger`** (`putIfAbsent` 기반 atomic): 데이터가 이미 player별로 분리되어 락이 불필요한 대신, 두 플레이어가 거의 동시에 선플레이어 카드를 선택해도 후속 처리 트리거가 1회만 발생되도록 atomic으로 보장
+  - **`LeadingPlayer.tryClaimLeaderSelectionTrigger`** (`putIfAbsent` 기반 atomic): 월 값은 한 번 저장되면 불변이라 "둘 다 완료" 감지엔 락이 불필요 — 두 플레이어가 거의 동시에 선택을 마쳐도 후속 처리 트리거가 1회만 발생하도록 atomic으로 보장
 - **③ AutoPlay 스케줄러** — 턴 타임아웃 시 자동으로 Game 액션 발사 (`NORMAL_SUBMIT` 카드 자동 제출 + `FLOOR_SELECT` 바닥 카드 자동 선택 + `GO_STOP_CHOICE` 자동 STOP). 타이머의 정체성을 **`TurnStep(round, turn, phase)`** 하나로 표현 — 등록 시점엔 TurnStep 순서 비교(같은 턴 안에서 제출 < 바닥 선택 < 고/스톱 선택) + `compute` 기반 atomic swap으로 낡은 등록이 유효한 타이머를 교체(파괴)하지 못하게 막고, 발사 시점엔 같은 TurnStep으로 게임 상태를 재검증해 낡은 타이머가 스스로 물러나게 함. 실행 자체는 사용자 요청과 동일한 **`TurnFlowService`** 흐름(상태 전이는 락 안에서 저장, 후처리는 메시지 전송 → 타이머 재등록)을 타므로 두 경로의 동작이 갈라질 수 없음
 
 > **MSA → 단일 서비스 통합:** 초기에는 `api-gateway` / `user-service` / `auth-service` / `game-service` 의 MSA로 기획했으나, **`game-service`의 동시성/성능 최적화에 집중**하기 위해 나머지 서비스는 폐기하고 단일 서비스로 통합했습니다.
