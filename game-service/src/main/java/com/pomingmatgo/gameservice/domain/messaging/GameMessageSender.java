@@ -173,7 +173,7 @@ public class GameMessageSender {
         String message = winner == PLAYER_NOTHING ? "무승부" : "게임 승리자";
         return messageSender.sendMessageToAllUser(
                 roomId,
-                WebSocketResDto.of(PLAYER_NOTHING, ResponseEvent.GAME_OVER, message, winner)
+                WebSocketResDto.of(PLAYER_NOTHING, ResponseEvent.GAME_OVER, message, GameOverRes.from(finalState, winner))
         );
     }
 }

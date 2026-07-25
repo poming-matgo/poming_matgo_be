@@ -90,6 +90,18 @@ public class GameState implements Serializable {
         return getPlayerState(player).canGoStop();
     }
 
+    public boolean isGoBak(Player winner) {
+        return winner != Player.PLAYER_NOTHING && getPlayerState(winner.opponent()).getGo() > 0;
+    }
+
+    public int payoutScoreOf(Player winner) {
+        if (winner == Player.PLAYER_NOTHING) {
+            return 0;
+        }
+        int payout = getPlayerState(winner).payoutScore();
+        return isGoBak(winner) ? payout * 2 : payout;
+    }
+
     @JsonIgnore
     public boolean isPlaying() {
         return this.phase == GamePhase.IN_PROGRESS;
