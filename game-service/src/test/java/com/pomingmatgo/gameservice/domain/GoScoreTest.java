@@ -1,13 +1,18 @@
 package com.pomingmatgo.gameservice.domain;
 
 import com.pomingmatgo.gameservice.domain.messaging.GameOverRes;
+import com.pomingmatgo.gameservice.domain.messaging.PlayerScoreDto;
+import com.pomingmatgo.gameservice.domain.messaging.ScoreInfoRes;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
 
+import java.util.List;
+
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.tuple;
 
 @DisplayName("고 점수 처리 테스트")
 class GoScoreTest {
@@ -101,6 +106,28 @@ class GoScoreTest {
             assertThat(res.getPayoutScore()).isZero();
             assertThat(res.getGoCount()).isZero();
             assertThat(res.isGoBak()).isFalse();
+        }
+    }
+
+    @Nested
+    @DisplayName("SCORE_UPDATE 응답")
+    class ScoreUpdatePayload {
+
+        @Test
+        @DisplayName("플레이어별 원점수와 정산 점수를 둘 다 싣는다")
+        void carriesBothRawAndPayoutScore() {
+            GameState state = stateOf(playerState(9, 3), playerState(8, 1));
+
+            List<PlayerScoreDto> scores = ScoreInfoRes.from(state).getScores();
+
+            assertThat(scores).extracting(
+                            PlayerScoreDto::getPlayerNumber,
+                            PlayerScoreDto::getScore,
+                            PlayerScoreDto::getGo,
+                            PlayerScoreDto::getPayoutScore)
+                    .containsExactly(
+                            tuple(1, 9, 3, 24),  // (9+3)×2
+                            tuple(2, 8, 1, 9));  // 8+1
         }
     }
 
