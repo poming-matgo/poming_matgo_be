@@ -79,7 +79,7 @@ class LastTurnGameOverTest {
 
         turnFlowService.processNormalSubmit(roomId, state, Player.PLAYER_2, 0, null, autoPlayScheduler).block();
 
-        Mockito.verify(gameMessageSender).sendGameOverMessage(any(), eq(Player.PLAYER_2));
+        Mockito.verify(gameMessageSender).sendGameOverMessage(any(), eq(Player.PLAYER_2), any());
         assertEquals(GamePhase.NONE, gameStateRepository.findById(roomId).block().getPhase(),
                 "게임 종료 후 빈 방 상태로 초기화돼야 한다");
     }
@@ -94,7 +94,7 @@ class LastTurnGameOverTest {
 
         turnFlowService.processNormalSubmit(roomId, state, Player.PLAYER_2, 0, null, autoPlayScheduler).block();
 
-        Mockito.verify(gameMessageSender).sendGameOverMessage(any(), eq(Player.PLAYER_NOTHING));
+        Mockito.verify(gameMessageSender).sendGameOverMessage(any(), eq(Player.PLAYER_NOTHING), any());
         assertEquals(GamePhase.NONE, gameStateRepository.findById(roomId).block().getPhase(),
                 "무승부 종료 후에도 빈 방 상태로 초기화돼야 한다");
     }

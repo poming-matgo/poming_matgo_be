@@ -4,6 +4,7 @@ import com.pomingmatgo.gameservice.domain.messaging.GameMessageSender;
 import com.pomingmatgo.gameservice.domain.messaging.ScoreInfoRes;
 import com.pomingmatgo.gameservice.domain.GameState;
 import com.pomingmatgo.gameservice.domain.Player;
+import com.pomingmatgo.gameservice.domain.score.PayoutCalculator;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import reactor.core.publisher.Flux;
@@ -17,6 +18,7 @@ import reactor.core.publisher.Mono;
 @RequiredArgsConstructor
 public class GameNotificationService {
     private final GameMessageSender gameMessageSender;
+    private final PayoutCalculator payoutCalculator;
 
     public Mono<Void> broadcastTurnResult(long roomId, Player player, GameState gameState, ProcessCardResult result) {
         // gameState는 턴 전환이 반영된 다음 상태일 수 있으므로 피를 잃는 쪽은 행위자(player) 기준으로 계산
@@ -36,6 +38,9 @@ public class GameNotificationService {
         return sendMoveCards
                 .then(sendAcquired)
                 .then(sendSpecial)
-                .then(gameMessageSender.sendScoreInfo(gameState.getRoomId(), ScoreInfoRes.from(gameState)));
+                .then(gameMessageSender.sendScoreInfo(gameState.getRoomId(), ScoreInfoRes.from(
+                        gameState,
+                        payoutCalculator.provisionalPayout(gameState, Player.PLAYER_1),
+                        payoutCalculator.provisionalPayout(gameState, Player.PLAYER_2))));
     }
 }

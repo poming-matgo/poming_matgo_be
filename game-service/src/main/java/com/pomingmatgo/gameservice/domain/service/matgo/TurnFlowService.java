@@ -4,6 +4,7 @@ import com.pomingmatgo.gameservice.domain.messaging.GameMessageSender;
 import com.pomingmatgo.gameservice.domain.GameState;
 import com.pomingmatgo.gameservice.domain.Player;
 import com.pomingmatgo.gameservice.domain.card.Card;
+import com.pomingmatgo.gameservice.domain.score.PayoutCalculator;
 import com.pomingmatgo.gameservice.scheduler.TurnScheduler;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
@@ -31,6 +32,7 @@ public class TurnFlowService {
     private final GamePlayService gamePlayService;
     private final GameMessageSender gameMessageSender;
     private final GameNotificationService gameNotificationService;
+    private final PayoutCalculator payoutCalculator;
 
     public Mono<Void> processNormalSubmit(long roomId, GameState gameState, Player player, int cardIdx, Runnable onLockAcquired, TurnScheduler scheduler) {
         return gamePlayService.executeNormalSubmit(roomId, gameState, player, cardIdx, onLockAcquired)
@@ -105,7 +107,8 @@ public class TurnFlowService {
     /** winner가 PLAYER_NOTHING이면 무승부 */
     private Mono<GameState> processGameOver(GameState gameState, Player winner) {
         return gamePlayService.gameOver(gameState)
-                .delayUntil(finalState -> gameMessageSender.sendGameOverMessage(finalState, winner));
+                .delayUntil(finalState -> gameMessageSender.sendGameOverMessage(
+                        finalState, winner, payoutCalculator.finalPayout(finalState, winner)));
     }
 
     /**

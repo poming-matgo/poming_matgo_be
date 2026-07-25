@@ -10,6 +10,7 @@ import com.pomingmatgo.gameservice.domain.card.Card;
 import com.pomingmatgo.gameservice.domain.repository.AcquiredCardRepository;
 import com.pomingmatgo.gameservice.domain.repository.GameStateRepository;
 import com.pomingmatgo.gameservice.domain.repository.InstalledCardRepository;
+import com.pomingmatgo.gameservice.domain.score.PayoutCalculator;
 import com.pomingmatgo.gameservice.global.exception.WebSocketBusinessException;
 import com.pomingmatgo.gameservice.scheduler.TurnScheduler;
 import lombok.RequiredArgsConstructor;
@@ -39,6 +40,7 @@ public class ReconnectService {
     private final InstalledCardRepository installedCardRepository;
     private final AcquiredCardRepository acquiredCardRepository;
     private final TurnScheduler turnScheduler;
+    private final PayoutCalculator payoutCalculator;
 
     public Mono<ReconnectStateRes> buildSnapshot(long roomId, Player me) {
         Player opponent = me.opponent();
@@ -71,7 +73,9 @@ public class ReconnectService {
                 .floorCards(floorCards.stream().collect(Collectors.groupingBy(Card::getMonth)))
                 .myAcquiredCards(myAcquired.stream().collect(Collectors.groupingBy(Card::getType)))
                 .opponentAcquiredCards(opponentAcquired.stream().collect(Collectors.groupingBy(Card::getType)))
-                .scores(ScoreInfoRes.from(gameState).getScores())
+                .scores(ScoreInfoRes.from(gameState,
+                        payoutCalculator.provisionalPayout(gameState, Player.PLAYER_1),
+                        payoutCalculator.provisionalPayout(gameState, Player.PLAYER_2)).getScores())
                 .myGo(gameState.getPlayerState(me).getGo())
                 .opponentGo(gameState.getPlayerState(opponent).getGo())
                 .selectableCards(pendingFloorChoice(gameState, me))

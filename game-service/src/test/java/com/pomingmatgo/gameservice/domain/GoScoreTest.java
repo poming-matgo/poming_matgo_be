@@ -3,6 +3,9 @@ package com.pomingmatgo.gameservice.domain;
 import com.pomingmatgo.gameservice.domain.messaging.GameOverRes;
 import com.pomingmatgo.gameservice.domain.messaging.PlayerScoreDto;
 import com.pomingmatgo.gameservice.domain.messaging.ScoreInfoRes;
+import com.pomingmatgo.gameservice.domain.score.Multiplier;
+import com.pomingmatgo.gameservice.domain.score.Payout;
+import com.pomingmatgo.gameservice.domain.score.PayoutCalculator;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
@@ -16,6 +19,8 @@ import static org.assertj.core.api.Assertions.tuple;
 
 @DisplayName("고 점수 처리 테스트")
 class GoScoreTest {
+
+    private final PayoutCalculator payoutCalculator = new PayoutCalculator();
 
     @Nested
     @DisplayName("고 보너스")
@@ -31,7 +36,9 @@ class GoScoreTest {
                 "7, 5, 96"   // 5고 = (7+5)×8
         })
         void appliesBonusThenMultiplier(int score, int go, int expected) {
-            assertThat(playerState(score, go).payoutScore()).isEqualTo(expected);
+            GameState state = stateOf(playerState(score, go), playerState(0, 0));
+
+            assertThat(payoutCalculator.provisionalPayout(state, Player.PLAYER_1).total()).isEqualTo(expected);
         }
     }
 
@@ -44,8 +51,10 @@ class GoScoreTest {
         void withoutOpponentGo() {
             GameState state = stateOf(playerState(9, 1), playerState(3, 0));
 
-            assertThat(state.isGoBak(Player.PLAYER_1)).isFalse();
-            assertThat(state.payoutScoreOf(Player.PLAYER_1)).isEqualTo(10);
+            Payout payout = payoutCalculator.finalPayout(state, Player.PLAYER_1);
+
+            assertThat(payout.has(Multiplier.GO_BAK)).isFalse();
+            assertThat(payout.total()).isEqualTo(10);
         }
 
         @Test
@@ -53,8 +62,10 @@ class GoScoreTest {
         void goBakDoublesWinnerScore() {
             GameState state = stateOf(playerState(7, 0), playerState(8, 2));
 
-            assertThat(state.isGoBak(Player.PLAYER_1)).isTrue();
-            assertThat(state.payoutScoreOf(Player.PLAYER_1)).isEqualTo(14);
+            Payout payout = payoutCalculator.finalPayout(state, Player.PLAYER_1);
+
+            assertThat(payout.has(Multiplier.GO_BAK)).isTrue();
+            assertThat(payout.total()).isEqualTo(14);
         }
 
         @Test
@@ -62,8 +73,14 @@ class GoScoreTest {
         void goBakAppliesWhenBothWentGo() {
             GameState state = stateOf(playerState(9, 3), playerState(8, 1));
 
-            // (9+3)×2 = 24, 고박 ×2
-            assertThat(state.payoutScoreOf(Player.PLAYER_1)).isEqualTo(48);
+            Payout payout = payoutCalculator.finalPayout(state, Player.PLAYER_1);
+
+            // 기본 점수 9+3=12에 고 배수 ×2, 고박 ×2
+            assertThat(payout.baseScore()).isEqualTo(12);
+            assertThat(payout.multipliers())
+                    .extracting(Payout.Applied::type, Payout.Applied::factor)
+                    .containsExactly(tuple(Multiplier.GO_MULTIPLIER, 2), tuple(Multiplier.GO_BAK, 2));
+            assertThat(payout.total()).isEqualTo(48);
         }
 
         @Test
@@ -71,8 +88,18 @@ class GoScoreTest {
         void drawScoresZero() {
             GameState state = stateOf(playerState(6, 1), playerState(5, 0));
 
-            assertThat(state.isGoBak(Player.PLAYER_NOTHING)).isFalse();
-            assertThat(state.payoutScoreOf(Player.PLAYER_NOTHING)).isZero();
+            assertThat(payoutCalculator.finalPayout(state, Player.PLAYER_NOTHING)).isEqualTo(Payout.NONE);
+        }
+
+        @Test
+        @DisplayName("진행 중 표시엔 승패가 갈려야 결정되는 고박(VERSUS)이 빠진다")
+        void provisionalExcludesVersusMultipliers() {
+            GameState state = stateOf(playerState(9, 3), playerState(8, 1));
+
+            Payout provisional = payoutCalculator.provisionalPayout(state, Player.PLAYER_1);
+
+            assertThat(provisional.has(Multiplier.GO_BAK)).isFalse();
+            assertThat(provisional.total()).isEqualTo(24);
         }
     }
 
@@ -81,30 +108,37 @@ class GoScoreTest {
     class GameOverPayload {
 
         @Test
-        @DisplayName("승자·원점수·정산 점수·고 횟수·고박 여부를 함께 싣는다")
+        @DisplayName("승자·원점수·기본 점수·정산 점수·고 횟수·적용 배수를 함께 싣는다")
         void carriesBothRawAndMultipliedScore() {
             GameState state = stateOf(playerState(9, 3), playerState(8, 1));
 
-            GameOverRes res = GameOverRes.from(state, Player.PLAYER_1);
+            GameOverRes res = GameOverRes.from(state, Player.PLAYER_1,
+                    payoutCalculator.finalPayout(state, Player.PLAYER_1));
 
             assertThat(res.getWinner()).isEqualTo(Player.PLAYER_1);
             assertThat(res.getScore()).isEqualTo(9);
+            assertThat(res.getBaseScore()).isEqualTo(12);
             assertThat(res.getPayoutScore()).isEqualTo(48);
             assertThat(res.getGoCount()).isEqualTo(3);
+            assertThat(res.getMultipliers())
+                    .extracting(Payout.Applied::type)
+                    .containsExactly(Multiplier.GO_MULTIPLIER, Multiplier.GO_BAK);
             assertThat(res.isGoBak()).isTrue();
         }
 
         @Test
-        @DisplayName("무승부는 원점수·정산 점수 모두 0, 고박 false")
+        @DisplayName("무승부는 원점수·정산 점수 모두 0, 배수 없음")
         void drawPayload() {
             GameState state = stateOf(playerState(6, 1), playerState(5, 2));
 
-            GameOverRes res = GameOverRes.from(state, Player.PLAYER_NOTHING);
+            GameOverRes res = GameOverRes.from(state, Player.PLAYER_NOTHING,
+                    payoutCalculator.finalPayout(state, Player.PLAYER_NOTHING));
 
             assertThat(res.getWinner()).isEqualTo(Player.PLAYER_NOTHING);
             assertThat(res.getScore()).isZero();
             assertThat(res.getPayoutScore()).isZero();
             assertThat(res.getGoCount()).isZero();
+            assertThat(res.getMultipliers()).isEmpty();
             assertThat(res.isGoBak()).isFalse();
         }
     }
@@ -118,7 +152,9 @@ class GoScoreTest {
         void carriesBothRawAndPayoutScore() {
             GameState state = stateOf(playerState(9, 3), playerState(8, 1));
 
-            List<PlayerScoreDto> scores = ScoreInfoRes.from(state).getScores();
+            List<PlayerScoreDto> scores = ScoreInfoRes.from(state,
+                    payoutCalculator.provisionalPayout(state, Player.PLAYER_1),
+                    payoutCalculator.provisionalPayout(state, Player.PLAYER_2)).getScores();
 
             assertThat(scores).extracting(
                             PlayerScoreDto::getPlayerNumber,

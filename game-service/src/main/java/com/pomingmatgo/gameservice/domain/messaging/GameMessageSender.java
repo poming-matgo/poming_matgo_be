@@ -5,6 +5,7 @@ import com.pomingmatgo.gameservice.domain.InstalledCard;
 import com.pomingmatgo.gameservice.domain.Player;
 import com.pomingmatgo.gameservice.domain.card.Card;
 import com.pomingmatgo.gameservice.domain.card.CardType;
+import com.pomingmatgo.gameservice.domain.score.Payout;
 import com.pomingmatgo.gameservice.domain.service.matgo.SpecialEvent;
 import com.pomingmatgo.gameservice.global.MessageSender;
 import com.pomingmatgo.gameservice.global.WebSocketResDto;
@@ -168,12 +169,12 @@ public class GameMessageSender {
     }
 
     /** winner가 PLAYER_NOTHING이면 무승부 */
-    public Mono<Void> sendGameOverMessage(GameState finalState, Player winner) {
+    public Mono<Void> sendGameOverMessage(GameState finalState, Player winner, Payout payout) {
         long roomId = finalState.getRoomId();
         String message = winner == PLAYER_NOTHING ? "무승부" : "게임 승리자";
         return messageSender.sendMessageToAllUser(
                 roomId,
-                WebSocketResDto.of(PLAYER_NOTHING, ResponseEvent.GAME_OVER, message, GameOverRes.from(finalState, winner))
+                WebSocketResDto.of(PLAYER_NOTHING, ResponseEvent.GAME_OVER, message, GameOverRes.from(finalState, winner, payout))
         );
     }
 }
