@@ -3,6 +3,7 @@ package com.pomingmatgo.gameservice.domain.service.matgo.calculatescore;
 import com.pomingmatgo.gameservice.domain.card.Card;
 import com.pomingmatgo.gameservice.domain.card.CardType;
 import com.pomingmatgo.gameservice.domain.card.SpecialType;
+import com.pomingmatgo.gameservice.domain.score.ScoreBreakdown;
 import org.springframework.stereotype.Component;
 
 import java.util.List;
@@ -14,7 +15,13 @@ import java.util.stream.Stream;
 @Component
 public final class ScoreCalculator {
     public int calculatePiScore(List<Card> cards) {
-        int piCnt = cards.stream()
+        int piCnt = countPi(cards);
+        return piCnt < 10 ? 0 : piCnt - 9;
+    }
+
+    /** 쌍피는 2장으로 센다 — 피 점수와 피박 판정이 같은 수를 쓴다 */
+    public int countPi(List<Card> cards) {
+        return cards.stream()
                 .mapToInt(card -> {
                     if (!CardType.PI.equals(card.getType())) {
                         throw new IllegalArgumentException("피 카드가 아닙니다.");
@@ -22,7 +29,6 @@ public final class ScoreCalculator {
                     return card.getSpecialType() == SpecialType.SSANG_PI ? 2 : 1;
                 })
                 .sum();
-        return piCnt < 10 ? 0 : piCnt - 9;
     }
 
     public int calculateGwangScore(List<Card> cards) {
@@ -60,17 +66,25 @@ public final class ScoreCalculator {
         return size < 5 ? additionalScore : additionalScore + (int) size - 4;
     }
 
-    public int calculateTotalScore(List<Card> cards) {
-        List<Card> piCards = cards.stream().filter(c -> c.getType() == CardType.PI).toList();
-        List<Card> gwangCards = cards.stream().filter(c -> c.getType() == CardType.GWANG).toList();
-        List<Card> kkutCards = cards.stream().filter(c -> c.getType() == CardType.KKUT).toList();
-        List<Card> ddiCards = cards.stream().filter(c -> c.getType() == CardType.DDI).toList();
+    public ScoreBreakdown calculate(List<Card> cards) {
+        List<Card> piCards = byType(cards, CardType.PI);
+        List<Card> gwangCards = byType(cards, CardType.GWANG);
+        List<Card> kkutCards = byType(cards, CardType.KKUT);
+        List<Card> ddiCards = byType(cards, CardType.DDI);
 
-        int piScore = calculatePiScore(piCards);
-        int gwangScore = calculateGwangScore(gwangCards);
-        int kkutScore = calculateKkutScore(kkutCards);
-        int ddiScore = calculateDdiScore(ddiCards);
+        return ScoreBreakdown.builder()
+                .piScore(calculatePiScore(piCards))
+                .gwangScore(calculateGwangScore(gwangCards))
+                .kkutScore(calculateKkutScore(kkutCards))
+                .ddiScore(calculateDdiScore(ddiCards))
+                .piCount(countPi(piCards))
+                .gwangCount(gwangCards.size())
+                .kkutCount(kkutCards.size())
+                .ddiCount(ddiCards.size())
+                .build();
+    }
 
-        return piScore + gwangScore + kkutScore + ddiScore;
+    private List<Card> byType(List<Card> cards, CardType type) {
+        return cards.stream().filter(c -> c.getType() == type).toList();
     }
 }

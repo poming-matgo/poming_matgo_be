@@ -7,6 +7,7 @@ import com.pomingmatgo.gameservice.domain.repository.GameStateRepository;
 import com.pomingmatgo.gameservice.domain.repository.InstalledCardRepository;
 import com.pomingmatgo.gameservice.domain.service.matgo.CardMatchEngine.FloorEffect;
 import com.pomingmatgo.gameservice.domain.service.matgo.CardMatchEngine.MatchOutcome;
+import com.pomingmatgo.gameservice.domain.score.ScoreBreakdown;
 import com.pomingmatgo.gameservice.domain.service.matgo.calculatescore.ScoreCalculator;
 import com.pomingmatgo.gameservice.global.exception.WebSocketBusinessException;
 import lombok.RequiredArgsConstructor;
@@ -45,16 +46,21 @@ public class GameService {
         Mono<List<Card>> player2Card = acquiredCardRepository.getAllCards(roomId, 2);
         return Mono.zip(player1Card, player2Card)
                 .flatMap(tuple -> {
-                    List<Card> player1Cards = tuple.getT1();
-                    List<Card> player2Cards = tuple.getT2();
+                    ScoreBreakdown player1Score = scoreCalculator.calculate(tuple.getT1());
+                    ScoreBreakdown player2Score = scoreCalculator.calculate(tuple.getT2());
 
-                    int player1Score = scoreCalculator.calculateTotalScore(player1Cards);
-                    int player2Score = scoreCalculator.calculateTotalScore(player2Cards);
-
-                    GameState newState = gameState.updatePlayerState(Player.PLAYER_1, ps -> ps.toBuilder().score(player1Score).build())
-                            .updatePlayerState(Player.PLAYER_2, ps -> ps.toBuilder().score(player2Score).build());
+                    GameState newState = gameState.updatePlayerState(Player.PLAYER_1, ps -> applyScore(ps, player1Score))
+                            .updatePlayerState(Player.PLAYER_2, ps -> applyScore(ps, player2Score));
                     return gameStateRepository.save(newState).thenReturn(newState);
                 });
+    }
+
+    // score와 breakdown은 항상 함께 갱신한다 (PlayerState.breakdown 불변식)
+    private PlayerState applyScore(PlayerState playerState, ScoreBreakdown breakdown) {
+        return playerState.toBuilder()
+                .score(breakdown.total())
+                .breakdown(breakdown)
+                .build();
     }
 
     public Mono<Void> acquireCards(long roomId, Player player, List<Card> acquiredCards) {
