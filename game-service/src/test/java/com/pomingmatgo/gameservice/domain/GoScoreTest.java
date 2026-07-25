@@ -7,6 +7,7 @@ import com.pomingmatgo.gameservice.domain.messaging.ScoreInfoRes;
 import com.pomingmatgo.gameservice.domain.score.Multiplier;
 import com.pomingmatgo.gameservice.domain.score.Payout;
 import com.pomingmatgo.gameservice.domain.score.PayoutCalculator;
+import com.pomingmatgo.gameservice.domain.score.ScoreBreakdown;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
@@ -14,6 +15,7 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
 
 import java.util.List;
+import java.util.function.UnaryOperator;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.tuple;
@@ -105,6 +107,105 @@ class GoScoreTest {
     }
 
     @Nested
+    @DisplayName("피박/광박")
+    class BakMultipliers {
+
+        @Test
+        @DisplayName("승자가 피로 점수를 냈고 패자 피가 5장 이하면 피박으로 2배가 된다")
+        void piBakDoublesWinnerScore() {
+            GameState state = stateOf(
+                    playerState(7, 0, breakdown(b -> b.piScore(2).piCount(11))),
+                    playerState(3, 0, breakdown(b -> b.piCount(5))));
+
+            Payout payout = payoutCalculator.finalPayout(state, Player.PLAYER_1);
+
+            assertThat(payout.has(Multiplier.PI_BAK)).isTrue();
+            assertThat(payout.total()).isEqualTo(14);
+        }
+
+        @Test
+        @DisplayName("패자 피가 6장이면 피박이 아니다 — 쌍피는 2장으로 센다")
+        void piBakExcludedWhenLoserHasSixPi() {
+            GameState state = stateOf(
+                    playerState(7, 0, breakdown(b -> b.piScore(2).piCount(11))),
+                    playerState(3, 0, breakdown(b -> b.piCount(6))));
+
+            assertThat(payoutCalculator.finalPayout(state, Player.PLAYER_1).has(Multiplier.PI_BAK)).isFalse();
+        }
+
+        @Test
+        @DisplayName("승자가 피로 점수를 내지 못했으면 패자 피가 적어도 피박이 아니다")
+        void piBakExcludedWhenWinnerScoredNoPi() {
+            GameState state = stateOf(
+                    playerState(7, 0, breakdown(b -> b.piCount(9))),
+                    playerState(3, 0, breakdown(b -> b.piCount(2))));
+
+            assertThat(payoutCalculator.finalPayout(state, Player.PLAYER_1).has(Multiplier.PI_BAK)).isFalse();
+        }
+
+        @Test
+        @DisplayName("승자가 광으로 점수를 냈고 패자가 광이 없으면 광박으로 2배가 된다")
+        void gwangBakDoublesWinnerScore() {
+            GameState state = stateOf(
+                    playerState(7, 0, breakdown(b -> b.gwangScore(3).gwangCount(3))),
+                    playerState(3, 0, breakdown(b -> b.gwangCount(0))));
+
+            Payout payout = payoutCalculator.finalPayout(state, Player.PLAYER_1);
+
+            assertThat(payout.has(Multiplier.GWANG_BAK)).isTrue();
+            assertThat(payout.total()).isEqualTo(14);
+        }
+
+        @Test
+        @DisplayName("패자가 광을 1장이라도 가졌으면 광박이 아니다")
+        void gwangBakExcludedWhenLoserHasGwang() {
+            GameState state = stateOf(
+                    playerState(7, 0, breakdown(b -> b.gwangScore(3).gwangCount(3))),
+                    playerState(3, 0, breakdown(b -> b.gwangCount(1))));
+
+            assertThat(payoutCalculator.finalPayout(state, Player.PLAYER_1).has(Multiplier.GWANG_BAK)).isFalse();
+        }
+
+        @Test
+        @DisplayName("승자가 광으로 점수를 내지 못했으면 패자가 광이 없어도 광박이 아니다")
+        void gwangBakExcludedWhenWinnerScoredNoGwang() {
+            GameState state = stateOf(
+                    playerState(7, 0, breakdown(b -> b.gwangCount(2))),
+                    playerState(3, 0, breakdown(b -> b.gwangCount(0))));
+
+            assertThat(payoutCalculator.finalPayout(state, Player.PLAYER_1).has(Multiplier.GWANG_BAK)).isFalse();
+        }
+
+        @Test
+        @DisplayName("고박·피박·광박은 함께 곱해진다")
+        void bakMultipliersStack() {
+            GameState state = stateOf(
+                    playerState(7, 0, breakdown(b -> b.piScore(2).piCount(11).gwangScore(3).gwangCount(3))),
+                    playerState(3, 1, breakdown(b -> b.piCount(3))));
+
+            Payout payout = payoutCalculator.finalPayout(state, Player.PLAYER_1);
+
+            assertThat(payout.multipliers())
+                    .extracting(Payout.Applied::type)
+                    .containsExactly(Multiplier.GO_BAK, Multiplier.PI_BAK, Multiplier.GWANG_BAK);
+            assertThat(payout.total()).isEqualTo(56);
+        }
+
+        @Test
+        @DisplayName("진행 중 표시엔 승패가 갈려야 결정되는 피박/광박이 빠진다")
+        void provisionalExcludesBakMultipliers() {
+            GameState state = stateOf(
+                    playerState(7, 0, breakdown(b -> b.piScore(2).piCount(11).gwangScore(3).gwangCount(3))),
+                    playerState(3, 0, breakdown(b -> b.piCount(3))));
+
+            Payout provisional = payoutCalculator.provisionalPayout(state, Player.PLAYER_1);
+
+            assertThat(provisional.multipliers()).isEmpty();
+            assertThat(provisional.total()).isEqualTo(7);
+        }
+    }
+
+    @Nested
     @DisplayName("GAME_OVER 응답")
     class GameOverPayload {
 
@@ -191,6 +292,14 @@ class GoScoreTest {
     /** goScore를 1 낮게 둬 고 이후 점수가 올라 스톱 가능해진 상태로 만든다 */
     private static PlayerState playerState(int score, int go) {
         return PlayerState.builder().score(score).go(go).goScore(go > 0 ? score - 1 : 0).build();
+    }
+
+    private static PlayerState playerState(int score, int go, ScoreBreakdown breakdown) {
+        return playerState(score, go).toBuilder().breakdown(breakdown).build();
+    }
+
+    private static ScoreBreakdown breakdown(UnaryOperator<ScoreBreakdown.ScoreBreakdownBuilder> customizer) {
+        return customizer.apply(ScoreBreakdown.builder()).build();
     }
 
     private static GameState stateOf(PlayerState player1, PlayerState player2) {
