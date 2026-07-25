@@ -4,7 +4,6 @@ import com.pomingmatgo.gameservice.domain.GamePhase;
 import com.pomingmatgo.gameservice.domain.Player;
 import com.pomingmatgo.gameservice.domain.card.Card;
 import com.pomingmatgo.gameservice.domain.card.CardType;
-import com.pomingmatgo.gameservice.domain.score.Payout;
 import lombok.Builder;
 import lombok.Getter;
 
@@ -14,7 +13,8 @@ import java.util.Map;
 /**
  * 재접속 시 클라이언트가 화면을 복원하는 데 필요한 게임 상태 스냅샷.
  * 각 필드 포맷은 기존 개별 메시지와 동일하다
- * (floorCards ↔ DISTRIBUTED_FLOOR_CARD, acquired ↔ ACQUIRED_CARD, scores ↔ SCORE_UPDATE).
+ * (floorCards ↔ DISTRIBUTED_FLOOR_CARD, acquired ↔ ACQUIRED_CARD, scores ↔ SCORE_UPDATE,
+ * goStopChoice ↔ GO_STOP_CHOICE).
  * 상대 손패는 장수만 노출한다.
  */
 @Getter
@@ -39,7 +39,6 @@ public class ReconnectStateRes {
 
     /** AWAITING_FLOOR_CARD_CHOICE이고 내 선택 차례일 때만 채워진다 */
     private final List<Card> selectableCards;
-    /** AWAITING_GO_STOP_CHOICE이고 내 선택 차례일 때만 채워진다 (sendGoStopChoiceMessage와 동일 값) */
-    private final Integer nextGoNum;
-    private final Payout stopPayout;
+    /** AWAITING_GO_STOP_CHOICE이고 내 선택 차례일 때만 채워진다 */
+    private final GoStopChoiceRes goStopChoice;
 }

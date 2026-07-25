@@ -1,5 +1,6 @@
 package com.pomingmatgo.gameservice.domain.service.matgo;
 
+import com.pomingmatgo.gameservice.domain.messaging.GoStopChoiceRes;
 import com.pomingmatgo.gameservice.domain.messaging.ReconnectStateRes;
 import com.pomingmatgo.gameservice.domain.messaging.ScoreInfoRes;
 import com.pomingmatgo.gameservice.domain.ChoiceInfo;
@@ -79,8 +80,7 @@ public class ReconnectService {
                 .myGo(gameState.getPlayerState(me).getGo())
                 .opponentGo(gameState.getPlayerState(opponent).getGo())
                 .selectableCards(pendingFloorChoice(gameState, me))
-                .nextGoNum(pendingGoStopChoice(gameState, me))
-                .stopPayout(awaitingMyGoStopChoice(gameState, me) ? payoutCalculator.finalPayout(gameState, me) : null)
+                .goStopChoice(pendingGoStopChoice(gameState, me))
                 .build();
     }
 
@@ -91,11 +91,9 @@ public class ReconnectService {
         return choiceInfo.getSelectableCards();
     }
 
-    private boolean awaitingMyGoStopChoice(GameState gameState, Player me) {
-        return gameState.getPhase() == GamePhase.AWAITING_GO_STOP_CHOICE && gameState.getCurrentPlayer() == me;
-    }
-
-    private Integer pendingGoStopChoice(GameState gameState, Player me) {
-        return awaitingMyGoStopChoice(gameState, me) ? gameState.getPlayerState(me).getGo() + 1 : null;
+    private GoStopChoiceRes pendingGoStopChoice(GameState gameState, Player me) {
+        if (gameState.getPhase() != GamePhase.AWAITING_GO_STOP_CHOICE) return null;
+        if (gameState.getCurrentPlayer() != me) return null;
+        return GoStopChoiceRes.of(gameState.getPlayerState(me), payoutCalculator.finalPayout(gameState, me));
     }
 }
