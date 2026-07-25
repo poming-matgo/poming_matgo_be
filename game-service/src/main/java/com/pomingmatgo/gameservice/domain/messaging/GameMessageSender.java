@@ -142,15 +142,15 @@ public class GameMessageSender {
         );
     }
 
-    public Mono<Void> sendGoStopChoiceMessage(GameState gameState, Player player) {
+    public Mono<Void> sendGoStopChoiceMessage(GameState gameState, Player player, Payout stopPayout) {
         long roomId = gameState.getRoomId();
         Player otherPlayer = gameState.getOtherPlayer();
-        int nextGoNum = gameState.getPlayerState(player).getGo() + 1;
+        GoStopChoiceRes res = GoStopChoiceRes.of(gameState.getPlayerState(player), stopPayout);
         WebSocketSession session = sessionManager.getSession(roomId, player.getNumber());
         WebSocketSession otherSession = sessionManager.getSession(roomId, otherPlayer.getNumber());
         return messageSender.sendMessageToSession(
                 session,
-                WebSocketResDto.of(player, ResponseEvent.GO_STOP_CHOICE, "고/스톱 선택", nextGoNum)
+                WebSocketResDto.of(player, ResponseEvent.GO_STOP_CHOICE, "고/스톱 선택", res)
         ).then(
                 messageSender.sendMessageToSession(
                         otherSession,

@@ -80,6 +80,7 @@ public class ReconnectService {
                 .opponentGo(gameState.getPlayerState(opponent).getGo())
                 .selectableCards(pendingFloorChoice(gameState, me))
                 .nextGoNum(pendingGoStopChoice(gameState, me))
+                .stopPayout(awaitingMyGoStopChoice(gameState, me) ? payoutCalculator.finalPayout(gameState, me) : null)
                 .build();
     }
 
@@ -90,9 +91,11 @@ public class ReconnectService {
         return choiceInfo.getSelectableCards();
     }
 
+    private boolean awaitingMyGoStopChoice(GameState gameState, Player me) {
+        return gameState.getPhase() == GamePhase.AWAITING_GO_STOP_CHOICE && gameState.getCurrentPlayer() == me;
+    }
+
     private Integer pendingGoStopChoice(GameState gameState, Player me) {
-        if (gameState.getPhase() != GamePhase.AWAITING_GO_STOP_CHOICE) return null;
-        if (gameState.getCurrentPlayer() != me) return null;
-        return gameState.getPlayerState(me).getGo() + 1;
+        return awaitingMyGoStopChoice(gameState, me) ? gameState.getPlayerState(me).getGo() + 1 : null;
     }
 }

@@ -1,6 +1,7 @@
 package com.pomingmatgo.gameservice.domain;
 
 import com.pomingmatgo.gameservice.domain.messaging.GameOverRes;
+import com.pomingmatgo.gameservice.domain.messaging.GoStopChoiceRes;
 import com.pomingmatgo.gameservice.domain.messaging.PlayerScoreDto;
 import com.pomingmatgo.gameservice.domain.messaging.ScoreInfoRes;
 import com.pomingmatgo.gameservice.domain.score.Multiplier;
@@ -140,6 +141,26 @@ class GoScoreTest {
             assertThat(res.getGoCount()).isZero();
             assertThat(res.getMultipliers()).isEmpty();
             assertThat(res.isGoBak()).isFalse();
+        }
+    }
+
+    @Nested
+    @DisplayName("GO_STOP_CHOICE 응답")
+    class GoStopChoicePayload {
+
+        @Test
+        @DisplayName("지금 스톱할 경우의 정산을 싣는다 — 스톱 판단에 필요하므로 고박(VERSUS)까지 반영한다")
+        void carriesStopPayoutIncludingVersusMultipliers() {
+            GameState state = stateOf(playerState(9, 3), playerState(8, 1));
+
+            GoStopChoiceRes res = GoStopChoiceRes.of(state.getPlayerState(Player.PLAYER_1),
+                    payoutCalculator.finalPayout(state, Player.PLAYER_1));
+
+            assertThat(res.getNextGoNum()).isEqualTo(4);
+            assertThat(res.getScore()).isEqualTo(9);
+            // 같은 상태의 SCORE_UPDATE(provisional)는 24 — 고박이 빠져 스톱 판단 근거가 되지 못한다
+            assertThat(res.getStopPayout().has(Multiplier.GO_BAK)).isTrue();
+            assertThat(res.getStopPayout().total()).isEqualTo(48);
         }
     }
 

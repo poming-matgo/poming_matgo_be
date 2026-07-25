@@ -95,7 +95,9 @@ public class TurnFlowService {
     /** 도달한 phase별 후처리 메시지: 고/스톱 선택지 전송, 게임 종료 정리(END는 승자/무승부 판정 포함), 다음 턴 공지 */
     private Mono<GameState> notifyNextStep(GameState nextState, Player player) {
         return switch (nextState.getPhase()) {
-            case AWAITING_GO_STOP_CHOICE -> gameMessageSender.sendGoStopChoiceMessage(nextState, player)
+            // 스톱 판단엔 박 계열까지 반영된 정산이 필요하므로 승자를 본인으로 가정한 최종 정산을 싣는다
+            case AWAITING_GO_STOP_CHOICE -> gameMessageSender.sendGoStopChoiceMessage(
+                            nextState, player, payoutCalculator.finalPayout(nextState, player))
                     .thenReturn(nextState);
             // 점수 달성자가 있으면 그 승리(최종 라운드 자동 스톱), 없으면 마지막 턴 미달성 무승부
             case END -> processGameOver(nextState, nextState.canGoStop(player) ? player : Player.PLAYER_NOTHING);

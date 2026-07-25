@@ -4,6 +4,7 @@ import com.pomingmatgo.gameservice.domain.GamePhase;
 import com.pomingmatgo.gameservice.domain.Player;
 import com.pomingmatgo.gameservice.domain.card.Card;
 import com.pomingmatgo.gameservice.domain.card.CardType;
+import com.pomingmatgo.gameservice.domain.score.Payout;
 import lombok.Builder;
 import lombok.Getter;
 
@@ -40,4 +41,5 @@ public class ReconnectStateRes {
     private final List<Card> selectableCards;
     /** AWAITING_GO_STOP_CHOICE이고 내 선택 차례일 때만 채워진다 (sendGoStopChoiceMessage와 동일 값) */
     private final Integer nextGoNum;
+    private final Payout stopPayout;
 }
