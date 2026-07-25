@@ -247,7 +247,8 @@ class DisconnectReconnectTest {
             GameState gs = gameStateRepository.findById(roomId).block();
             return gs != null && gs.getCurrentTurn() == 2;
         }, 5000, "자동플레이로 턴이 진행되지 않음");
-        assertTrue(p2.received("SUBMIT_CARD"), "상대가 자동 제출 메시지를 받지 못함: " + p2.outbox());
+        // 턴 전환 저장은 @GameLock 안, SUBMIT_CARD 전송은 그 뒤 — 상태만 보고 단정하면 메시지보다 앞선다
+        awaitTrue(() -> p2.received("SUBMIT_CARD"), 3000, "상대가 자동 제출 메시지를 받지 못함");
     }
 
     @Test
