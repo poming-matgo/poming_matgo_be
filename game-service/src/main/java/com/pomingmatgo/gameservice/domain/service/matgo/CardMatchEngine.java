@@ -109,7 +109,8 @@ public class CardMatchEngine {
                         })
                         .orElseGet(() -> new PlayOutcome(ProcessCardResult.immediate(acquired), effects));
             }
-            default -> new PlayOutcome(ProcessCardResult.immediate(List.of()), List.of());
+            // 한 월은 4장뿐 — 낼 카드가 손/더미에 남아 있는 이상 그 월 바닥 스택은 3장을 넘을 수 없다
+            default -> throw new IllegalStateException("불가능한 바닥 스택 크기: " + stack.size());
         };
     }
 
