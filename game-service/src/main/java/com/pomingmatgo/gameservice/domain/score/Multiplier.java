@@ -2,10 +2,7 @@ package com.pomingmatgo.gameservice.domain.score;
 
 import lombok.Getter;
 
-/**
- * 정산 배수 룰 — 새 배수(흔들기/폭탄)는 상수 한 블록 추가로 편입된다.
- * PayoutCalculator는 values()를 순회할 뿐 개별 룰을 알지 않는다.
- */
+// PayoutCalculator는 values()를 순회할 뿐이라 새 배수는 상수 한 블록 추가로 편입된다
 @Getter
 public enum Multiplier {
 

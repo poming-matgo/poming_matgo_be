@@ -11,13 +11,7 @@ import reactor.core.publisher.Mono;
 import static com.pomingmatgo.gameservice.domain.Player.PLAYER_1;
 import static com.pomingmatgo.gameservice.domain.Player.PLAYER_2;
 
-/**
- * 프리게임 오케스트레이션: 선 선택 저장 → (모두 선택 시) 선 확정 공지 → 카드 배분 →
- * 총통 체크 → 첫 턴 시작. (TurnFlowService와 대칭 — 핸들러는 phase 검증/라우팅만 담당)
- *
- * TurnScheduler는 빈 주입 — AutoPlayScheduler가 이 서비스를 의존하지 않으므로
- * DI cycle이 없다 (ReconnectService와 같은 패턴).
- */
+// TurnScheduler를 빈으로 주입해도 되는 이유: AutoPlayScheduler가 이 서비스를 의존하지 않아 DI cycle이 없다
 @Service
 @RequiredArgsConstructor
 public class PreGameFlowService {

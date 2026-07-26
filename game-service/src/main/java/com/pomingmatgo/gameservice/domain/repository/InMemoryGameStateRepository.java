@@ -34,9 +34,8 @@ public class InMemoryGameStateRepository implements GameStateRepository {
     @Override
     public Mono<Long> save(GameState gameState) {
         return Mono.fromCallable(() -> {
-            // 게임 액션 경로의 save는 RoomLockManager를 타지 않으므로 cleanup(remove)과 동시 실행될 수 있다.
-            // 존재 확인과 갱신을 computeIfPresent로 원자화해 삭제된 방이 재삽입(부활)되지 않도록 보장.
-            // (Redis 프로파일의 setIfPresent와 동일 계약)
+            // 게임 액션의 save는 RoomLockManager를 타지 않아 cleanup과 동시 실행될 수 있다 —
+            // computeIfPresent로 원자화해 삭제된 방이 부활하지 않게 한다 (Redis setIfPresent와 같은 계약)
             GameState updated = store.computeIfPresent(gameState.getRoomId(), (k, prev) -> gameState);
             if (updated == null) {
                 throw new BusinessException(ErrorCode.SYSTEM_ERROR);

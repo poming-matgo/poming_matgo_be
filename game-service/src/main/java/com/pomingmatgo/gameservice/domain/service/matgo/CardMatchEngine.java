@@ -12,10 +12,7 @@ import java.util.Comparator;
 import java.util.List;
 import java.util.Optional;
 
-/**
- * 고스톱 카드 매칭 규칙의 순수 계산부. 저장소 접근 없이 입력(바닥 스택, 상대 획득패)만으로
- * 턴 결과와 바닥에 적용할 변경(FloorEffect)을 결정한다. 상태 조회/반영은 GameService 담당.
- */
+// 저장소를 건드리지 않는 순수 계산부 — 상태 조회/반영은 GameService 담당
 @Component
 public class CardMatchEngine {
 

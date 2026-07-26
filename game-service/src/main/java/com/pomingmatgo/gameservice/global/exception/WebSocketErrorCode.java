@@ -5,34 +5,26 @@ import lombok.Getter;
 @Getter
 public enum WebSocketErrorCode {
 
-    //게임 phase
     INVALID_GAME_PHASE("현재 게임 상태에서 허용되지 않는 동작입니다."),
 
-    //유저
     INVALID_USER("유효하지 않은 사용자입니다."),
     ALREADY_JOIN("이미 다른방에 접속해있습니다."),
-    //비즈니스 에러
     NOT_EXISTED_ROOM( "존재하지 않는 방입니다."),
     NOT_IN_ROOM("방에 입장하지 않았습니다."),
     FULL_ROOM("방이 꽉 찼습니다."),
 
-    //선두 플레이어 선택
     ALREADY_SELECTED_CARD("이미 선택된 카드입니다."),
 
     SYSTEM_ERROR("시스템 에러가 발생했습니다. 관리자에게 문의하세요."),
 
-    //카드 제출
     INVALID_CARD("유효하지 않은 카드입니다."),
     NOT_EXIST_FLOOR_CARD("선택할 수 있는 바닥패가 없습니다."),
     NOT_YOUR_TURN("턴이 아닙니다."),
 
-    //다시 시도
     TRY_AGAIN("다시 시도해주세요"),
 
-    //유효하지 않은 사용자
     INVALID_PLAYER("유효하지 않은 플레이어입니다."),
 
-    //너무 많은 요청
     TOO_MANY_REQUESTS("너무 많은 요청입니다. 잠시 후 다시 시도해주세요.");
     private final String message;
 

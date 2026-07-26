@@ -29,11 +29,7 @@ import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.BDDMockito.given;
 import static org.mockito.BDDMockito.then;
 
-/**
- * 선택 대기(AWAITING_FLOOR_CARD_CHOICE) 진입 시 같은 턴에서 이미 확정된 획득분이
- * choiceInfo.prevCards/prevMoveCards로 이월되고, 선택 완료 시 최종 결과에 복원되는지 검증.
- * (이월이 없으면 바닥에서 이미 삭제된 획득 카드가 어느 플레이어에게도 귀속되지 않고 유실된다)
- */
+// 이월이 없으면 바닥에서 이미 삭제된 획득 카드가 어느 플레이어에게도 귀속되지 않고 유실된다
 @ExtendWith(MockitoExtension.class)
 @DisplayName("바닥 카드 선택 대기 시 기획득 카드 이월/복원")
 class FloorChoiceCarryoverTest {

@@ -13,13 +13,8 @@ import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.LongAdder;
 
-/**
- * 서버 측 초당 WS 송신 메시지 계측.
- * k6(클라이언트) 집계는 대규모 부하에서 시계열 sink의 backpressure 한계(InfluxDB 적재 유실)가 있어,
- * 1초 단위 throughput 시계열은 서버가 직접 센다 — README 부하 테스트 방법론 참조.
- * hot path 비용은 LongAdder.increment() 1회. 방 단위 상태가 아니므로 RoomCleanupService 대상 아님.
- * metrics.throughput.enabled=false로 끄면 샘플러 스레드/조회 엔드포인트/계측이 모두 비활성화된다.
- */
+// 대규모 부하에서 k6 쪽 시계열 sink는 적재 유실이 있어 1초 단위 throughput은 서버가 직접 센다.
+// 방 단위 상태가 아니므로 RoomCleanupService 정리 대상이 아니다
 @Component
 @ConditionalOnProperty(name = "metrics.throughput.enabled", havingValue = "true", matchIfMissing = true)
 public class ThroughputRecorder {

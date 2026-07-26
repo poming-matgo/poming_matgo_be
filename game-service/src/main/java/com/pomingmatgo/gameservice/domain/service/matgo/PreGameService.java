@@ -38,7 +38,6 @@ public class PreGameService {
     private static final int PLAYER_2_END_INDEX = PLAYER_1_END_INDEX + PLAYER_CARD_COUNT;
     private static final int REVEALED_CARD_END_INDEX = PLAYER_2_END_INDEX + REVEALED_CARD_COUNT;
 
-    //선 플레이어 정하는 과정
     //todo: cardService로 분리 및 cardsByMonth를 상수로
     public Mono<Void> pickFiveCardsAndSave(Long roomId) {
         Map<Integer, List<Card>> cardsByMonth = Arrays.stream(Card.values())
@@ -70,10 +69,7 @@ public class PreGameService {
                 });
     }
 
-    /**
-     * 선 선택 카드 저장. 선택 현황 조회(read)→검증→저장(write) 사이에 상대 선택이 끼어들면
-     * 중복 월 검증이 뚫리므로 그 구간을 방 단위 락으로 직렬화한다 (joinRoom/leaveRoom과 같은 패턴).
-     */
+    // read→검증→write 사이에 상대 선택이 끼어들면 중복 월 검증이 뚫리므로 방 단위 락으로 직렬화한다
     public Mono<Void> selectLeaderCard(long roomId, Player player, int cardIndex) {
         return roomLockManager.withLock(roomId,
                 leadingPlayerRepository.getCardByIndex(roomId, cardIndex)
@@ -84,11 +80,7 @@ public class PreGameService {
                 () -> new WebSocketBusinessException(TOO_MANY_REQUESTS));
     }
 
-    /**
-     * 두 플레이어 모두 선택을 마쳤으면 후속 트리거를 claim한다 (true = 이 호출이 후속 진행 담당).
-     * 락 불필요 — 월은 한 번 저장되면 불변이고, 동시 선택 완료로 둘 다 여기 도달해도
-     * putIfAbsent 기반 트리거가 1회 발사를 보장한다.
-     */
+    /** true = 이 호출이 후속 진행 담당. 락 불필요 — putIfAbsent 트리거가 동시 도달에도 1회 발사를 보장한다 */
     public Mono<Boolean> checkAllSelected(long roomId) {
         return leadingPlayerRepository.getPlayerSelectedCard(roomId)
                 .flatMap(choice -> choice.getPlayer1Month() != 0 && choice.getPlayer2Month() != 0

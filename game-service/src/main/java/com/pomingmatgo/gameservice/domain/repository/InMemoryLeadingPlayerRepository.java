@@ -26,7 +26,7 @@ public class InMemoryLeadingPlayerRepository implements LeadingPlayerRepository 
     @Override
     public Mono<Void> saveSelectedCard(List<Card> cards, Long roomId) {
         return Mono.fromRunnable(() -> {
-            // @GameLock 직렬화 보장 → computeIfAbsent 후 리스트 뮤테이션은 단일 스레드
+            // 방 단위 쓰기는 락으로 직렬화되므로 computeIfAbsent 이후 뮤테이션은 단일 스레드다
             selectedCards.computeIfAbsent(roomId, k -> new ArrayList<>()).addAll(cards);
         });
     }

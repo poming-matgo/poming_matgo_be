@@ -10,10 +10,7 @@ import org.springframework.stereotype.Service;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 
-/**
- * 턴 실행 결과 브로드캐스트(피 이동/획득/특수 이벤트/점수) — 순수 전송만 담당한다.
- * 다음 단계(게임 종료/고스톱 대기/다음 턴) 결정·저장은 GamePlayService, 후속 메시지/타이머는 TurnFlowService의 책임.
- */
+// 턴 결과 브로드캐스트만 담당 — 다음 단계 결정은 GamePlayService, 후속 메시지/타이머는 TurnFlowService
 @Service
 @RequiredArgsConstructor
 public class GameNotificationService {

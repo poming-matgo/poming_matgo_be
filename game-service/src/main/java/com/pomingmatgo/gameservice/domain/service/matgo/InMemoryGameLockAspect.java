@@ -26,9 +26,7 @@ import static com.pomingmatgo.gameservice.global.exception.WebSocketErrorCode.TR
 public class InMemoryGameLockAspect implements GameLockCleaner {
 
     private final ConcurrentHashMap<Long, ConcurrentHashMap<String, Semaphore>> locksByRoom = new ConcurrentHashMap<>();
-    // SpelExpressionParser는 thread-safe (필드 공유 OK).
-    // 단, parseExpression이 반환하는 Expression 객체는 evaluation 도중 내부 상태를 갱신하므로 thread-safe하지 않다.
-    // 캐싱 시 동시 evaluation에서 partial state로 인해 "property cannot be found on null" 같은 race 발생 → 매번 parse
+    // 파서는 thread-safe하지만 Expression 객체는 evaluation 중 내부 상태를 갱신해 캐싱하면 race가 난다 → 매번 parse
     private final ExpressionParser parser = new SpelExpressionParser();
 
     @Around("@annotation(gameLock)")
@@ -44,8 +42,7 @@ public class InMemoryGameLockAspect implements GameLockCleaner {
                 .computeIfAbsent(roomId, k -> new ConcurrentHashMap<>())
                 .computeIfAbsent(keyName, k -> new Semaphore(1));
 
-        // 정상 게임 흐름에서 같은 방의 게임 액션 락 경쟁은 발생하지 않음 (한 턴엔 한 행위자뿐)
-        // 경쟁이 발생했다면 자동플레이 race → 즉시 실패가 3초 대기보다 안전
+        // 한 턴엔 한 행위자뿐이라 정상 흐름엔 경쟁이 없다 — 경쟁은 자동플레이 race이므로 즉시 실패
         if (!semaphore.tryAcquire()) {
             return Mono.error(new WebSocketBusinessException(TRY_AGAIN));
         }

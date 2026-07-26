@@ -23,16 +23,8 @@ import java.util.stream.Collectors;
 
 import static com.pomingmatgo.gameservice.global.exception.WebSocketErrorCode.NOT_EXISTED_ROOM;
 
-/**
- * 재접속한 플레이어에게 보낼 게임 상태 스냅샷을 조립한다.
- *
- * 상태는 호출 시점에 fresh 조회한다 — 이탈 중 자동플레이가 게임을 진행시켰을 수 있고,
- * 이탈자 전원 퇴장으로 방이 정리(teardown)됐다면 NOT_EXISTED_ROOM으로 실패해
- * 재접속 자체를 거절한다.
- *
- * 스냅샷 조립은 락 없이 여러 repository를 읽으므로 자동플레이 진행과 겹치면 필드 간
- * 미세한 어긋남이 있을 수 있다 — 이후 브로드캐스트 메시지가 도착하며 수렴하므로 허용한다.
- */
+// 상태는 fresh 조회 — 이탈 중 자동플레이가 게임을 진행시켰을 수 있고, 방이 teardown됐다면 재접속 자체를 거절한다.
+// 락 없이 여러 repository를 읽어 필드 간 미세한 어긋남이 가능하지만 이후 브로드캐스트로 수렴하므로 허용한다
 @Service
 @RequiredArgsConstructor
 public class ReconnectService {

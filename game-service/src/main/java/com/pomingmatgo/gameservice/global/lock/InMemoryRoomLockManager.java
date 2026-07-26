@@ -38,9 +38,8 @@ public class InMemoryRoomLockManager implements RoomLockManager {
 
     @Override
     public Mono<Void> cleanup(long roomId) {
-        // compute + tryAcquire 변형은 withLock의 (computeIfAbsent → tryAcquire) 2단계 사이에 끼어들어
-        // 다른 스레드의 permit을 가로채 영구 timeout을 유발. 단순 remove로 회귀.
-        // remove 후 새 withLock이 새 Semaphore를 받지만, gameOver→cleanup→재시작 흐름은 정상 게임에서 충돌 거의 없음
+        // 단순 remove여야 한다 — compute+tryAcquire 변형은 withLock의 2단계 사이에 끼어들어
+        // 다른 스레드의 permit을 가로채고 영구 timeout을 만든다
         return Mono.fromRunnable(() -> locks.remove(roomId));
     }
 }

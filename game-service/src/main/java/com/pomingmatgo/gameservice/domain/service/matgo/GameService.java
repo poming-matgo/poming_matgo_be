@@ -75,7 +75,6 @@ public class GameService {
         return installedCardRepository.drawTopCard(roomId);
     }
 
-    /** 제출할 카드를 손패에서 꺼낸다(손패에서 제거 후 반환) */
     public Mono<Card> takeCardFromHand(long roomId, Player player, int cardIndex) {
         return installedCardRepository.getPlayerCards(roomId, player)
                 .flatMap(playerCards -> {
@@ -140,10 +139,7 @@ public class GameService {
                 .then();
     }
 
-    /**
-     * 선택 대기가 새로 생기면 AWAITING 저장, 선택 완료로 턴이 확정되면 IN_PROGRESS 복귀 저장.
-     * 정상 제출이 선택 없이 끝나면 phase 변화가 없으므로 저장하지 않는다 (점수 저장은 settleTurn 담당).
-     */
+    // phase가 바뀔 때만 저장한다 — 선택 없이 끝난 정상 제출의 점수 저장은 settleTurn 담당
     private Mono<Void> saveResultingPhase(GameState gameState, MatchOutcome outcome) {
         if (outcome.pendingChoice() != null) {
             return gameStateRepository.save(gameState.toBuilder()
@@ -174,7 +170,7 @@ public class GameService {
         }
     }
 
-    /** 고/스톱 선택 대기 진입 — phase를 저장해 선택 요청 검증과 자동플레이 타이머(TurnStep)가 같은 상태를 공유하게 한다 */
+    /** phase를 저장해야 선택 요청 검증과 자동플레이 타이머(TurnStep)가 같은 상태를 본다 */
     public Mono<GameState> enterGoStopChoice(GameState gameState) {
         GameState newState = gameState.toBuilder()
                 .phase(GamePhase.AWAITING_GO_STOP_CHOICE)

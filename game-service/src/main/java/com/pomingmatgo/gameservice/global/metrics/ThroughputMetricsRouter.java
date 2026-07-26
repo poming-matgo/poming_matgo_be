@@ -8,11 +8,7 @@ import org.springframework.web.reactive.function.server.ServerResponse;
 
 import static org.springframework.web.reactive.function.server.RouterFunctions.route;
 
-/**
- * 부하 테스트용 내부 계측 조회 엔드포인트.
- * GET: 누적/초당 송신 메시지 스냅샷, DELETE: 측정 리셋 (run 사이 초기화용)
- * ThroughputRecorder가 비활성(metrics.throughput.enabled=false)이면 엔드포인트도 등록되지 않는다.
- */
+// 부하 테스트용 내부 엔드포인트 — DELETE는 run 사이 초기화용. Recorder가 꺼져 있으면 등록되지 않는다
 @Configuration
 public class ThroughputMetricsRouter {
     @Bean

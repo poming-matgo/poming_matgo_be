@@ -27,7 +27,7 @@ public class MessageSender {
     }
 
     public <T> Mono<Void> sendMessageToSession(WebSocketSession session, WebSocketResDto<T> response) {
-        // session null: 상대 미접속 또는 방 정리와 동시 실행된 경우 → 전송 스킵
+        // 상대 미접속 또는 방 정리와 동시 실행된 경우
         if (session == null || !session.isOpen()) {
             return Mono.empty();
         }
@@ -49,9 +49,8 @@ public class MessageSender {
     }
 
     public <T> Mono<Void> sendMessageToAllUser(long roomId, WebSocketResDto<T> response) {
-        // 수신자 조회는 구독 시점으로 지연(defer)해야 한다.
-        // assembly 시점에 getAllUser를 즉시 평가하면 addPlayer(...).then(broadcast) 체인에서
-        // 세션 등록 전에 수신자를 캡처해 접속 직후 첫 브로드캐스트가 유실된다 (CONNECT ack 미도달 버그).
+        // 수신자 조회는 반드시 구독 시점으로 지연 — assembly 시점에 평가하면
+        // addPlayer(...).then(broadcast) 체인에서 세션 등록 전 수신자를 캡처해 첫 브로드캐스트가 유실된다
         return Flux.defer(() -> Flux.fromIterable(sessionManager.getAllUser(roomId)))
                 .flatMap(session -> sendMessageToSession(session, response))
                 .then();

@@ -168,7 +168,6 @@ public class GameMessageSender {
         );
     }
 
-    /** winner가 PLAYER_NOTHING이면 무승부 */
     public Mono<Void> sendGameOverMessage(GameState finalState, Player winner, Payout payout) {
         long roomId = finalState.getRoomId();
         String message = winner == PLAYER_NOTHING ? "무승부" : "게임 승리자";

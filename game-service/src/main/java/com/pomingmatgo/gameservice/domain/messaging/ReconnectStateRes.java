@@ -10,13 +10,8 @@ import lombok.Getter;
 import java.util.List;
 import java.util.Map;
 
-/**
- * 재접속 시 클라이언트가 화면을 복원하는 데 필요한 게임 상태 스냅샷.
- * 각 필드 포맷은 기존 개별 메시지와 동일하다
- * (floorCards ↔ DISTRIBUTED_FLOOR_CARD, acquired ↔ ACQUIRED_CARD, scores ↔ SCORE_UPDATE,
- * goStopChoice ↔ GO_STOP_CHOICE).
- * 상대 손패는 장수만 노출한다.
- */
+// 각 필드 포맷은 대응하는 개별 메시지(DISTRIBUTED_FLOOR_CARD/ACQUIRED_CARD/SCORE_UPDATE/GO_STOP_CHOICE)와 같다.
+// 상대 손패는 장수만 노출한다
 @Getter
 @Builder
 public class ReconnectStateRes {

@@ -50,8 +50,7 @@ public class InMemoryInFlightManager implements InFlightManager {
     @Override
     public Mono<Void> deleteFlag(String key, String token) {
         return Mono.fromRunnable(() -> {
-            // TTL 만료 후 다른 요청이 플래그를 재획득했을 수 있으므로 소유 토큰이 일치할 때만 삭제.
-            // remove(key, value)는 값 동등성 기반 원자 연산 → 그 사이 또 교체됐어도 no-op
+            // 소유 토큰이 일치할 때만 삭제 — remove(key, value)는 원자 연산이라 그 사이 교체됐어도 no-op
             Flag current = flags.get(key);
             if (current != null && current.token().equals(token)) {
                 flags.remove(key, current);

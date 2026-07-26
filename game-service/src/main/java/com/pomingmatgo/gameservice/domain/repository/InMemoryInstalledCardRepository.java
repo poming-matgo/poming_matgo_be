@@ -9,6 +9,7 @@ import reactor.core.publisher.Mono;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 
+// 방 단위 쓰기는 @GameLock으로 직렬화되므로 computeIfAbsent 이후의 컬렉션 뮤테이션은 단일 스레드다
 @Profile("in-memory")
 @Repository
 public class InMemoryInstalledCardRepository implements InstalledCardRepository {
@@ -20,7 +21,6 @@ public class InMemoryInstalledCardRepository implements InstalledCardRepository 
     @Override
     public Mono<Boolean> savePlayerCards(List<Card> cards, long roomId, Player player) {
         return Mono.fromCallable(() -> {
-            // @GameLock 직렬화 보장 → computeIfAbsent 후 리스트 뮤테이션은 단일 스레드
             playerCards.computeIfAbsent(roomId, k -> new ConcurrentHashMap<>())
                        .computeIfAbsent(player.name(), k -> new ArrayList<>())
                        .addAll(cards);
@@ -42,7 +42,6 @@ public class InMemoryInstalledCardRepository implements InstalledCardRepository 
         return Mono.fromCallable(() -> {
             ConcurrentHashMap<Integer, Set<Card>> room = revealedCards.computeIfAbsent(roomId, k -> new ConcurrentHashMap<>());
             for (Card card : cards) {
-                // @GameLock 직렬화 보장 → computeIfAbsent 후 셋 뮤테이션은 단일 스레드
                 room.computeIfAbsent(card.getMonth(), k -> new HashSet<>()).add(card);
             }
             return true;
@@ -52,7 +51,6 @@ public class InMemoryInstalledCardRepository implements InstalledCardRepository 
     @Override
     public Mono<Boolean> saveHiddenCard(List<Card> cards, long roomId) {
         return Mono.fromCallable(() -> {
-            // @GameLock 직렬화 보장 → computeIfAbsent 후 덱 뮤테이션은 단일 스레드
             hiddenDeck.computeIfAbsent(roomId, k -> new ArrayDeque<>()).addAll(cards);
             return true;
         });
@@ -124,7 +122,6 @@ public class InMemoryInstalledCardRepository implements InstalledCardRepository 
 
     @Override
     public Mono<Void> cleanup(long roomId) {
-        // 2단계 맵: O(1) 제거, 다른 방 키 탐색 없음
         return Mono.fromRunnable(() -> {
             playerCards.remove(roomId);
             revealedCards.remove(roomId);

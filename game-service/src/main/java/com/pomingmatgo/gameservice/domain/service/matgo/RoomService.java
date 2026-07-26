@@ -41,14 +41,13 @@ public class RoomService {
     }
 
     public Mono<Void> leaveRoom(long userId, long roomId) {
-        // joinRoom/Ready와 동일하게 단일 GameState 공유 수정이므로 방 단위 락으로 직렬화 (lost update 방지)
+        // 단일 GameState 공유 수정이라 방 단위 락으로 직렬화한다 (lost update 방지)
         return roomLockManager.withLock(roomId,
                 gameStateRepository.findById(roomId)
                         .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.NOT_EXISTED_ROOM)))
                         .filter(gameState -> gameState.hasUser(userId))
                         .flatMap(gameState -> {
-                            // 게임 시작 후의 이탈은 WS disconnect 흐름(보존/teardown)이 담당 —
-                            // 진행 중 REST leave를 허용하면 PlayerState만 초기화된 어긋난 상태가 된다
+                            // 진행 중 이탈은 WS disconnect 흐름이 담당 — REST leave를 허용하면 PlayerState만 초기화된 어긋난 상태가 된다
                             if (gameState.getPhase() != GamePhase.NONE) {
                                 return Mono.error(new BusinessException(ErrorCode.GAME_IN_PROGRESS));
                             }

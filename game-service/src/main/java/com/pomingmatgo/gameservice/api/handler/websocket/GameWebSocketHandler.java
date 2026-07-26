@@ -92,10 +92,9 @@ public class GameWebSocketHandler implements WebSocketHandler {
                             .switchIfEmpty(Mono.error(new WebSocketBusinessException(NOT_EXISTED_ROOM)))
                             .flatMap(gameState -> {
                                 if (isGameAction(event, gameState, player)) {
-                                    // 정상 요청은 NORMAL 키만 사용. 자동플레이가 진행 중이어도 InFlight 단계에선 차단되지 않음.
-                                    // 자동플레이의 abort는 routeEvent 안의 onLockAcquired 콜백에서 cancelAutoPlay 호출로 처리됨.
+                                    // NORMAL 키만 사용 — 자동플레이 abort는 routeEvent의 onLockAcquired 콜백이 맡는다
                                     String flagKey = InFlightManager.normalKey(roomId, player.getNumber());
-                                    // 요청별 소유 토큰: TTL 만료 후 다른 요청이 플래그를 재획득해도 내 정리가 남의 플래그를 지우지 않게 함
+                                    // 요청별 소유 토큰 — TTL 만료 후 다른 요청이 재획득해도 내 정리가 남의 플래그를 지우지 않는다
                                     String flagToken = Long.toHexString(ThreadLocalRandom.current().nextLong());
 
                                     return inFlightManager.trySetFlag(flagKey, flagToken, Duration.ofSeconds(3))
@@ -121,7 +120,7 @@ public class GameWebSocketHandler implements WebSocketHandler {
                eventType == SubCategory.FLOOR_SELECT ||
                eventType == SubCategory.GO_STOP_CHOICE;
 
-        // 행동 대기 phase(제출/바닥 선택/고스톱 선택)는 모두 자동플레이 타이머와 경합하므로 InFlight 방어가 필요하다
+        // 행동 대기 phase는 모두 자동플레이 타이머와 경합하므로 InFlight 방어 대상이다
         boolean cond2 = gameState.getPhase().isPlayerActionPhase() &&
                 player.equals(gameState.getCurrentPlayer());
 
@@ -151,10 +150,6 @@ public class GameWebSocketHandler implements WebSocketHandler {
                                                 roomId, WebSocketResDto.of(player, ResponseEvent.CONNECT, "접속했습니다.")))));
     }
 
-    /**
-     * 진행 중인 게임으로의 재접속: 양쪽에 재접속을 알리고, 재접속자에게 화면 복원용 상태 스냅샷을 보낸다.
-     * 스냅샷은 fresh 조회 — 이탈 중 자동플레이가 게임을 진행시켰을 수 있다.
-     */
     private Mono<Void> handleReconnect(long roomId, Player player, WebSocketSession session) {
         return messageSender.sendMessageToAllUser(
                         roomId, WebSocketResDto.of(player, ResponseEvent.RECONNECT, "재접속했습니다."))
@@ -200,15 +195,14 @@ public class GameWebSocketHandler implements WebSocketHandler {
                     // identity guard: 컨텍스트 조회 후 재접속이 슬롯을 교체했다면 새 세션을 지우지 않는다
                     sessionManager.deletePlayer(roomId, playerNum, session);
 
-                    // 슬롯이 다시 점유돼 있다면 이 disconnect는 재접속에 밀린 낡은 것 —
-                    // 보존/teardown 판정까지 진행하면 방금 재접속한 세션 밑에서
-                    // OPPONENT_DISCONNECTED 오발송이나 방 파괴가 일어나므로 통째로 중단한다
+                    // 슬롯이 다시 점유됐다면 재접속에 밀린 낡은 disconnect —
+                    // 계속 진행하면 방금 재접속한 세션 밑에서 오알림·방 파괴가 일어난다
                     if (sessionManager.getSession(roomId, playerNum) != null) {
                         return Mono.empty();
                     }
 
                     return gameService.findGameState(roomId)
-                            // 방 상태가 이미 없으면(teardown과 교차한 재접속 등) 세션 매핑만 마저 정리 (roomSessions 누수 방지)
+                            // 방 상태가 이미 없으면 세션 매핑만 마저 정리 (roomSessions 누수 방지)
                             .switchIfEmpty(Mono.defer(() ->
                                     sessionManager.removeRoom(roomId).then(Mono.<GameState>empty())))
                             .flatMap(gameState -> {
@@ -216,9 +210,8 @@ public class GameWebSocketHandler implements WebSocketHandler {
                                 boolean opponentConnected =
                                         sessionManager.getSession(roomId, disconnected.opponent().getNumber()) != null;
 
-                                // 행동 대기 phase는 자동플레이 타이머가 진행(liveness)을 보장하므로
-                                // 방을 보존해 재접속을 허용한다 — 이탈자의 턴은 기존 타이머가 그대로 대행.
-                                // 단, 마지막 접속자까지 나가면 버려진 방이므로 즉시 정리한다.
+                                // 행동 대기 phase만 자동플레이가 진행(liveness)을 보장하므로 방을 보존한다.
+                                // 마지막 접속자까지 나가면 버려진 방이라 아래로 흘려보내 정리한다
                                 if (phase.isPlayerActionPhase() && opponentConnected) {
                                     return messageSender.sendMessageToAllUser(roomId,
                                             WebSocketResDto.of(disconnected, ResponseEvent.OPPONENT_DISCONNECTED,

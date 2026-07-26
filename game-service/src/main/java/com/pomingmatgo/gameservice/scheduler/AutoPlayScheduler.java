@@ -21,47 +21,24 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.TimeUnit;
 
-/**
- * 자동플레이 스케줄러.
- *
- * 타이머의 정체성은 TurnStep(round, turn, phase) 하나로 표현한다:
- * - IN_PROGRESS: 턴 타임아웃 시 카드 자동 제출
- * - AWAITING_FLOOR_CARD_CHOICE: 선택 타임아웃 시 바닥 카드 자동 선택
- * - AWAITING_GO_STOP_CHOICE: 선택 타임아웃 시 자동 STOP (확정된 승리를 가져가는 안전한 기본값 + 게임 종료 보장)
- * 등록 시점엔 TurnStep의 순서 비교로 낡은 등록이 유효한 타이머를 교체(파괴)하지 못하게 막고,
- * 발사 시점엔 실제 게임 상태가 TurnStep과 일치하는지 재검증해 낡은 타이머가 스스로 물러나게 한다.
- * 실행 자체는 TurnFlowService에 위임하므로 후처리(타이머 재등록 포함)는 사용자 요청 경로와 동일하다.
- *
- * 제약: scheduled 맵과 reactor.core.Disposable 기반 타이머는 모두 인스턴스 로컬이다.
- * 따라서 다수 인스턴스 배포 시  방 단위 sticky routing이 전제되어야 한다.
- * (한 방의 모든 메시지가 항상 같은 인스턴스로 라우팅).
- *
- * 이 전제가 깨지면 한 인스턴스의 cancelAutoplay가 다른 인스턴스의 타이머를 취소하지 못해
- * false 자동플레이가 발사될 수 있다. 분산 환경에서 sticky routing 없이 동작시키려면 Redis 기반 분산 타이머가 별도로 필요하다.
- */
+// scheduled 맵과 Disposable 타이머가 모두 인스턴스 로컬 — 다중 인스턴스 배포는 방 단위 sticky routing 전제.
+// 깨지면 한 인스턴스의 cancelAutoPlay가 다른 인스턴스의 타이머를 취소하지 못해 false 자동플레이가 발사된다
 @Service
 @RequiredArgsConstructor
 @Log4j2
 public class AutoPlayScheduler implements TurnScheduler {
 
-    // 자동 액션은 항상 첫 번째 카드(손패/선택지)를 사용
     private static final int AUTO_PLAY_CARD_INDEX = 0;
-    // 고/스톱 타임아웃 시 자동 선택 — STOP(false): 확정 승리로 즉시 종료 (GO는 AFK 플레이어의 리스크를 키움)
+    // STOP: 확정 승리로 즉시 종료 — GO는 AFK 플레이어의 리스크를 키운다
     private static final boolean AUTO_GO_STOP_IS_GO = false;
-    // 타이머 발사 시점이 이미 deadline을 지났을 때 즉시 실행 대신 주는 최소 지연
     private static final long MIN_DELAY_MILLIS = 100;
 
     private final InFlightManager inFlightManager;
     private final GameService gameService;
     private final TurnFlowService turnFlowService;
 
-    /**
-     * 타이머가 속한 턴 단계의 정체성. 등록 시점의 교체 판정(순서 비교)과
-     * 발사 시점의 상태 재검증(matches)이 같은 값을 공유한다.
-     * 같은 턴 안의 단계 순서는 GamePhase.turnStepOrder가 정의한다
-     * (제출 < 바닥 선택 < 고/스톱 선택) — 낡은 앞 단계 타이머 등록이
-     * 먼저 등록된 뒤 단계 타이머를 교체(파괴)하지 못하게 한다.
-     */
+    // 등록 시 교체 판정(순서 비교)과 발사 시 상태 재검증(matches)이 공유하는 타이머 정체성.
+    // 순서는 GamePhase.turnStepOrder — 낡은 앞 단계 등록이 먼저 등록된 뒤 단계 타이머를 파괴하지 못하게 한다
     private record TurnStep(int round, int turn, GamePhase phase) implements Comparable<TurnStep> {
 
         @Override
@@ -84,11 +61,7 @@ public class AutoPlayScheduler implements TurnScheduler {
 
     private final Map<Long, Scheduled> scheduled = new ConcurrentHashMap<>();
 
-    /**
-     * 현재 대기 중인 타이머 기준, 클라이언트에 알릴 남은 턴 시간(ms).
-     * deadline은 GRACE_PERIOD를 포함하므로 빼서 돌려준다. 타이머가 없으면(경합 틈) 턴 제한 전체를 반환 —
-     * 재접속 스냅샷 표시용 근사값이며 실제 타임아웃 판정은 타이머 자신이 한다.
-     */
+    /** 재접속 스냅샷 표시용 근사값 — deadline이 품은 GRACE_PERIOD를 뺀다. 실제 타임아웃 판정은 타이머 자신이 한다 */
     @Override
     public long getRemainingTurnMillis(long roomId) {
         Scheduled current = scheduled.get(roomId);
@@ -105,10 +78,8 @@ public class AutoPlayScheduler implements TurnScheduler {
         long delayMillis = TimeUnit.NANOSECONDS.toMillis(deadlineNanos - System.nanoTime());
         if (delayMillis <= 0) delayMillis = MIN_DELAY_MILLIS;
 
-        // 취소(dispose) 대상은 "대기 중인 타이머"로 한정한다. 발사 이후의 실행은 독립 구독으로 분리 —
-        // 실행 도중 cancelAutoPlay가 호출되는 경우(자동플레이 자신의 게임 종료 cleanup, 고/스톱 분기 등)
-        // 실행 체인을 중단시키면 아직 전송되지 않은 GAME_OVER/GO_STOP_CHOICE 메시지가 유실된다.
-        // 발사 이후의 경합은 TurnStep 재검증 + InFlight + @GameLock이 방어한다.
+        // 발사 이후 실행은 독립 구독 — 실행 체인을 dispose하면 미전송 GAME_OVER/GO_STOP_CHOICE가 유실된다.
+        // 발사 이후 경합은 TurnStep 재검증 + InFlight + @GameLock이 방어하므로 취소 대상은 대기 중인 타이머뿐
         Disposable newTask = Mono.delay(Duration.ofMillis(delayMillis))
                 .subscribe(v -> attemptAutoPlay(roomId, newStep, currentPlayer)
                         .subscribe(
@@ -132,10 +103,7 @@ public class AutoPlayScheduler implements TurnScheduler {
         }
     }
 
-    /**
-     * 방 정리 이벤트 수신 시 예약된 타이머 취소. RoomCleanupService가 이 클래스를 직접 의존하면
-     * DI cycle(AutoPlayScheduler → TurnFlowService → ... → RoomCleanupService)이 생기므로 이벤트로 수신한다.
-     */
+    // RoomCleanupService가 이 클래스를 직접 의존하면 DI cycle이 생기므로 이벤트로 수신한다
     @EventListener
     public void onRoomCleanedUp(RoomCleanedUpEvent event) {
         cancelAutoPlay(event.roomId());
@@ -156,7 +124,7 @@ public class AutoPlayScheduler implements TurnScheduler {
                         return Mono.empty();
                     }
 
-                    // 정상 요청 진행 여부는 NORMAL 키로 체크 (양보)
+                    // 정상 요청이 진행 중이면 양보한다
                     String normalFlagKey = InFlightManager.normalKey(roomId, currentPlayer.getNumber());
 
                     return inFlightManager.isSet(normalFlagKey)
@@ -172,10 +140,10 @@ public class AutoPlayScheduler implements TurnScheduler {
     }
 
     private Mono<Void> executeAutoPlayLogic(long roomId, TurnStep step, Player currentPlayer) {
-        // AUTOPLAY 키는 자동플레이끼리의 동시 시작 방지용 (정상 요청과는 키 분리)
+        // AUTOPLAY 키는 자동플레이끼리의 동시 시작만 막는다 (정상 요청과 키 분리)
         String autoplayFlagKey = InFlightManager.autoplayKey(roomId, currentPlayer.getNumber());
         String normalFlagKey = InFlightManager.normalKey(roomId, currentPlayer.getNumber());
-        // 발사별 소유 토큰: TTL 만료 후 다른 발사가 플래그를 재획득해도 내 정리가 남의 플래그를 지우지 않게 함
+        // 발사별 소유 토큰 — TTL 만료 후 다른 발사가 플래그를 재획득해도 내 정리가 남의 플래그를 지우지 않는다
         String autoplayToken = Long.toHexString(ThreadLocalRandom.current().nextLong());
         return inFlightManager.trySetFlag(autoplayFlagKey, autoplayToken, Duration.ofSeconds(2))
                 .flatMap(acquired -> {
@@ -183,7 +151,7 @@ public class AutoPlayScheduler implements TurnScheduler {
 
                     Mono<Void> mainProcess = Mono.defer(() -> inFlightManager.isSet(normalFlagKey)
                             .flatMap(normalInProgress -> {
-                                // attempt 시점 이후 정상 요청이 막 도착했을 수 있음 → 게임 로직 진입 직전 한 번 더 체크 (race 좁힘)
+                                // attempt 이후 정상 요청이 막 도착했을 수 있어 진입 직전 재확인 (race 좁힘)
                                 if (normalInProgress) return Mono.<Void>empty();
                                 return gameService.findGameState(roomId)
                                         .flatMap(gameState -> {

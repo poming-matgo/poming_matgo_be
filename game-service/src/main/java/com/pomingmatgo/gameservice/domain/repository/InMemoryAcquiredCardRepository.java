@@ -11,6 +11,7 @@ import java.util.List;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 
+// 방 단위 쓰기는 @GameLock으로 직렬화되므로 computeIfAbsent 이후의 셋 뮤테이션은 단일 스레드다
 @Profile("in-memory")
 @Repository
 public class InMemoryAcquiredCardRepository implements AcquiredCardRepository {
@@ -23,7 +24,6 @@ public class InMemoryAcquiredCardRepository implements AcquiredCardRepository {
             return Mono.just(0L);
         }
         return Mono.fromCallable(() -> {
-            // @GameLock 직렬화 보장 → computeIfAbsent 후 셋 뮤테이션은 단일 스레드
             store.computeIfAbsent(roomId, k -> new ConcurrentHashMap<>())
                  .computeIfAbsent(playerId, k -> ConcurrentHashMap.newKeySet())
                  .addAll(cards);
@@ -52,7 +52,6 @@ public class InMemoryAcquiredCardRepository implements AcquiredCardRepository {
 
     @Override
     public Mono<Void> cleanup(long roomId) {
-        // 2단계 맵: O(1) 제거, 다른 방 키 탐색 없음
         return Mono.fromRunnable(() -> store.remove(roomId));
     }
 }

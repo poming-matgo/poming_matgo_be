@@ -32,9 +32,8 @@ public class RoomCleanupService {
                 leadingPlayerRepository.cleanup(roomId),
                 roomLockManager.cleanup(roomId),
                 gameLockCleaner.cleanup(roomId),
-                // 예약된 자동플레이 task dispose + scheduled 맵 entry 제거.
-                // AutoPlayScheduler 직접 의존은 DI cycle을 만들므로 이벤트로 위임 —
-                // 리스너는 발행 스레드에서 동기 실행되어 기존 직접 호출과 동일한 시점에 취소된다
+                // 자동플레이 타이머 취소 — AutoPlayScheduler 직접 의존은 DI cycle을 만들어 이벤트로 위임한다.
+                // 리스너는 발행 스레드에서 동기 실행되므로 취소 시점은 직접 호출과 같다
                 Mono.fromRunnable(() -> eventPublisher.publishEvent(new RoomCleanedUpEvent(roomId)))
         );
     }

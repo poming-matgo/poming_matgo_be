@@ -28,8 +28,7 @@ public class ProcessCardResult {
     private final List<Card> moveCards = new ArrayList<>();
 
     public ProcessCardResult merge(ProcessCardResult other) {
-        // 선택 대기 결과면 그대로 반환 — this(앞선 획득분)는 버려지지만, handleTwoCardsOnFloor가
-        // choiceInfo.prev*로 이월해 두었으므로 선택 완료 시 finalizeTurn이 복원한다
+        // 선택 대기면 this(앞선 획득분)를 버려도 된다 — CardMatchEngine이 choiceInfo.prev*로 이월해 뒀다
         if (other.isChoiceRequired()) return other;
 
         List<Card> mergedAcquired = new ArrayList<>(this.acquiredCards);
