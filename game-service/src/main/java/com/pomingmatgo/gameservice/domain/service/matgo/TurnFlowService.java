@@ -104,8 +104,8 @@ public class TurnFlowService {
         return endedState.hasPpeokWin(actor) || endedState.canGoStop(actor) ? actor : Player.PLAYER_NOTHING;
     }
 
-    /** winner가 PLAYER_NOTHING이면 무승부 */
-    private Mono<GameState> processGameOver(GameState gameState, Player winner) {
+    /** winner가 PLAYER_NOTHING이면 무승부 — 첫 턴 시작 전 종료(PreGameFlowService)도 이 경로를 공유한다 */
+    public Mono<GameState> processGameOver(GameState gameState, Player winner) {
         return gamePlayService.gameOver(gameState)
                 .delayUntil(finalState -> gameMessageSender.sendGameOverMessage(
                         finalState, winner, payoutCalculator.finalPayout(finalState, winner)));

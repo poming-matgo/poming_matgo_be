@@ -1,6 +1,7 @@
 package com.pomingmatgo.gameservice.domain.service.matgo;
 
 import com.pomingmatgo.gameservice.domain.GameState;
+import com.pomingmatgo.gameservice.domain.InstalledCard;
 import com.pomingmatgo.gameservice.domain.Player;
 import com.pomingmatgo.gameservice.domain.messaging.GameMessageSender;
 import com.pomingmatgo.gameservice.scheduler.TurnScheduler;
@@ -10,6 +11,7 @@ import reactor.core.publisher.Mono;
 
 import static com.pomingmatgo.gameservice.domain.Player.PLAYER_1;
 import static com.pomingmatgo.gameservice.domain.Player.PLAYER_2;
+import static com.pomingmatgo.gameservice.domain.Player.PLAYER_NOTHING;
 
 // TurnScheduler를 빈으로 주입해도 되는 이유: AutoPlayScheduler가 이 서비스를 의존하지 않아 DI cycle이 없다
 @Service
@@ -55,8 +57,16 @@ public class PreGameFlowService {
     private Mono<GameState> distributeCardsAndNotify(GameState gameState) {
         long roomId = gameState.getRoomId();
         return Mono.defer(() -> preGameService.distributeCards(roomId))
-                .flatMap(cards -> gameMessageSender.sendDistributedCardInfo(roomId, cards))
-                .thenReturn(gameState);
+                .delayUntil(cards -> gameMessageSender.sendDistributedCardInfo(roomId, cards))
+                .flatMap(cards -> checkFloorDrawAndProceed(gameState, cards));
+    }
+
+    // 첫 턴 시작 전에 끝나는 무승부 — empty를 반환해 이후 시작 단계를 건너뛴다
+    private Mono<GameState> checkFloorDrawAndProceed(GameState gameState, InstalledCard cards) {
+        if (!cards.hasFourOfSameMonthOnFloor()) {
+            return Mono.just(gameState);
+        }
+        return turnFlowService.processGameOver(gameState, PLAYER_NOTHING).then(Mono.empty());
     }
 
     // todo: 승부판정 로직 구현 필요
