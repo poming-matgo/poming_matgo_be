@@ -48,7 +48,7 @@ public enum Multiplier {
     static final int GO_MULTIPLIER_FROM = 3;
 
     // 승자가 피로 점수를 냈고 패자 피가 이 장수 이하면 피박 (쌍피는 2장)
-    static final int PI_BAK_UP_TO = 5;
+    static final int PI_BAK_UP_TO = 7;
 
     /** SELF는 승자 자신의 상태만으로, VERSUS는 승패가 갈려야 결정된다 (진행 중 표시에선 VERSUS 제외) */
     public enum Scope { SELF, VERSUS }
