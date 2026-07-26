@@ -26,7 +26,6 @@ public class GameState implements Serializable {
     @Builder.Default
     private PlayerState player2 = new PlayerState();
 
-    //game phase
     private int leadingPlayer;
     private int currentTurn;
     private int round;
@@ -88,6 +87,10 @@ public class GameState implements Serializable {
 
     public boolean canGoStop(Player player) {
         return getPlayerState(player).canGoStop();
+    }
+
+    public boolean hasPpeokWin(Player player) {
+        return getPlayerState(player).hasPpeokWin();
     }
 
     @JsonIgnore

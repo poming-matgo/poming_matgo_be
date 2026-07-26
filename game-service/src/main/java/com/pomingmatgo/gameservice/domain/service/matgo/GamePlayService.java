@@ -41,11 +41,7 @@ public class GamePlayService {
                                 .map(nextState -> new FloorSelectionResult(result, nextState))));
     }
 
-    /**
-     * @GameLock 획득 직후의 공통 전처리: 자동플레이 타이머 취소 콜백 실행 → fresh 상태 재조회 →
-     * phase/차례 재검증. 락 통과 후에도 자동플레이와의 race로 상태가 이미 진행됐을 수 있어
-     * 세 게임 액션(제출/바닥 선택/고스톱) 모두 fresh 상태 기준으로 검증한다.
-     */
+    // 락 통과 후에도 자동플레이 race로 상태가 이미 진행됐을 수 있어 fresh 상태로 재검증한다
     private Mono<GameState> validatedFreshState(long roomId, GamePhase expectedPhase, Player player, Runnable onLockAcquired) {
         return Mono.defer(() -> {
             if (onLockAcquired != null) {
@@ -63,13 +59,8 @@ public class GamePlayService {
         });
     }
 
-    /**
-     * 턴 확정 공통 후처리: 피 뺏기/획득 반영 후 점수를 재계산하고, 다음 상태
-     * (고스톱 대기/게임 종료/다음 턴)까지 결정해 저장한 상태를 반환한다.
-     * 다음 상태 저장은 반드시 @GameLock 안에서 끝나야 한다 — 락 해제 후로 미루면
-     * 그 사이(결과 브로드캐스트 등) 낡은 경쟁자가 phase/차례 재검증을 통과해 같은 턴을 중복 실행한다.
-     * 선택 대기(choiceRequired)면 아직 턴이 끝나지 않았으므로 아무것도 반영하지 않고 기존 상태 그대로 반환.
-     */
+    // 다음 상태 저장까지 @GameLock 안에서 끝내야 한다 — 락 해제 후로 미루면
+    // 그 사이 낡은 경쟁자가 phase/차례 재검증을 통과해 같은 턴을 중복 실행한다
     private Mono<GameState> settleTurn(long roomId, GameState gameState, ProcessCardResult result) {
         if (result.isChoiceRequired()) {
             return Mono.just(gameState);
@@ -80,13 +71,25 @@ public class GamePlayService {
 
         return loseCards
                 .then(gameService.acquireCards(roomId, gameState.getCurrentPlayer(), result.getAcquiredCards()))
-                .then(gameService.calculateAndApplyScores(roomId, gameState))
+                .then(gameService.calculateAndApplyScores(roomId, countPpeok(gameState, result)))
                 .flatMap(this::transitionAfterTurn);
     }
 
-    /** 턴 완료 후 다음 상태 결정+저장: 최종 라운드 점수 달성/마지막 턴 미달성 → 종료, 점수 달성 → 고/스톱 대기, 그 외 → 다음 턴 */
+    // 뻑 누적은 점수 저장(calculateAndApplyScores)에 실려 함께 영속된다
+    private GameState countPpeok(GameState gameState, ProcessCardResult result) {
+        if (!result.getSpecialEvents().contains(SpecialEvent.PPEOK)) {
+            return gameState;
+        }
+        return gameState.updatePlayerState(gameState.getCurrentPlayer(),
+                ps -> ps.toBuilder().ppeokCount(ps.getPpeokCount() + 1).build());
+    }
+
     private Mono<GameState> transitionAfterTurn(GameState settled) {
         Player player = settled.getCurrentPlayer();
+        // 세번뻑은 점수와 무관한 즉시 승리라 고/스톱 판정보다 앞선다
+        if (settled.hasPpeokWin(player)) {
+            return markEnded(settled);
+        }
         if (settled.canGoStop(player)) {
             // 마지막 라운드엔 GO 선택지가 없으므로 자동 스톱으로 곧바로 게임 종료
             return settled.isFinalRound()

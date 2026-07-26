@@ -2,6 +2,7 @@ package com.pomingmatgo.gameservice.domain.score;
 
 import com.pomingmatgo.gameservice.domain.GameState;
 import com.pomingmatgo.gameservice.domain.Player;
+import com.pomingmatgo.gameservice.domain.PlayerState;
 import org.springframework.stereotype.Component;
 
 import java.util.ArrayList;
@@ -17,12 +18,21 @@ public class PayoutCalculator {
         if (winner == Player.PLAYER_NOTHING) {
             return Payout.NONE;
         }
-        return calculate(contextOf(gameState, winner), scope -> true);
+        return payoutOf(gameState, winner, scope -> true);
     }
 
     /** 진행 중 표시용 — 승패에 따라 결정되는 VERSUS 배수는 아직 확정할 수 없어 제외한다 */
     public Payout provisionalPayout(GameState gameState, Player player) {
-        return calculate(contextOf(gameState, player), scope -> scope == Multiplier.Scope.SELF);
+        return payoutOf(gameState, player, scope -> scope == Multiplier.Scope.SELF);
+    }
+
+    private Payout payoutOf(GameState gameState, Player player, Predicate<Multiplier.Scope> scopeFilter) {
+        PlayerState playerState = gameState.getPlayerState(player);
+        // 세번뻑 승리는 고 보너스도 배수도 없는 7점 고정
+        if (playerState.hasPpeokWin()) {
+            return Payout.flat(playerState.winningScore());
+        }
+        return calculate(contextOf(gameState, player), scopeFilter);
     }
 
     private PayoutContext contextOf(GameState gameState, Player winner) {

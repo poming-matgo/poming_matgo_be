@@ -29,7 +29,7 @@ public class GameOverRes {
         PlayerState winnerState = finalState.getPlayerState(winner);
         return new GameOverRes(
                 winner,
-                winnerState.getScore(),
+                winnerState.winningScore(),
                 payout.baseScore(),
                 payout.total(),
                 winnerState.getGo(),
