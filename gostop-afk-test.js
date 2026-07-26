@@ -27,6 +27,7 @@ const STALL_LIMIT_MS = 30000;
 const floorChoiceCounter = new Counter('afk_floor_choices');
 const goStopChoiceCounter = new Counter('afk_go_stop_choices');
 const turnCounter = new Counter('afk_turn_announcements');
+const threePpeokCounter = new Counter('afk_three_ppeok_wins');
 
 function connectPlayer(userId, playerType, roomId, result) {
     return new Promise((resolve) => {
@@ -110,6 +111,17 @@ function connectPlayer(userId, playerType, roomId, result) {
                     break;
                 }
 
+                case 'THREE_PPEOK': {
+                    // 뻑 3회 → 7점 즉시 승리. 고/스톱 대기 없이 곧바로 GAME_OVER가 이어진다
+                    const winner = res.player || (res.data && res.data.player);
+                    result.threePpeokWinner = winner;
+                    if (winner === playerType) {
+                        threePpeokCounter.add(1);
+                        console.log(`${logPrefix} 💥 세번뻑 — 7점 즉시 승리로 게임 종료`);
+                    }
+                    break;
+                }
+
                 case 'GAME_OVER':
                     console.log(`${logPrefix} 🏁 GAME_OVER 수신 — 완주`);
                     result.gameOver = true;
@@ -135,8 +147,8 @@ export default async function () {
     const join2 = http.post(`${BASE_HTTP_URL}/room/join`, JSON.stringify({ roomId: roomId.toString(), userId: '2' }), { headers });
     if (!check(join1, { 'P1 입장': (r) => r.status === 200 }) || !check(join2, { 'P2 입장': (r) => r.status === 200 })) return;
 
-    const r1 = { gameOver: false, stalled: false, floorChoices: 0, goStopChoices: 0, turns: 0 };
-    const r2 = { gameOver: false, stalled: false, floorChoices: 0, goStopChoices: 0, turns: 0 };
+    const r1 = { gameOver: false, stalled: false, floorChoices: 0, goStopChoices: 0, turns: 0, threePpeokWinner: null };
+    const r2 = { gameOver: false, stalled: false, floorChoices: 0, goStopChoices: 0, turns: 0, threePpeokWinner: null };
 
     await Promise.all([
         connectPlayer(1, 'PLAYER_1', roomId, r1),
@@ -148,8 +160,11 @@ export default async function () {
     });
 
     const totalChoices = r1.floorChoices + r2.floorChoices;
-    console.log(`📊 결과 — 턴 공지: ${r1.turns}회, 바닥 카드 선택 발생: P1=${r1.floorChoices} P2=${r2.floorChoices}, 고/스톱 선택 발생: P1=${r1.goStopChoices} P2=${r2.goStopChoices}`);
+    const ppeokWinner = r1.threePpeokWinner || r2.threePpeokWinner;
+    const endReason = ppeokWinner ? `세번뻑 즉시 승리 (${ppeokWinner})` : '고/스톱 자동 STOP 또는 최종 라운드 종료';
+    console.log(`📊 결과 — 종료 사유: ${endReason}, 턴 공지: ${r1.turns}회, 바닥 카드 선택 발생: P1=${r1.floorChoices} P2=${r2.floorChoices}, 고/스톱 선택 발생: P1=${r1.goStopChoices} P2=${r2.goStopChoices}`);
     if (totalChoices === 0) {
+        // 세번뻑으로 조기 종료되면 선택 상황을 만날 기회 자체가 적다
         console.warn('⚠️ 이번 판에서는 바닥 카드 선택 상황이 발생하지 않았습니다 (덱 셔플 랜덤). 재실행을 권장합니다.');
     }
 }

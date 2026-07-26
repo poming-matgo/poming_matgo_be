@@ -12,6 +12,8 @@ const serverErrors = new Counter('gostop_server_errors');
 const clientTimeouts = new Counter('gostop_client_timeouts');
 // 완주된 게임 수 (방당 1회 — PLAYER_1 수신 기준)
 const gamesCompleted = new Counter('gostop_games_completed');
+// 세번뻑(뻑 3회 → 7점 즉시 승리)으로 조기 종료된 게임 수
+const threePpeokWins = new Counter('gostop_three_ppeok_wins');
 
 export const options = {
     stages: [
@@ -173,6 +175,12 @@ export default async function () {
                                     );
                                 }, 500);
                             }
+                            break;
+
+                        case 'THREE_PPEOK':
+                            // 고/스톱 대기 없이 곧바로 GAME_OVER로 이어진다 — 승자 기준 방당 1회 집계
+                            let ppeokWinner = res.player || (res.data && res.data.player);
+                            if (ppeokWinner === playerType) threePpeokWins.add(1);
                             break;
 
                         case 'GAME_OVER':
