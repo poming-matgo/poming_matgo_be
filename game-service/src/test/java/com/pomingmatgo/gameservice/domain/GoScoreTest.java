@@ -107,15 +107,15 @@ class GoScoreTest {
     }
 
     @Nested
-    @DisplayName("피박/광박")
+    @DisplayName("피박/광박/멍박")
     class BakMultipliers {
 
         @Test
-        @DisplayName("승자가 피로 점수를 냈고 패자 피가 5장 이하면 피박으로 2배가 된다")
+        @DisplayName("승자가 피로 점수를 냈고 패자 피가 7장 이하면 피박으로 2배가 된다")
         void piBakDoublesWinnerScore() {
             GameState state = stateOf(
                     playerState(7, 0, breakdown(b -> b.piScore(2).piCount(11))),
-                    playerState(3, 0, breakdown(b -> b.piCount(5))));
+                    playerState(3, 0, breakdown(b -> b.piCount(7))));
 
             Payout payout = payoutCalculator.finalPayout(state, Player.PLAYER_1);
 
@@ -124,11 +124,11 @@ class GoScoreTest {
         }
 
         @Test
-        @DisplayName("패자 피가 6장이면 피박이 아니다 — 쌍피는 2장으로 센다")
-        void piBakExcludedWhenLoserHasSixPi() {
+        @DisplayName("패자 피가 8장이면 피박이 아니다 — 쌍피는 2장으로 센다")
+        void piBakExcludedWhenLoserExceedsThreshold() {
             GameState state = stateOf(
                     playerState(7, 0, breakdown(b -> b.piScore(2).piCount(11))),
-                    playerState(3, 0, breakdown(b -> b.piCount(6))));
+                    playerState(3, 0, breakdown(b -> b.piCount(8))));
 
             assertThat(payoutCalculator.finalPayout(state, Player.PLAYER_1).has(Multiplier.PI_BAK)).isFalse();
         }
@@ -177,31 +177,58 @@ class GoScoreTest {
         }
 
         @Test
-        @DisplayName("고박·피박·광박은 함께 곱해진다")
+        @DisplayName("끗을 7장 이상 모으면 상대 끗과 무관하게 멍박으로 2배가 된다")
+        void mungBakDoublesWinnerScore() {
+            GameState state = stateOf(
+                    playerState(7, 0, breakdown(b -> b.kkutScore(3).kkutCount(7))),
+                    playerState(3, 0, breakdown(b -> b.kkutCount(4))));
+
+            Payout payout = payoutCalculator.finalPayout(state, Player.PLAYER_1);
+
+            assertThat(payout.has(Multiplier.MUNG_BAK)).isTrue();
+            assertThat(payout.total()).isEqualTo(14);
+        }
+
+        @Test
+        @DisplayName("끗이 6장이면 멍박이 아니다")
+        void mungBakExcludedBelowThreshold() {
+            GameState state = stateOf(
+                    playerState(7, 0, breakdown(b -> b.kkutScore(2).kkutCount(6))),
+                    playerState(3, 0, breakdown(b -> b.kkutCount(0))));
+
+            assertThat(payoutCalculator.finalPayout(state, Player.PLAYER_1).has(Multiplier.MUNG_BAK)).isFalse();
+        }
+
+        @Test
+        @DisplayName("고박·피박·광박·멍박은 함께 곱해진다")
         void bakMultipliersStack() {
             GameState state = stateOf(
-                    playerState(7, 0, breakdown(b -> b.piScore(2).piCount(11).gwangScore(3).gwangCount(3))),
+                    playerState(7, 0, breakdown(b -> b.piScore(2).piCount(11)
+                            .gwangScore(3).gwangCount(3).kkutScore(3).kkutCount(7))),
                     playerState(3, 1, breakdown(b -> b.piCount(3))));
 
             Payout payout = payoutCalculator.finalPayout(state, Player.PLAYER_1);
 
             assertThat(payout.multipliers())
                     .extracting(Payout.Applied::type)
-                    .containsExactly(Multiplier.GO_BAK, Multiplier.PI_BAK, Multiplier.GWANG_BAK);
-            assertThat(payout.total()).isEqualTo(56);
+                    .containsExactly(Multiplier.GO_BAK, Multiplier.PI_BAK, Multiplier.GWANG_BAK, Multiplier.MUNG_BAK);
+            assertThat(payout.total()).isEqualTo(112);
         }
 
         @Test
-        @DisplayName("진행 중 표시엔 승패가 갈려야 결정되는 피박/광박이 빠진다")
-        void provisionalExcludesBakMultipliers() {
+        @DisplayName("진행 중 표시엔 승패가 갈려야 결정되는 피박/광박이 빠지고, 자기 상태만 보는 멍박은 남는다")
+        void provisionalKeepsOnlySelfScopedMungBak() {
             GameState state = stateOf(
-                    playerState(7, 0, breakdown(b -> b.piScore(2).piCount(11).gwangScore(3).gwangCount(3))),
+                    playerState(7, 0, breakdown(b -> b.piScore(2).piCount(11)
+                            .gwangScore(3).gwangCount(3).kkutScore(3).kkutCount(7))),
                     playerState(3, 0, breakdown(b -> b.piCount(3))));
 
             Payout provisional = payoutCalculator.provisionalPayout(state, Player.PLAYER_1);
 
-            assertThat(provisional.multipliers()).isEmpty();
-            assertThat(provisional.total()).isEqualTo(7);
+            assertThat(provisional.multipliers())
+                    .extracting(Payout.Applied::type)
+                    .containsExactly(Multiplier.MUNG_BAK);
+            assertThat(provisional.total()).isEqualTo(14);
         }
     }
 
