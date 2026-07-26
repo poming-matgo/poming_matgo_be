@@ -48,6 +48,25 @@ public class ProcessCardResult {
                 .build();
     }
 
+    /** 판쓸이 보상을 이미 확정된 이번 턴 획득분 위에 얹는다 */
+    public ProcessCardResult withSweep(Card pi) {
+        List<Card> acquired = new ArrayList<>(this.acquiredCards);
+        acquired.add(pi);
+
+        List<SpecialEvent> events = new ArrayList<>(this.specialEvents);
+        events.add(SpecialEvent.SWEEP);
+
+        List<Card> moves = new ArrayList<>(this.moveCards);
+        moves.add(pi);
+
+        return this.toBuilder()
+                .acquiredCards(acquired)
+                .specialEvents(events)
+                .moveCards(moves)
+                .claimOpponentPi(true)
+                .build();
+    }
+
     public static ProcessCardResult immediate(List<Card> cards) {
         // 호출자 리스트를 그대로 참조하지 않도록 복사 (choicePending과 동일한 방어)
         return ProcessCardResult.builder()

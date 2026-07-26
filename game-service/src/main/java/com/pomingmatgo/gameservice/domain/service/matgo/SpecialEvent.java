@@ -11,6 +11,8 @@ public enum SpecialEvent {
     PPEOK("뻑!", ResponseEvent.PPEOK),
     TTADAK("따닥!", ResponseEvent.TTADAK),
     JJOK("쪽!", ResponseEvent.JJOK),
+    // 월별 매칭이 아니라 바닥 전체가 비었는지의 판정이라 바닥 반영 후의 GameService가 발행한다
+    SWEEP("판쓸이!", ResponseEvent.SWEEP),
     // 카드 매칭 결과가 아니라 뻑 누적 판정 결과라 CardMatchEngine이 아닌 TurnFlowService가 발행한다
     THREE_PPEOK("세번뻑!", ResponseEvent.THREE_PPEOK);
 

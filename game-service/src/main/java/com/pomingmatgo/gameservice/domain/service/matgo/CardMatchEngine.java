@@ -69,6 +69,14 @@ public class CardMatchEngine {
         return new MatchOutcome(prev.merge(base.merge(next.result())), effects, null);
     }
 
+    /** 바닥이 빈 판쓸이 보상 — 바닥 잔여 판정은 저장소를 보는 GameService가 하고 여기선 뺏을 피만 고른다 */
+    public ProcessCardResult decideSweep(ProcessCardResult result, List<Card> opponentAcquired) {
+        // 같은 턴에 이미 뺏은 피(쪽·따닥·뻑먹기)를 다시 고르면 상대가 잃지 않은 카드를 두 번 얻는다
+        return findMovablePi(opponentAcquired, result.getMoveCards())
+                .map(result::withSweep)
+                .orElse(result);
+    }
+
     private MatchOutcome decideSameMonth(Card submitted, Card turned, List<Card> stack, List<Card> opponentAcquired) {
         if (stack.size() == 1) {
             return new MatchOutcome(ProcessCardResult.ppeok(List.of()),

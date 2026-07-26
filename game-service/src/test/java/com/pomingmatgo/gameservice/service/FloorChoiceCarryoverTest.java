@@ -101,6 +101,7 @@ class FloorChoiceCarryoverTest {
 
         given(installedCardRepository.deleteRevealedCard(anyLong(), any()))
                 .willReturn(Mono.just(true));
+        given(installedCardRepository.getAllRevealedCards(ROOM_ID)).willReturn(Mono.just(List.of(FEB_3)));
         given(acquiredCardRepository.getAllCards(ROOM_ID, 2)).willReturn(Mono.just(List.of()));
         given(gameStateRepository.save(any())).willReturn(Mono.just(ROOM_ID));
 

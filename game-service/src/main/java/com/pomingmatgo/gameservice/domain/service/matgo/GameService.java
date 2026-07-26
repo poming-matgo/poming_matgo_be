@@ -126,7 +126,20 @@ public class GameService {
     private Mono<ProcessCardResult> applyOutcome(GameState gameState, MatchOutcome outcome) {
         return applyFloorEffects(gameState.getRoomId(), outcome.effects())
                 .then(saveResultingPhase(gameState, outcome))
-                .thenReturn(outcome.result());
+                .then(applySweepIfFloorCleared(gameState, outcome.result()));
+    }
+
+    // 판쓸이 판정 대상은 FloorEffect가 모두 반영된 뒤의 바닥이다.
+    // 선택 대기 중엔 낸 카드가 바닥 밖(choiceInfo)에 있어 아직 턴 결과가 확정되지 않았다
+    private Mono<ProcessCardResult> applySweepIfFloorCleared(GameState gameState, ProcessCardResult result) {
+        if (result.isChoiceRequired()) {
+            return Mono.just(result);
+        }
+        return installedCardRepository.getAllRevealedCards(gameState.getRoomId())
+                .filter(List::isEmpty)
+                .flatMap(empty -> opponentAcquiredCards(gameState))
+                .map(opponentCards -> cardMatchEngine.decideSweep(result, opponentCards))
+                .defaultIfEmpty(result);
     }
 
     private Mono<Void> applyFloorEffects(long roomId, List<FloorEffect> effects) {
