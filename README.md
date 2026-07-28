@@ -108,7 +108,7 @@ k6 run --out influxdb=http://localhost:8086/k6 gostop-test.js
 
 초기에는 게임 상태 관리를 위해 Redis를 도입했으나, **단일 방 안에서만 상태 공유가 필요한 게임 도메인 특성**상 분산 캐시의 오버헤드가 불필요하다고 판단했습니다.
 
-`ConcurrentHashMap` 기반의 인메모리 구조로 전환하여 **TCP 통신 및 직렬화/역직렬화 비용을 완전히 제거**했습니다. *(Redis 프로파일은 그대로 유지해 분산 배포 시 전환 가능)*
+`ConcurrentHashMap` 기반의 인메모리 구조로 전환하여 **TCP 통신 및 직렬화/역직렬화 비용을 제거**했습니다. *(Redis 프로파일은 전환 효과를 동일 시나리오로 비교 측정하기 위한 대조군이자 롤백 경로로 유지 — 실제 분산 배포에는 방 단위 sticky routing 등 선행 조건이 별도로 필요)*
 
  **결과:** I/O 병목을 해소하여 단일 서버에서 **초당 평균 약 88,700건(1초 피크 95,310건)** 의 웹소켓 메시지를 처리합니다([부하 테스트 결과](#-부하-테스트-결과) 참조). 전환 시점의 동일 부하 시나리오 비교 측정에서는 Redis 프로파일 대비 **약 6.6배** 의 처리량 향상을 확인했습니다.
 
@@ -173,7 +173,7 @@ k6 run --out influxdb=http://localhost:8086/k6 gostop-test.js
   - 문제: 게임 중 disconnect 시 방을 즉시 정리해, 순간적인 연결 끊김에도 게임이 파괴됨
   - 해결: **자동플레이가 진행(liveness)을 보장하는 행동 대기 phase에 한해 방을 보존**해 재접속 허용. 이탈자의 턴은 이미 등록된 자동플레이 타이머가 그대로 대행하므로 이탈 처리에 새 스케줄링 경로가 없고, 이탈을 별도 공유 상태로 만들지 않아(세션 슬롯 null = 이탈) 새 동기화 지점도 생기지 않음. 재접속은 별도 이벤트 없이 기존 `CONNECT` 재사용(보존된 `GameState`에 userId가 남아 입장 검증 자연 통과) + fresh 조회한 상태 스냅샷(`RECONNECT_STATE`: 손패/바닥/획득/점수/선택지/남은시간)으로 동기화. 마지막 접속자까지 이탈하면 즉시 전체 teardown(버려진 방을 headless로 완주시키지 않음)
   - 세션 경합 3단 방어: ⓐ 같은 슬롯의 낡은 세션은 매핑 제거 후 close — **중복 접속·좀비 TCP 모두 새 세션이 승리** ⓑ disconnect 정리는 그 세션이 아직 슬롯을 점유 중일 때만 수행 (identity guard) ⓒ 슬롯이 재점유됐으면 보존/teardown 판정 전에 disconnect 처리 자체를 중단해 **stale disconnect가 재접속 직후의 방을 파괴하는 TOCTOU 차단**
-  - 검증: mock 세션으로 실제 핸들러 흐름을 구동하는 통합 테스트([`DisconnectReconnectTest`](game-service/src/test/java/com/pomingmatgo/gameservice/websocket/DisconnectReconnectTest.java)) 7건
+  - 검증: mock 세션으로 실제 핸들러 흐름을 구동하는 통합 테스트([`DisconnectReconnectTest`](game-service/src/test/java/com/pomingmatgo/gameservice/websocket/DisconnectReconnectTest.java)) 8건
 
 - **브로드캐스트 수신자 목록의 assembly 시점 eager 평가 — 접속 직후 첫 응답 유실 회귀**
   - 문제: `sendMessageToAllUser`가 수신자 목록(`getAllUser`)을 리액티브 체인 **조립(assembly) 시점에 즉시 평가**. `addPlayer(...).then(broadcast)` 체인에서 자바의 인자 선평가 규칙상 세션 등록(runnable은 구독 시점 실행) **전에** 수신자를 캡처해, 접속 직후 첫 브로드캐스트(CONNECT 응답)가 유실됨 — 클라이언트는 응답 대기 상태로 정지해 게임이 시작되지 않는 회귀. 재접속 기능 도입 시 `handleJoinRoom` 재구성으로 유입
