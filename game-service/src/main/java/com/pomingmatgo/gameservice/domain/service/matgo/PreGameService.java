@@ -110,11 +110,17 @@ public class PreGameService {
     }
 
     public Mono<InstalledCard> distributeCards(long roomId) {
-        return Flux.fromArray(Card.values())
-                .collectList()
-                .map(ArrayList::new)
-                .doOnNext(Collections::shuffle)
-                .map(this::dealCardsFromDeck)
+        return Mono.fromCallable(() -> {
+                    List<Card> deck = new ArrayList<>(Arrays.asList(Card.values()));
+                    Collections.shuffle(deck);
+                    return deck;
+                })
+                .flatMap(deck -> distributeCards(roomId, deck));
+    }
+
+    /** 셔플 결과를 값으로 받는 결정적 경로 — 커맨드 로그의 덱 고정 레코드와 replay가 이 seam을 쓴다 */
+    public Mono<InstalledCard> distributeCards(long roomId, List<Card> deck) {
+        return Mono.fromCallable(() -> dealCardsFromDeck(deck))
                 .flatMap(installedCard -> persistAllCards(installedCard, roomId));
     }
 
