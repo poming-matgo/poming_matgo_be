@@ -53,7 +53,8 @@ public class GameWebSocketHandler implements WebSocketHandler {
     @Override
     public Mono<Void> handle(WebSocketSession session) {
         return session.receive()
-                .flatMap(message -> handleMessage(message, session))
+                // 세션 내 순차 처리 — demand가 Netty까지 전파돼 flood 클라이언트를 TCP 레벨에서 차단
+                .concatMap(message -> handleMessage(message, session))
                 .then()
                 // 정상 종료(onComplete) / 에러(onError) / 구독 취소(cancel) 모든 경로에서 disconnect 처리
                 .doFinally(signal -> handleDisconnect(session)
