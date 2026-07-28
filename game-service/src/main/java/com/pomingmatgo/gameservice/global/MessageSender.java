@@ -27,12 +27,16 @@ public class MessageSender {
     }
 
     public <T> Mono<Void> sendMessageToSession(WebSocketSession session, WebSocketResDto<T> response) {
+        return sendPayload(session, response);
+    }
+
+    public Mono<Void> sendPayload(WebSocketSession session, Object payload) {
         // 상대 미접속 또는 방 정리와 동시 실행된 경우
         if (session == null || !session.isOpen()) {
             return Mono.empty();
         }
 
-        return Mono.fromCallable(() -> objectMapper.writeValueAsString(response))
+        return Mono.fromCallable(() -> objectMapper.writeValueAsString(payload))
                 .map(session::textMessage)
                 .flatMap(msg -> session.send(Mono.just(msg)))
                 // 전송 성공만 계측 — skip(null/closed 세션)·실패는 throughput에 포함하지 않는다

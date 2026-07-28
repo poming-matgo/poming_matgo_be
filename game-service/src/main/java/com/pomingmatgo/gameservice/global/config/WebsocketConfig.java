@@ -8,7 +8,6 @@ import org.springframework.web.reactive.HandlerMapping;
 import org.springframework.web.reactive.handler.SimpleUrlHandlerMapping;
 import org.springframework.web.reactive.socket.WebSocketHandler;
 import org.springframework.web.reactive.socket.server.support.WebSocketHandlerAdapter;
-import reactor.core.publisher.Sinks;
 
 import java.util.HashMap;
 import java.util.Map;
@@ -30,10 +29,5 @@ public class WebsocketConfig {
     @Bean
     public WebSocketHandlerAdapter webSocketHandlerAdapter() {
         return new WebSocketHandlerAdapter();
-    }
-
-    @Bean
-    public Sinks.One<String> sink() {
-        return Sinks.one();
     }
 }

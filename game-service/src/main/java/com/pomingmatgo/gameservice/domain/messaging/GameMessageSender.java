@@ -117,7 +117,7 @@ public class GameMessageSender {
         WebSocketSession otherSession = sessionManager.getSession(roomId, otherPlayer.getNumber());
         return messageSender.sendMessageToSession(
                 session,
-                WebSocketResDto.of(player, ResponseEvent.OPPONENT_PI_CLAIMED, "상대방의 카드를 빼았습니다.", card)).then(
+                WebSocketResDto.of(player, ResponseEvent.OPPONENT_PI_CLAIMED, "상대방의 카드를 빼앗았습니다.", card)).then(
                 messageSender.sendMessageToSession(
                         otherSession,
                         WebSocketResDto.of(otherPlayer, ResponseEvent.OPPONENT_PI_CLAIMED, "상대방이 피를 뺏습니다.", card)

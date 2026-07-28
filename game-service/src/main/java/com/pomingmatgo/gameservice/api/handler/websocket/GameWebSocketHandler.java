@@ -179,18 +179,7 @@ public class GameWebSocketHandler implements WebSocketHandler {
             log.error("WebSocket system error occurred in session [{}].", session.getId(), error);
         }
 
-        WebSocketErrorResDto errorDto = new WebSocketErrorResDto(errorCode);
-
-        if (!session.isOpen()) {
-            return Mono.empty();
-        }
-        return Mono.fromCallable(() -> objectMapper.writeValueAsString(errorDto))
-                .map(session::textMessage)
-                .flatMap(message -> session.send(Mono.just(message)))
-                .onErrorResume(sendError -> {
-                    log.debug("에러 응답 전송 실패 — 세션 [{}] 스킵", session.getId(), sendError);
-                    return Mono.empty();
-                });
+        return messageSender.sendPayload(session, new WebSocketErrorResDto(errorCode));
     }
 
     private Mono<Void> handleDisconnect(WebSocketSession session) {

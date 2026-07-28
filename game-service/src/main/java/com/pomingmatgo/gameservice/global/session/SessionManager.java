@@ -4,7 +4,6 @@ import com.pomingmatgo.gameservice.domain.Player;
 import org.springframework.stereotype.Component;
 import org.springframework.web.reactive.socket.WebSocketSession;
 import reactor.core.publisher.Mono;
-import reactor.core.scheduler.Schedulers;
 
 import java.util.Collection;
 import java.util.List;
@@ -44,7 +43,7 @@ public class SessionManager {
             if (occupant == null) return null;
 
             return new PlayerContext(roomId, occupant.userId(), occupant.playerNum());
-        }).subscribeOn(Schedulers.boundedElastic());
+        });
     }
 
     public Mono<Void> addRoom(long roomId) {

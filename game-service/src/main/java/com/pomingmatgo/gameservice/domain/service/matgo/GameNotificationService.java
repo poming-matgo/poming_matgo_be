@@ -35,7 +35,7 @@ public class GameNotificationService {
         return sendMoveCards
                 .then(sendAcquired)
                 .then(sendSpecial)
-                .then(gameMessageSender.sendScoreInfo(gameState.getRoomId(), ScoreInfoRes.from(
+                .then(gameMessageSender.sendScoreInfo(roomId, ScoreInfoRes.from(
                         gameState,
                         payoutCalculator.provisionalPayout(gameState, Player.PLAYER_1),
                         payoutCalculator.provisionalPayout(gameState, Player.PLAYER_2))));
