@@ -1,6 +1,7 @@
 package com.pomingmatgo.gameservice.domain.service.matgo;
 
 import com.pomingmatgo.gameservice.domain.event.RoomCleanedUpEvent;
+import com.pomingmatgo.gameservice.domain.gamelog.GameCommandLog;
 import com.pomingmatgo.gameservice.domain.repository.AcquiredCardRepository;
 import com.pomingmatgo.gameservice.domain.repository.GameStateRepository;
 import com.pomingmatgo.gameservice.domain.repository.InstalledCardRepository;
@@ -22,6 +23,7 @@ public class RoomCleanupService {
     private final LeadingPlayerRepository leadingPlayerRepository;
     private final RoomLockManager roomLockManager;
     private final GameLockCleaner gameLockCleaner;
+    private final GameCommandLog gameCommandLog;
     private final ApplicationEventPublisher eventPublisher;
 
     public Mono<Void> cleanupRoomData(long roomId) {
@@ -32,6 +34,8 @@ public class RoomCleanupService {
                 leadingPlayerRepository.cleanup(roomId),
                 roomLockManager.cleanup(roomId),
                 gameLockCleaner.cleanup(roomId),
+                // 로그는 delete가 아니라 drain + 완료 표시 — 커맨드 로그는 방 정리 후에도 저장소에 남는다
+                gameCommandLog.close(roomId),
                 // 자동플레이 타이머 취소 — AutoPlayScheduler 직접 의존은 DI cycle을 만들어 이벤트로 위임한다.
                 // 리스너는 발행 스레드에서 동기 실행되므로 취소 시점은 직접 호출과 같다
                 Mono.fromRunnable(() -> eventPublisher.publishEvent(new RoomCleanedUpEvent(roomId)))

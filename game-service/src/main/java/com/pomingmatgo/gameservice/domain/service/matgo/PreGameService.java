@@ -3,6 +3,7 @@ package com.pomingmatgo.gameservice.domain.service.matgo;
 import com.pomingmatgo.gameservice.domain.messaging.LeadSelectionRes;
 import com.pomingmatgo.gameservice.domain.*;
 import com.pomingmatgo.gameservice.domain.card.Card;
+import com.pomingmatgo.gameservice.domain.gamelog.GameCommandLog;
 import com.pomingmatgo.gameservice.domain.repository.GameStateRepository;
 import com.pomingmatgo.gameservice.domain.repository.InstalledCardRepository;
 import com.pomingmatgo.gameservice.domain.repository.LeadingPlayerRepository;
@@ -30,6 +31,7 @@ public class PreGameService {
     private final InstalledCardRepository installedCardRepository;
     private final GameStateRepository gameStateRepository;
     private final RoomLockManager roomLockManager;
+    private final GameCommandLog gameCommandLog;
 
     private static final int CARDS_TO_PICK = 5;
     private static final int PLAYER_CARD_COUNT = 10;
@@ -115,7 +117,9 @@ public class PreGameService {
                     Collections.shuffle(deck);
                     return deck;
                 })
-                .flatMap(deck -> distributeCards(roomId, deck));
+                .flatMap(deck -> distributeCards(roomId, deck)
+                        // 배분 확정 후 셔플 덱을 로그 첫 레코드로 고정 — replay 경로(아래 seam)는 기록하지 않는다
+                        .delayUntil(cards -> gameCommandLog.logDeckInit(roomId, deck)));
     }
 
     /** 셔플 결과를 값으로 받는 결정적 경로 — 커맨드 로그의 덱 고정 레코드와 replay가 이 seam을 쓴다 */

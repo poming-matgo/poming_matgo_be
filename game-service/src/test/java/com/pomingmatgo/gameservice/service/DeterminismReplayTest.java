@@ -33,7 +33,7 @@ import static org.junit.jupiter.api.Assertions.fail;
         + "org.redisson.spring.starter.RedissonAutoConfigurationV2,"
         + "org.springframework.boot.autoconfigure.data.redis.RedisAutoConfiguration,"
         + "org.springframework.boot.autoconfigure.data.redis.RedisReactiveAutoConfiguration")
-@DisplayName("결정성 감사(1-A): 같은 덱 + 같은 커맨드 replay가 같은 최종 상태를 만든다")
+@DisplayName("결정성 감사: 같은 덱 + 같은 커맨드 replay가 같은 최종 상태를 만든다")
 class DeterminismReplayTest {
 
     @Autowired GamePlayService gamePlayService;
@@ -50,7 +50,7 @@ class DeterminismReplayTest {
 
     private enum CommandType { SUBMIT, FLOOR_SELECT, GO_STOP }
 
-    /** 커맨드 로그 레코드의 최소형 — 1-B에서 영속화될 내용과 같은 정보량 */
+    /** 커맨드 로그 레코드의 최소형 — 영속화되는 레코드와 같은 정보량 */
     private record Command(CommandType type, Player player, int cardIndex, boolean go) {}
 
     @AfterEach

@@ -4,6 +4,8 @@ import com.pomingmatgo.gameservice.domain.GamePhase;
 import com.pomingmatgo.gameservice.domain.GameState;
 import com.pomingmatgo.gameservice.domain.Player;
 import com.pomingmatgo.gameservice.domain.card.Card;
+import com.pomingmatgo.gameservice.domain.gamelog.GameCommandLog;
+import com.pomingmatgo.gameservice.domain.gamelog.GameCommandType;
 import com.pomingmatgo.gameservice.global.exception.WebSocketBusinessException;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
@@ -17,6 +19,7 @@ import static com.pomingmatgo.gameservice.global.exception.WebSocketErrorCode.NO
 @RequiredArgsConstructor
 public class GamePlayService {
     private final GameService gameService;
+    private final GameCommandLog gameCommandLog;
 
     @GameLock
     public Mono<TurnExecutionResult> executeNormalSubmit(long roomId, Player player, int cardIdx, Runnable onLockAcquired) {
@@ -30,7 +33,10 @@ public class GamePlayService {
                                             .flatMap(processResult -> settleTurn(roomId, freshState, processResult)
                                                     .map(nextState -> new TurnExecutionResult(
                                                             submittedCard, topCard, processResult, nextState)));
-                                }));
+                                }))
+                // 상태 저장 성공 후, 아직 @GameLock 안 — seq 부여가 락 밖이면 append 순서 역전이 가능하다
+                .delayUntil(result -> gameCommandLog.logCommand(roomId, GameCommandType.NORMAL_SUBMIT, player, cardIdx,
+                        false, GamePhase.IN_PROGRESS, resultingPhase(result.cardResult(), result.updatedGameState())));
     }
 
     @GameLock
@@ -38,7 +44,14 @@ public class GamePlayService {
         return validatedFreshState(roomId, GamePhase.AWAITING_FLOOR_CARD_CHOICE, player, onLockAcquired)
                 .flatMap(freshState -> gameService.selectFloorCard(freshState, player, cardIdx)
                         .flatMap(result -> settleTurn(roomId, freshState, result)
-                                .map(nextState -> new FloorSelectionResult(result, nextState))));
+                                .map(nextState -> new FloorSelectionResult(result, nextState))))
+                .delayUntil(result -> gameCommandLog.logCommand(roomId, GameCommandType.FLOOR_SELECT, player, cardIdx,
+                        false, GamePhase.AWAITING_FLOOR_CARD_CHOICE, resultingPhase(result.cardResult(), result.updatedGameState())));
+    }
+
+    // 선택 대기로 끝난 턴은 settleTurn이 상태 객체를 갱신하지 않으므로 저장된 phase는 AWAITING_FLOOR_CARD_CHOICE다
+    private GamePhase resultingPhase(ProcessCardResult result, GameState nextState) {
+        return result.isChoiceRequired() ? GamePhase.AWAITING_FLOOR_CARD_CHOICE : nextState.getPhase();
     }
 
     // 락 통과 후에도 자동플레이 race로 상태가 이미 진행됐을 수 있어 fresh 상태로 재검증한다
@@ -114,7 +127,9 @@ public class GamePlayService {
                 .flatMap(freshState -> go
                         ? gameService.applyGo(freshState, player).flatMap(this::proceedToNextTurn)
                         // STOP도 락 안에서 END를 저장 — 저장 없이 반환하면 락 해제~cleanup 사이 낡은 GO가 재검증을 통과한다
-                        : markEnded(freshState));
+                        : markEnded(freshState))
+                .delayUntil(nextState -> gameCommandLog.logCommand(roomId, GameCommandType.GO_STOP, player, 0,
+                        go, GamePhase.AWAITING_GO_STOP_CHOICE, nextState.getPhase()));
     }
 
     public Mono<GameState> gameOver(GameState gameState) {
