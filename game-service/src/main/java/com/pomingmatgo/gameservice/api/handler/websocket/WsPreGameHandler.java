@@ -25,7 +25,7 @@ public class WsPreGameHandler {
 
         return switch (event.getSubCategory()) {
             case LEADER_SELECTION -> handleLeaderSelectionEvent(event.as(), gameState, player);
-            default -> Mono.error(new IllegalArgumentException("Invalid GAME event type"));
+            default -> Mono.error(new IllegalStateException("처리기가 없는 PREGAME 이벤트: " + event.getSubCategory()));
         };
     }
 

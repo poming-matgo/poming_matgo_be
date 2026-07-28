@@ -7,6 +7,8 @@ public enum WebSocketErrorCode {
 
     INVALID_GAME_PHASE("현재 게임 상태에서 허용되지 않는 동작입니다."),
 
+    INVALID_REQUEST("잘못된 요청 형식입니다."),
+
     INVALID_USER("유효하지 않은 사용자입니다."),
     ALREADY_JOIN("이미 다른방에 접속해있습니다."),
     NOT_EXISTED_ROOM( "존재하지 않는 방입니다."),

@@ -33,7 +33,7 @@ public class WsRoomHandler {
         return switch (event.getSubCategory()) {
             case READY -> handleReadyEvent(gameState, player);
             case UNREADY -> handleUnreadyEvent(gameState, player);
-            default -> Mono.error(new IllegalArgumentException("Invalid GAME event type"));
+            default -> Mono.error(new IllegalStateException("처리기가 없는 ROOM 이벤트: " + event.getSubCategory()));
         };
     }
 

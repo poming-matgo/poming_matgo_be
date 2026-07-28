@@ -180,6 +180,36 @@ class DisconnectReconnectTest {
     }
 
     @Test
+    @DisplayName("잘못된 클라 메시지는 INVALID_REQUEST로 응답한다 (시스템 에러 아님)")
+    void malformedMessagesAreRejectedAsInvalidRequest() throws Exception {
+        roomId = 920_007L;
+        seedInGameRoom();
+        TestSession p1 = connect("s1", USER_1, 1);
+
+        List<String> malformed = List.of(
+                "not a json",
+                "{\"eventType\":{\"subType\":\"NO_SUCH_TYPE\"}}",
+                // payload가 필요한데 data 누락 — 예전엔 핸들러에서 NPE가 나 SYSTEM_ERROR로 새어나갔다
+                "{\"eventType\":{\"subType\":\"NORMAL_SUBMIT\"}}"
+        );
+
+        for (String json : malformed) {
+            p1.outbox().clear();
+            p1.emit(json);
+            awaitTrue(() -> p1.received("INVALID_REQUEST"), 3000, "INVALID_REQUEST 미수신: " + json);
+            assertFalse(p1.received("SYSTEM_ERROR"), "클라 입력 오류가 시스템 에러로 분류됨: " + p1.outbox());
+        }
+
+        assertSame(p1.session(), sessionManager.getSession(roomId, 1), "입력 오류로 세션이 끊기면 안 된다");
+
+        // CONNECT의 null 필드는 미접속 세션에서만 드러난다 (접속된 세션은 ALREADY_JOIN이 먼저)
+        TestSession fresh = newSession("s-bad");
+        fresh.emit("{\"eventType\":{\"subType\":\"CONNECT\"},\"data\":{\"userId\":null,\"roomId\":null}}");
+        awaitTrue(() -> fresh.received("INVALID_REQUEST"), 3000, "CONNECT null 필드가 거절되지 않음");
+        assertFalse(fresh.received("SYSTEM_ERROR"), "null 필드 언박싱 NPE가 새어나감: " + fresh.outbox());
+    }
+
+    @Test
     @DisplayName("재접속하면 세션이 복구되고 상태 스냅샷(RECONNECT_STATE)을 받는다")
     void reconnectRestoresSessionWithSnapshot() throws Exception {
         roomId = 920_003L;

@@ -34,7 +34,7 @@ public class WsGameHandler {
             case NORMAL_SUBMIT -> handleNormalSubmit(event.as(), gameState, player);
             case FLOOR_SELECT -> handleFloorSelect(event.as(), gameState, player);
             case GO_STOP_CHOICE -> handleGoStopChoice(event.as(), gameState, player);
-            default -> Mono.error(new IllegalArgumentException("Invalid GAME event type"));
+            default -> Mono.error(new IllegalStateException("처리기가 없는 GAME 이벤트: " + event.getSubCategory()));
         };
     }
 

@@ -71,8 +71,13 @@ public class GameWebSocketHandler implements WebSocketHandler {
 
                     RequestEvent<?> event = objectMapper.convertValue(rootNode, type);
                     event.setSubCategory(subType);
+                    if (subType.getPayloadClass() != Void.class && event.getData() == null) {
+                        throw new WebSocketBusinessException(INVALID_REQUEST);
+                    }
                     return event;
                 })
+                .onErrorMap(e -> !(e instanceof WebSocketBusinessException),
+                        e -> new WebSocketBusinessException(INVALID_REQUEST))
                 .flatMap(event -> processEvent(event, session))
                 .onErrorResume(error -> handleWebSocketError(session, error));
     }
@@ -136,6 +141,9 @@ public class GameWebSocketHandler implements WebSocketHandler {
     }
 
     private Mono<Void> processJoinRoomLogic(JoinRoomReq payload, WebSocketSession session) {
+        if (payload.roomId() == null || payload.userId() == null) {
+            return Mono.error(new WebSocketBusinessException(INVALID_REQUEST));
+        }
         long userId = payload.userId();
         long roomId = payload.roomId();
 
