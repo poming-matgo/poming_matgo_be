@@ -37,7 +37,7 @@ public class TurnFlowService {
                     );
 
                     Mono<Void> handleResult = ctx.isChoiceRequired()
-                            ? requestFloorChoice(roomId, gameState, player, ctx.cardResult().getSelectableCards(), scheduler)
+                            ? requestFloorChoice(roomId, ctx.updatedGameState(), player, ctx.cardResult().getSelectableCards(), scheduler)
                             : finishTurn(roomId, player, ctx.updatedGameState(), ctx.cardResult(), scheduler);
 
                     return sendInfos.then(handleResult);
@@ -48,7 +48,7 @@ public class TurnFlowService {
         return gamePlayService.executeFloorSelection(roomId, gameState, player, cardIdx, onLockAcquired)
                 .flatMap(ctx -> ctx.isChoiceRequired()
                         // 뒤집은 카드가 또 선택을 요구한 경우 — 선택지 재전송 + 타이머 재등록
-                        ? requestFloorChoice(roomId, gameState, player, ctx.cardResult().getSelectableCards(), scheduler)
+                        ? requestFloorChoice(roomId, ctx.updatedGameState(), player, ctx.cardResult().getSelectableCards(), scheduler)
                         : finishTurn(roomId, player, ctx.updatedGameState(), ctx.cardResult(), scheduler));
     }
 
@@ -112,10 +112,10 @@ public class TurnFlowService {
     }
 
     // 타이머를 함께 걸어야 선택 대기 phase에서 게임이 멈추지 않는다
-    private Mono<Void> requestFloorChoice(long roomId, GameState gameState, Player player, List<Card> selectableCards, TurnScheduler scheduler) {
+    private Mono<Void> requestFloorChoice(long roomId, GameState freshState, Player player, List<Card> selectableCards, TurnScheduler scheduler) {
         return gameMessageSender.sendChooseFloorCardMessage(roomId, player, selectableCards)
                 .then(Mono.<Void>fromRunnable(() -> scheduler.scheduleAutoPlay(
-                        roomId, gameState.getRound(), gameState.getCurrentTurn(), player, nextDeadlineNanos(), AWAITING_FLOOR_CARD_CHOICE)));
+                        roomId, freshState.getRound(), freshState.getCurrentTurn(), player, nextDeadlineNanos(), AWAITING_FLOOR_CARD_CHOICE)));
     }
 
     // 대기 주체는 항상 currentPlayer — 고/스톱 대기면 방금 행동한 본인, 턴이 넘어갔으면 상대

@@ -210,10 +210,37 @@ class ConcurrentGameActionTest {
         assertEquals(5, leadingPlayerRepository.getAllCards(roomId).block().size(),
                 "선 선택 카드 5장이 두 번 뽑히면(10장) 시작이 중복 발화된 것이다");
 
-        // 시작 후의 중복 READY는 시작 흐름을 다시 타지 않는다 (phase 필터)
-        wsRoomHandler.handleRoomEvent(readyEvent, state, Player.PLAYER_1).block();
+        // 시작 후의 READY는 거절된다 — 통과시키면 GameState 전체 덮어쓰기가 @GameLock의 턴 전이를 되돌린다
+        WebSocketBusinessException rejected = assertThrows(WebSocketBusinessException.class,
+                () -> wsRoomHandler.handleRoomEvent(readyEvent, state, Player.PLAYER_1).block());
+        assertEquals(INVALID_GAME_PHASE, rejected.getWebsocketErrorCode());
         assertEquals(5, leadingPlayerRepository.getAllCards(roomId).block().size());
         assertEquals(GamePhase.DETERMINING_STARTING_PLAYER, gameStateRepository.findById(roomId).block().getPhase());
+    }
+
+    @Test
+    @DisplayName("진행 중 READY는 거절돼 턴 상태를 덮어쓰지 않는다")
+    void readyDuringGameDoesNotClobberTurnState() {
+        roomId = 930_008L;
+        GameState state = GameState.builder()
+                .roomId(roomId).leadingPlayer(1).currentTurn(2).round(4)
+                .phase(GamePhase.IN_PROGRESS)
+                .build();
+        gameStateRepository.create(state).block();
+
+        RequestEvent<Void> readyEvent = new RequestEvent<>();
+        readyEvent.setSubCategory(SubCategory.READY);
+
+        // 핸들러가 받는 건 낡은 스냅샷일 수 있으므로 방 락 안 fresh 상태로 걸러져야 한다
+        GameState stale = GameState.createEmptyRoom(roomId);
+        WebSocketBusinessException rejected = assertThrows(WebSocketBusinessException.class,
+                () -> wsRoomHandler.handleRoomEvent(readyEvent, stale, Player.PLAYER_1).block());
+        assertEquals(INVALID_GAME_PHASE, rejected.getWebsocketErrorCode());
+
+        GameState after = gameStateRepository.findById(roomId).block();
+        assertEquals(GamePhase.IN_PROGRESS, after.getPhase());
+        assertEquals(4, after.getRound(), "READY가 라운드를 되돌리면 안 된다");
+        assertEquals(2, after.getCurrentTurn(), "READY가 턴을 되돌리면 안 된다");
     }
 
     @Test

@@ -95,6 +95,9 @@ public class RoomService {
     public Mono<GameState> readyFresh(long roomId, Player player, boolean isReady) {
         return gameStateRepository.findById(roomId)
                 .switchIfEmpty(Mono.error(new WebSocketBusinessException(WebSocketErrorCode.NOT_EXISTED_ROOM)))
+                .flatMap(state -> state.getPhase() == GamePhase.NONE
+                        ? Mono.just(state)
+                        : Mono.error(new WebSocketBusinessException(WebSocketErrorCode.INVALID_GAME_PHASE)))
                 .map(state -> state.withPlayerReady(player, isReady))
                 .flatMap(state -> gameStateRepository.save(state).thenReturn(state));
     }
