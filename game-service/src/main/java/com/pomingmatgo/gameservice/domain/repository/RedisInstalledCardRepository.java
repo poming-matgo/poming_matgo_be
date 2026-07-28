@@ -114,11 +114,13 @@ public class RedisInstalledCardRepository implements InstalledCardRepository {
         return saveCards(cards, generateHiddenCardKey(roomId));
     }
 
+    // SMEMBERS는 순서를 보장하지 않는다 — natural order 정렬로 고정 (인터페이스 계약)
     public Mono<List<Card>> getRevealedCardByMonth(long roomId, int month) {
         String redisKey = generateRevealedCardKey(roomId, month);
         return redisOps.opsForSet()
                 .members(redisKey)
                 .map(Card::valueOf)
+                .sort()
                 .collectList();
     }
 
@@ -127,6 +129,7 @@ public class RedisInstalledCardRepository implements InstalledCardRepository {
                 .flatMap(month -> redisOps.opsForSet()
                         .members(generateRevealedCardKey(roomId, month)))
                 .map(Card::valueOf)
+                .sort()
                 .collectList();
     }
 

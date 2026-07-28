@@ -74,13 +74,15 @@ public class InMemoryInstalledCardRepository implements InstalledCardRepository 
         });
     }
 
+    // HashSet 순회 순서는 JVM 실행마다 다르다(enum identity hash) — natural order 정렬로 고정 (인터페이스 계약)
     @Override
     public Mono<List<Card>> getRevealedCardByMonth(long roomId, int month) {
         return Mono.fromCallable(() -> {
             ConcurrentHashMap<Integer, Set<Card>> room = revealedCards.get(roomId);
-            return room != null
-                    ? new ArrayList<>(room.getOrDefault(month, Collections.emptySet()))
-                    : Collections.emptyList();
+            if (room == null) return Collections.emptyList();
+            List<Card> cards = new ArrayList<>(room.getOrDefault(month, Collections.emptySet()));
+            Collections.sort(cards);
+            return cards;
         });
     }
 
@@ -91,6 +93,7 @@ public class InMemoryInstalledCardRepository implements InstalledCardRepository 
             if (room == null) return Collections.emptyList();
             List<Card> all = new ArrayList<>();
             room.values().forEach(all::addAll);
+            Collections.sort(all);
             return all;
         });
     }

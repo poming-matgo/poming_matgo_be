@@ -34,10 +34,12 @@ public class RedisAcquiredCardRepository implements AcquiredCardRepository {
         return redisOps.opsForSet().add(generateKey(roomId, playerId), cardNames);
     }
 
+    // SMEMBERS는 순서를 보장하지 않는다 — natural order 정렬로 고정 (인터페이스 계약)
     public Mono<List<Card>> getAllCards(long roomId, long playerId) {
         return redisOps.opsForSet()
                 .members(generateKey(roomId, playerId))
                 .map(Card::valueOf)
+                .sort()
                 .collectList();
     }
 

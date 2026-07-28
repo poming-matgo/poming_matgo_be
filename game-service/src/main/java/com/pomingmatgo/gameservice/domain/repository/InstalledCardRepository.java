@@ -14,7 +14,9 @@ public interface InstalledCardRepository {
     Mono<Boolean> saveHiddenCard(List<Card> cards, long roomId);
     Mono<Boolean> deleteAllRevealedCardByMonth(long roomId, int month);
     Mono<Boolean> deleteRevealedCard(long roomId, Card card);
+    /** 반환 순서는 Card natural order 고정 — 이 순서가 바닥 선택지 인덱스의 카드 정체성을 결정한다 (replay 결정성) */
     Mono<List<Card>> getRevealedCardByMonth(long roomId, int month);
+    /** 반환 순서는 Card natural order 고정 */
     Mono<List<Card>> getAllRevealedCards(long roomId);
     /** 더미 맨 위 카드를 꺼낸다(소모). 더미가 비어 있으면 empty */
     Mono<Card> drawTopCard(long roomId);

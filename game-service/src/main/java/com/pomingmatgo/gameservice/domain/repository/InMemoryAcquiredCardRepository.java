@@ -31,13 +31,15 @@ public class InMemoryAcquiredCardRepository implements AcquiredCardRepository {
         });
     }
 
+    // Set 순회 순서는 실행마다 다르다 — natural order 정렬로 고정 (인터페이스 계약)
     @Override
     public Mono<List<Card>> getAllCards(long roomId, long playerId) {
         return Mono.fromCallable(() -> {
             ConcurrentHashMap<Long, Set<Card>> room = store.get(roomId);
-            return room != null
-                    ? new ArrayList<>(room.getOrDefault(playerId, Collections.emptySet()))
-                    : Collections.emptyList();
+            if (room == null) return Collections.emptyList();
+            List<Card> cards = new ArrayList<>(room.getOrDefault(playerId, Collections.emptySet()));
+            Collections.sort(cards);
+            return cards;
         });
     }
 
