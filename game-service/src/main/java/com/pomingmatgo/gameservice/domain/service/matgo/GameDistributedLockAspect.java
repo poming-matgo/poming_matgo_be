@@ -10,9 +10,6 @@ import org.aspectj.lang.annotation.Aspect;
 import org.aspectj.lang.reflect.MethodSignature;
 import org.redisson.api.RLockReactive;
 import org.redisson.api.RedissonReactiveClient;
-import org.springframework.expression.ExpressionParser;
-import org.springframework.expression.spel.standard.SpelExpressionParser;
-import org.springframework.expression.spel.support.StandardEvaluationContext;
 import org.springframework.context.annotation.Profile;
 import org.springframework.stereotype.Component;
 import reactor.core.publisher.Mono;
@@ -30,7 +27,6 @@ import static com.pomingmatgo.gameservice.global.exception.WebSocketErrorCode.TR
 public class GameDistributedLockAspect implements GameLockCleaner {
 
     private final RedissonReactiveClient redissonClient;
-    private final ExpressionParser parser = new SpelExpressionParser();
 
     @Around("@annotation(gameLock)")
     public Mono<Object> lock(ProceedingJoinPoint joinPoint, GameLock gameLock) {
@@ -41,8 +37,7 @@ public class GameDistributedLockAspect implements GameLockCleaner {
             return Mono.error(new IllegalStateException("@GameLock은 Mono를 반환하는 메서드에만 사용할 수 있습니다."));
         }
 
-        String keyName = generateKey(gameLock.key(), joinPoint);
-        RLockReactive lock = redissonClient.getLock(keyName);
+        RLockReactive lock = redissonClient.getLock(GameLockKey.lockName(GameLockKey.roomId(joinPoint)));
 
         long executionId = UUID.randomUUID().getMostSignificantBits();
 
@@ -83,19 +78,5 @@ public class GameDistributedLockAspect implements GameLockCleaner {
                     }
                     return Mono.empty();
                 });
-    }
-
-    private String generateKey(String key, ProceedingJoinPoint joinPoint) {
-        MethodSignature signature = (MethodSignature) joinPoint.getSignature();
-        StandardEvaluationContext context = new StandardEvaluationContext();
-        Object[] args = joinPoint.getArgs();
-        String[] paramNames = signature.getParameterNames();
-
-        if (paramNames != null) {
-            for (int i = 0; i < args.length; i++) {
-                context.setVariable(paramNames[i], args[i]);
-            }
-        }
-        return "LOCK:" + parser.parseExpression(key).getValue(context, String.class);
     }
 }

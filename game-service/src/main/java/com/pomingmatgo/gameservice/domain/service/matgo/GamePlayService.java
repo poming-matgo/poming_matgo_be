@@ -18,7 +18,7 @@ import static com.pomingmatgo.gameservice.global.exception.WebSocketErrorCode.NO
 public class GamePlayService {
     private final GameService gameService;
 
-    @GameLock(key = "'game:' + #roomId")
+    @GameLock
     public Mono<TurnExecutionResult> executeNormalSubmit(long roomId, Player player, int cardIdx, Runnable onLockAcquired) {
         return validatedFreshState(roomId, GamePhase.IN_PROGRESS, player, onLockAcquired)
                 .flatMap(freshState ->
@@ -33,7 +33,7 @@ public class GamePlayService {
                                 }));
     }
 
-    @GameLock(key = "'game:' + #roomId")
+    @GameLock
     public Mono<FloorSelectionResult> executeFloorSelection(long roomId, Player player, int cardIdx, Runnable onLockAcquired) {
         return validatedFreshState(roomId, GamePhase.AWAITING_FLOOR_CARD_CHOICE, player, onLockAcquired)
                 .flatMap(freshState -> gameService.selectFloorCard(freshState, player, cardIdx)
@@ -108,7 +108,7 @@ public class GamePlayService {
         return gameService.saveState(gameState.setNextTurn());
     }
 
-    @GameLock(key = "'game:' + #roomId")
+    @GameLock
     public Mono<GameState> executeGoStop(long roomId, Player player, boolean go, Runnable onLockAcquired) {
         return validatedFreshState(roomId, GamePhase.AWAITING_GO_STOP_CHOICE, player, onLockAcquired)
                 .flatMap(freshState -> go
