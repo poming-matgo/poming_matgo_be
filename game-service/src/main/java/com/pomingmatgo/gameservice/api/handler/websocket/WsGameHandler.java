@@ -45,7 +45,7 @@ public class WsGameHandler {
 
         long roomId = gameState.getRoomId();
         return turnFlowService.processNormalSubmit(
-                roomId, gameState, player, event.getData().cardIndex(),
+                roomId, player, event.getData().cardIndex(),
                 () -> autoPlayScheduler.cancelAutoPlay(roomId), autoPlayScheduler);
     }
 
@@ -56,7 +56,7 @@ public class WsGameHandler {
 
         long roomId = gameState.getRoomId();
         return turnFlowService.processFloorSelection(
-                roomId, gameState, player, event.getData().cardIndex(),
+                roomId, player, event.getData().cardIndex(),
                 () -> autoPlayScheduler.cancelAutoPlay(roomId), autoPlayScheduler);
     }
 
@@ -67,7 +67,7 @@ public class WsGameHandler {
 
         long roomId = gameState.getRoomId();
         return turnFlowService.processGoStopChoice(
-                roomId, gameState, player, event.getData().go(),
+                roomId, player, event.getData().go(),
                 () -> autoPlayScheduler.cancelAutoPlay(roomId), autoPlayScheduler);
     }
 }

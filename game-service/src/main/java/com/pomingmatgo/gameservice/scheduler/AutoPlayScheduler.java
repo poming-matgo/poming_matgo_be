@@ -161,11 +161,11 @@ public class AutoPlayScheduler implements TurnScheduler {
 
                                             return switch (step.phase()) {
                                                 case AWAITING_FLOOR_CARD_CHOICE ->
-                                                        turnFlowService.processFloorSelection(roomId, gameState, currentPlayer, AUTO_PLAY_CARD_INDEX, null, this);
+                                                        turnFlowService.processFloorSelection(roomId, currentPlayer, AUTO_PLAY_CARD_INDEX, null, this);
                                                 case AWAITING_GO_STOP_CHOICE ->
-                                                        turnFlowService.processGoStopChoice(roomId, gameState, currentPlayer, AUTO_GO_STOP_IS_GO, null, this);
+                                                        turnFlowService.processGoStopChoice(roomId, currentPlayer, AUTO_GO_STOP_IS_GO, null, this);
                                                 default ->
-                                                        turnFlowService.processNormalSubmit(roomId, gameState, currentPlayer, AUTO_PLAY_CARD_INDEX, null, this);
+                                                        turnFlowService.processNormalSubmit(roomId, currentPlayer, AUTO_PLAY_CARD_INDEX, null, this);
                                             };
                                         });
                             }));

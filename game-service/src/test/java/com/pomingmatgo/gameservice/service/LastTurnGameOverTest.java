@@ -77,7 +77,7 @@ class LastTurnGameOverTest {
         acquiredCardRepository.addCards(roomId, 2, List.of(Card.JAN_1, Card.MAR_1, Card.AUG_1, Card.NOV_1, Card.DEC_1)).block();
         seedHandAndDeck();
 
-        turnFlowService.processNormalSubmit(roomId, state, Player.PLAYER_2, 0, null, autoPlayScheduler).block();
+        turnFlowService.processNormalSubmit(roomId, Player.PLAYER_2, 0, null, autoPlayScheduler).block();
 
         Mockito.verify(gameMessageSender).sendGameOverMessage(any(), eq(Player.PLAYER_2), any());
         assertEquals(GamePhase.NONE, gameStateRepository.findById(roomId).block().getPhase(),
@@ -92,7 +92,7 @@ class LastTurnGameOverTest {
         gameStateRepository.create(state).block();
         seedHandAndDeck();
 
-        turnFlowService.processNormalSubmit(roomId, state, Player.PLAYER_2, 0, null, autoPlayScheduler).block();
+        turnFlowService.processNormalSubmit(roomId, Player.PLAYER_2, 0, null, autoPlayScheduler).block();
 
         Mockito.verify(gameMessageSender).sendGameOverMessage(any(), eq(Player.PLAYER_NOTHING), any());
         assertEquals(GamePhase.NONE, gameStateRepository.findById(roomId).block().getPhase(),

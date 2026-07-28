@@ -19,7 +19,7 @@ public class GamePlayService {
     private final GameService gameService;
 
     @GameLock(key = "'game:' + #roomId")
-    public Mono<TurnExecutionResult> executeNormalSubmit(long roomId, GameState gameState, Player player, int cardIdx, Runnable onLockAcquired) {
+    public Mono<TurnExecutionResult> executeNormalSubmit(long roomId, Player player, int cardIdx, Runnable onLockAcquired) {
         return validatedFreshState(roomId, GamePhase.IN_PROGRESS, player, onLockAcquired)
                 .flatMap(freshState ->
                         Mono.zip(gameService.takeCardFromHand(roomId, player, cardIdx), gameService.drawTopCard(roomId))
@@ -34,7 +34,7 @@ public class GamePlayService {
     }
 
     @GameLock(key = "'game:' + #roomId")
-    public Mono<FloorSelectionResult> executeFloorSelection(long roomId, GameState gameState, Player player, int cardIdx, Runnable onLockAcquired) {
+    public Mono<FloorSelectionResult> executeFloorSelection(long roomId, Player player, int cardIdx, Runnable onLockAcquired) {
         return validatedFreshState(roomId, GamePhase.AWAITING_FLOOR_CARD_CHOICE, player, onLockAcquired)
                 .flatMap(freshState -> gameService.selectFloorCard(freshState, player, cardIdx)
                         .flatMap(result -> settleTurn(roomId, freshState, result)
@@ -109,7 +109,7 @@ public class GamePlayService {
     }
 
     @GameLock(key = "'game:' + #roomId")
-    public Mono<GameState> executeGoStop(long roomId, GameState gameState, Player player, boolean go, Runnable onLockAcquired) {
+    public Mono<GameState> executeGoStop(long roomId, Player player, boolean go, Runnable onLockAcquired) {
         return validatedFreshState(roomId, GamePhase.AWAITING_GO_STOP_CHOICE, player, onLockAcquired)
                 .flatMap(freshState -> go
                         ? gameService.applyGo(freshState, player).flatMap(this::proceedToNextTurn)

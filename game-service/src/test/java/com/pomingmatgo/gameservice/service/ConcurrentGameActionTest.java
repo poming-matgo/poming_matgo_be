@@ -95,7 +95,7 @@ class ConcurrentGameActionTest {
 
         // 유저 요청과 자동플레이가 같은 낡은 상태로 동시에 진입한 상황
         RaceResult result = race(2, () ->
-                turnFlowService.processNormalSubmit(roomId, state, Player.PLAYER_1, 0, null, autoPlayScheduler).block());
+                turnFlowService.processNormalSubmit(roomId, Player.PLAYER_1, 0, null, autoPlayScheduler).block());
 
         assertEquals(1, result.successes(), "카드 제출은 정확히 한 번만 실행돼야 한다");
         for (Throwable failure : result.failures()) {
@@ -122,7 +122,7 @@ class ConcurrentGameActionTest {
         gameStateRepository.create(state).block();
 
         RaceResult result = race(2, () ->
-                turnFlowService.processGoStopChoice(roomId, state, Player.PLAYER_1, true, null, autoPlayScheduler).block());
+                turnFlowService.processGoStopChoice(roomId, Player.PLAYER_1, true, null, autoPlayScheduler).block());
 
         assertEquals(1, result.successes(), "GO 선언은 정확히 한 번만 실행돼야 한다");
 
@@ -156,7 +156,7 @@ class ConcurrentGameActionTest {
         Thread.sleep(400);
 
         // 유저가 자동플레이(0번: JAN_1)와 다른 1번 선택지(JAN_2)로 행동을 완료
-        turnFlowService.processFloorSelection(roomId, state, Player.PLAYER_1, 1, null, autoPlayScheduler).block();
+        turnFlowService.processFloorSelection(roomId, Player.PLAYER_1, 1, null, autoPlayScheduler).block();
         inFlightManager.deleteFlag(normalKey, token).block();
 
         // 재시도 주기(1초)가 지나도 자동 선택이 중복 실행되지 않아야 한다
@@ -256,7 +256,7 @@ class ConcurrentGameActionTest {
         installedCardRepository.saveHiddenCard(List.of(Card.FEB_3), roomId).block();
 
         // TurnFlowService 후처리 없이 락 구간만 실행 — 락 해제 직후의 저장 상태를 검증
-        gamePlayService.executeNormalSubmit(roomId, state, Player.PLAYER_1, 0, null).block();
+        gamePlayService.executeNormalSubmit(roomId, Player.PLAYER_1, 0, null).block();
 
         GameState after = gameStateRepository.findById(roomId).block();
         assertEquals(2, after.getCurrentTurn(), "턴 전환이 락 안에서 저장돼야 한다");
@@ -277,7 +277,7 @@ class ConcurrentGameActionTest {
         installedCardRepository.savePlayerCards(List.of(Card.FEB_1), roomId, Player.PLAYER_1).block();
         installedCardRepository.saveHiddenCard(List.of(Card.MAR_3), roomId).block();
 
-        gamePlayService.executeNormalSubmit(roomId, state, Player.PLAYER_1, 0, null).block();
+        gamePlayService.executeNormalSubmit(roomId, Player.PLAYER_1, 0, null).block();
 
         GameState after = gameStateRepository.findById(roomId).block();
         assertEquals(GamePhase.AWAITING_GO_STOP_CHOICE, after.getPhase(), "고/스톱 대기 진입이 락 안에서 저장돼야 한다");
@@ -300,7 +300,7 @@ class ConcurrentGameActionTest {
         gameStateRepository.create(state).block();
         installedCardRepository.saveRevealedCard(List.of(Card.JAN_1, Card.JAN_2), roomId).block();
 
-        gamePlayService.executeFloorSelection(roomId, state, Player.PLAYER_1, 0, null).block();
+        gamePlayService.executeFloorSelection(roomId, Player.PLAYER_1, 0, null).block();
 
         GameState after = gameStateRepository.findById(roomId).block();
         assertEquals(2, after.getCurrentTurn(), "턴 전환이 락 안에서 저장돼야 한다");
@@ -322,10 +322,10 @@ class ConcurrentGameActionTest {
 
         // 자동플레이의 락 구간이 끝났지만 후처리(브로드캐스트/타이머)는 아직인 창구를 재현:
         // 락 구간만 실행하고 후처리를 생략한 채 낡은 상태의 유저 제출을 밀어넣는다
-        gamePlayService.executeNormalSubmit(roomId, state, Player.PLAYER_1, 0, null).block();
+        gamePlayService.executeNormalSubmit(roomId, Player.PLAYER_1, 0, null).block();
 
         WebSocketBusinessException e = assertThrows(WebSocketBusinessException.class,
-                () -> turnFlowService.processNormalSubmit(roomId, state, Player.PLAYER_1, 0, null, autoPlayScheduler).block());
+                () -> turnFlowService.processNormalSubmit(roomId, Player.PLAYER_1, 0, null, autoPlayScheduler).block());
         assertEquals(NOT_YOUR_TURN, e.getWebsocketErrorCode());
 
         assertEquals(List.of(Card.FEB_1), installedCardRepository.getPlayerCards(roomId, Player.PLAYER_1).block(),
@@ -345,12 +345,12 @@ class ConcurrentGameActionTest {
         gameStateRepository.create(state).block();
 
         // STOP의 락 구간만 실행 (게임 종료 정리는 아직) — 이 시점에 이미 END가 저장돼 있어야 한다
-        gamePlayService.executeGoStop(roomId, state, Player.PLAYER_1, false, null).block();
+        gamePlayService.executeGoStop(roomId, Player.PLAYER_1, false, null).block();
         assertEquals(GamePhase.END, gameStateRepository.findById(roomId).block().getPhase(),
                 "STOP의 END 전이가 락 안에서 저장돼야 한다");
 
         WebSocketBusinessException e = assertThrows(WebSocketBusinessException.class,
-                () -> turnFlowService.processGoStopChoice(roomId, state, Player.PLAYER_1, true, null, autoPlayScheduler).block());
+                () -> turnFlowService.processGoStopChoice(roomId, Player.PLAYER_1, true, null, autoPlayScheduler).block());
         assertEquals(INVALID_GAME_PHASE, e.getWebsocketErrorCode());
         assertEquals(0, gameStateRepository.findById(roomId).block().getPlayerState(Player.PLAYER_1).getGo(),
                 "STOP 뒤에 낡은 GO가 반영되면 안 된다");

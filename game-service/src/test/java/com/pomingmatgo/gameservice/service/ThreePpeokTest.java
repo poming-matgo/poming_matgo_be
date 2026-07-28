@@ -91,7 +91,7 @@ class ThreePpeokTest {
         gameStateRepository.create(state).block();
         seedPpeokDeal();
 
-        turnFlowService.processNormalSubmit(roomId, state, Player.PLAYER_1, 0, null, autoPlayScheduler).block();
+        turnFlowService.processNormalSubmit(roomId, Player.PLAYER_1, 0, null, autoPlayScheduler).block();
 
         // 클라가 종료 사유를 알 수 있으려면 GAME_OVER 앞에 세번뻑이 나가야 한다
         assertEquals(List.of("PPEOK", "THREE_PPEOK", "GAME_OVER"), sentOrder);
@@ -115,7 +115,7 @@ class ThreePpeokTest {
         gameStateRepository.create(state).block();
         seedPpeokDeal();
 
-        turnFlowService.processNormalSubmit(roomId, state, Player.PLAYER_1, 0, null, autoPlayScheduler).block();
+        turnFlowService.processNormalSubmit(roomId, Player.PLAYER_1, 0, null, autoPlayScheduler).block();
 
         assertEquals(List.of("PPEOK"), sentOrder, "세번뻑/게임 종료 메시지가 나가면 안 된다");
         GameState next = gameStateRepository.findById(roomId).block();

@@ -136,7 +136,7 @@ class AutoPlayFloorSelectionTest {
         installedCardRepository.saveRevealedCard(List.of(Card.JAN_1, Card.JAN_2), roomId).block();
         installedCardRepository.saveHiddenCard(List.of(Card.FEB_3), roomId).block();
 
-        turnFlowService.processNormalSubmit(roomId, state, Player.PLAYER_1, 0,
+        turnFlowService.processNormalSubmit(roomId, Player.PLAYER_1, 0,
                 () -> autoPlayScheduler.cancelAutoPlay(roomId), autoPlayScheduler).block();
 
         GameState afterSubmit = gameStateRepository.findById(roomId).block();

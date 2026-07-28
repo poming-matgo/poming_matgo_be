@@ -76,7 +76,7 @@ class AutoPlayGoStopChoiceTest {
         installedCardRepository.savePlayerCards(List.of(Card.FEB_1), roomId, Player.PLAYER_1).block();
         installedCardRepository.saveHiddenCard(List.of(Card.MAR_3), roomId).block();
 
-        turnFlowService.processNormalSubmit(roomId, state, Player.PLAYER_1, 0,
+        turnFlowService.processNormalSubmit(roomId, Player.PLAYER_1, 0,
                 () -> autoPlayScheduler.cancelAutoPlay(roomId), autoPlayScheduler).block();
 
         GameState afterSubmit = gameStateRepository.findById(roomId).block();
@@ -121,8 +121,7 @@ class AutoPlayGoStopChoiceTest {
         roomId = 920_003L;
         seedGoStopPendingRoom();
 
-        turnFlowService.processGoStopChoice(roomId, gameStateRepository.findById(roomId).block(),
-                Player.PLAYER_1, true, null, autoPlayScheduler).block();
+        turnFlowService.processGoStopChoice(roomId, Player.PLAYER_1, true, null, autoPlayScheduler).block();
 
         GameState result = gameStateRepository.findById(roomId).block();
         assertEquals(GamePhase.IN_PROGRESS, result.getPhase());
@@ -142,7 +141,7 @@ class AutoPlayGoStopChoiceTest {
         gameStateRepository.create(state).block();
 
         WebSocketBusinessException e = assertThrows(WebSocketBusinessException.class,
-                () -> turnFlowService.processGoStopChoice(roomId, state, Player.PLAYER_1, true, null, autoPlayScheduler).block());
+                () -> turnFlowService.processGoStopChoice(roomId, Player.PLAYER_1, true, null, autoPlayScheduler).block());
         assertEquals(INVALID_GAME_PHASE, e.getWebsocketErrorCode());
     }
 
