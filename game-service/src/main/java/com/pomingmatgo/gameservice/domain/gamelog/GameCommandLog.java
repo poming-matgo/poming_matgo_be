@@ -50,29 +50,31 @@ public class GameCommandLog {
         }
 
         // @GameLock이 방 단위 직렬화를 보장하므로 synchronized는 경합용이 아니라 스레드 간 seq 가시성용이다
-        private synchronized void emit(LongFunction<GameLogRecord> recordFactory) {
+        private synchronized long emit(LongFunction<GameLogRecord> recordFactory) {
             GameLogRecord record = recordFactory.apply(++seq);
             Sinks.EmitResult result = sink.tryEmitNext(record);
             if (result.isFailure()) {
                 log.warn("게임 로그 emit 실패({}) — roomId={}, seq={}", result, record.roomId(), record.seq());
             }
+            return record.seq();
         }
     }
 
-    public Mono<Void> logDeckInit(long roomId, List<Card> deck) {
+    public Mono<Long> logDeckInit(long roomId, List<Card> deck) {
         return enqueue(roomId, seq -> GameLogRecord.deckInit(roomId, seq, deck));
     }
 
-    public Mono<Void> logCommand(long roomId, GameCommandType type, Player player, int cardIndex,
+    /** 부여된 seq를 반환한다 — 스냅샷의 일관성 지점(seq N 시점)이 이 값으로 정의된다. 비활성이면 empty */
+    public Mono<Long> logCommand(long roomId, GameCommandType type, Player player, int cardIndex,
                                  boolean go, GamePhase prevPhase, GamePhase nextPhase) {
         return enqueue(roomId, seq -> GameLogRecord.command(roomId, seq, type, player, cardIndex, go, prevPhase, nextPhase));
     }
 
-    private Mono<Void> enqueue(long roomId, LongFunction<GameLogRecord> recordFactory) {
+    private Mono<Long> enqueue(long roomId, LongFunction<GameLogRecord> recordFactory) {
         if (!gameLogRepository.enabled()) {
             return Mono.empty();
         }
-        return Mono.fromRunnable(() ->
+        return Mono.fromCallable(() ->
                 channels.computeIfAbsent(roomId, RoomLogChannel::new).emit(recordFactory));
     }
 
