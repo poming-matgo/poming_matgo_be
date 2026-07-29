@@ -142,6 +142,47 @@ class PostgresGameLogStoreTest {
     }
 
     @Test
+    @DisplayName("cross-room 배치: 여러 방·세대 경계가 섞인 한 배치가 방·세대별로 올바르게 귀속된다")
+    void crossRoomAppendAll() {
+        long roomA = newRoomId();
+        long roomB = newRoomId();
+        logRepository.appendAll(List.of(
+                GameLogRecord.deckInit(roomA, 1, List.of(Card.JAN_1)),
+                GameLogRecord.deckInit(roomB, 1, List.of(Card.FEB_1)),
+                command(roomA, 2),
+                command(roomB, 2))).block(TIMEOUT);
+
+        // 같은 배치 안에 roomA의 1세대 마지막 커맨드 + 새 게임(DECK_INIT) + 2세대 커맨드가 섞인 경우
+        GameLogRecord gen2Init = GameLogRecord.deckInit(roomA, 1, List.of(Card.MAR_1));
+        GameLogRecord gen2Command = command(roomA, 2);
+        logRepository.appendAll(List.of(
+                command(roomA, 3),
+                gen2Init,
+                gen2Command,
+                command(roomB, 3))).block(TIMEOUT);
+
+        // 조회는 방별 최신 세대만 — roomA는 2세대 2건, roomB는 1세대 3건
+        assertEquals(List.of(gen2Init, gen2Command),
+                logRepository.findAllFromSeq(roomA, 1).collectList().block(TIMEOUT));
+        assertEquals(3, logRepository.findAllFromSeq(roomB, 1).collectList().block(TIMEOUT).size());
+
+        // 이전 세대 레코드 보존 + 세대 수 확인
+        Long roomARows = db.sql("SELECT count(*) AS cnt FROM game_log WHERE room_id = :roomId")
+                .bind("roomId", roomA)
+                .map(row -> row.get("cnt", Long.class)).one().block(TIMEOUT);
+        assertEquals(5L, roomARows);
+        Long roomAGenerations = db.sql("SELECT count(*) AS cnt FROM game_generation WHERE room_id = :roomId")
+                .bind("roomId", roomA)
+                .map(row -> row.get("cnt", Long.class)).one().block(TIMEOUT);
+        assertEquals(2L, roomAGenerations);
+    }
+
+    private GameLogRecord command(long roomId, long seq) {
+        return GameLogRecord.command(roomId, seq, GameCommandType.NORMAL_SUBMIT,
+                Player.PLAYER_1, 0, false, GamePhase.IN_PROGRESS, GamePhase.IN_PROGRESS);
+    }
+
+    @Test
     @DisplayName("스냅샷은 JSON 왕복 후에도 상태가 보존되고 findLatest는 최신 세대의 최고 seq를 반환한다")
     void snapshotRoundTripAndLatest() {
         long roomId = newRoomId();

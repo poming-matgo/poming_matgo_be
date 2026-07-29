@@ -32,29 +32,49 @@ public class PostgresGameLogRepository implements GameLogRepository {
             return Mono.empty();
         }
         // DECK_INIT은 세대의 첫 레코드라 배치 선두로만 도착한다 (방 단위 ordered writer가 순서 보장)
-        Mono<Long> gameId = batch.get(0).type() == GameCommandType.DECK_INIT
+        return resolveGameId(batch).flatMap(id ->
+                insertRows(batch.stream().map(record -> new Row(id, record)).toList()));
+    }
+
+    // cross-room 배치 = insert 1왕복. 같은 방의 세그먼트 간 세대 해소 순서(현 세대 조회 → startNew)를 지켜야 하므로 순차 resolve
+    @Override
+    public Mono<Void> appendAll(List<GameLogRecord> batch) {
+        if (batch.isEmpty()) {
+            return Mono.empty();
+        }
+        return Flux.fromIterable(GameLogRepository.segmentByGeneration(batch))
+                .concatMap(segment -> resolveGameId(segment)
+                        .map(id -> segment.stream().map(record -> new Row(id, record)).toList()))
+                .collectList()
+                .flatMap(rowGroups -> insertRows(rowGroups.stream().flatMap(List::stream).toList()));
+    }
+
+    private Mono<Long> resolveGameId(List<GameLogRecord> segment) {
+        long roomId = segment.get(0).roomId();
+        return segment.get(0).type() == GameCommandType.DECK_INIT
                 ? generations.startNew(roomId)
                 : generations.currentGeneration(roomId)
                         .switchIfEmpty(Mono.error(() -> new IllegalStateException("게임 세대 없음 — roomId=" + roomId)));
-        return gameId.flatMap(id -> insertBatch(id, batch));
     }
 
-    private Mono<Void> insertBatch(long gameId, List<GameLogRecord> batch) {
+    private record Row(long gameId, GameLogRecord record) {}
+
+    private Mono<Void> insertRows(List<Row> rows) {
         StringBuilder sql = new StringBuilder(
                 "INSERT INTO game_log (game_id, seq, room_id, type, player, card_index, go, deck, prev_phase, next_phase) VALUES ");
-        for (int i = 0; i < batch.size(); i++) {
+        for (int i = 0; i < rows.size(); i++) {
             sql.append(i > 0 ? ", " : "")
-                    .append("(:gameId, :seq").append(i).append(", :roomId, :type").append(i)
-                    .append(", :player").append(i).append(", :cardIndex").append(i)
+                    .append("(:gameId").append(i).append(", :seq").append(i).append(", :roomId").append(i)
+                    .append(", :type").append(i).append(", :player").append(i).append(", :cardIndex").append(i)
                     .append(", :go").append(i).append(", :deck").append(i)
                     .append(", :prevPhase").append(i).append(", :nextPhase").append(i).append(')');
         }
-        DatabaseClient.GenericExecuteSpec spec = gameLogDatabaseClient.sql(sql.toString())
-                .bind("gameId", gameId)
-                .bind("roomId", batch.get(0).roomId());
-        for (int i = 0; i < batch.size(); i++) {
-            GameLogRecord r = batch.get(i);
-            spec = spec.bind("seq" + i, r.seq())
+        DatabaseClient.GenericExecuteSpec spec = gameLogDatabaseClient.sql(sql.toString());
+        for (int i = 0; i < rows.size(); i++) {
+            GameLogRecord r = rows.get(i).record();
+            spec = spec.bind("gameId" + i, rows.get(i).gameId())
+                    .bind("roomId" + i, r.roomId())
+                    .bind("seq" + i, r.seq())
                     .bind("type" + i, r.type().name())
                     .bind("cardIndex" + i, r.cardIndex())
                     .bind("go" + i, r.go());
