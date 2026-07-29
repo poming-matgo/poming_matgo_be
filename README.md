@@ -19,7 +19,7 @@
 
 - Java 21, Spring WebFlux (Reactor), WebSocket
 - 게임 상태 저장: `ConcurrentHashMap` In-Memory *(기본 프로파일)* / Redis + Redisson *(분산 프로파일)*
-- 테스트: WebSocket 통합 테스트 (JUnit), k6 (부하·기능 테스트), InfluxDB + Grafana (시계열 모니터링)
+- 테스트: WebSocket 통합 테스트 (JUnit), k6 (부하·기능 테스트) + 서버 측 실측 계측(`ThroughputRecorder`)
 
 <br/>
 
@@ -75,23 +75,6 @@ k6 run gostop-test.js
 # 두 플레이어가 완전 방치(AFK)해도 서버 자동플레이(카드 제출 + 바닥 카드 선택 + 고/스톱 자동 STOP)만으로
 # 게임이 정지 없이 완주되는지 검증 (1방 2인, 약 4~8분 소요)
 k6 run gostop-afk-test.js
-```
-
-### 부하 테스트 시계열 모니터링 (선택)
-
-InfluxDB + Grafana 스택을 Docker로 띄워 throughput 추이를 시계열로 관찰할 수 있습니다. 단, 5,000 VU 대규모 부하에서는 k6 → InfluxDB write backpressure로 샘플이 일부만 적재되므로(자세한 내용은 아래 [측정 방법론](#측정-방법론) 참조), **정확한 throughput은 k6 콘솔 집계를 신뢰하고 이 스택은 sustain 안정성 패턴 검증 용도로만 활용**합니다.
-
-```bash
-# 1. 스택 기동 (Docker Desktop 필요)
-cd loadtest
-docker compose up -d
-
-# 2. k6를 InfluxDB output과 함께 실행 (프로젝트 루트에서)
-cd ..
-k6 run --out influxdb=http://localhost:8086/k6 gostop-test.js
-
-# 3. Grafana 접속 (대시보드 자동 provision)
-# http://localhost:3000  →  "k6 Load Testing Results" 대시보드
 ```
 
 <br/>
@@ -223,5 +206,5 @@ k6 run --out influxdb=http://localhost:8086/k6 gostop-test.js
 
 - **서버 측 1초 단위 실측:** 초기엔 k6 콘솔 평균(ramp up/down이 희석한 값)에 구간 가중치를 두어 sustain 피크를 *추정*했으나, 추정치는 방어가 어렵다고 판단해 **서버가 송신 메시지를 직접 세도록 계측을 추가**(`LongAdder` 카운트 + 1초 샘플링, hot path 비용은 increment 1회). 표의 sustain 평균/피크는 램프업 완료 후 7분 구간의 실측 시계열 통계
 - **클라이언트 측 RTT/에러 계측:** k6 custom `Trend`(액션 RTT) / `Counter`(서버 에러, 무응답 타임아웃, 완주 게임 수)를 스크립트에 내장. 에러율 없는 throughput 수치는 의미가 없으므로 결과표에 에러/타임아웃 건수를 함께 보고
-- **InfluxDB 시계열 측정의 한계 (서버 측 계측 전환의 계기):** 1초 단위 max를 측정하려 InfluxDB + Grafana를 도입했으나, 5,000 VU 부하에서 k6 → InfluxDB write가 backpressure로 **sample의 약 1.5%만 적재**되어 실패. 클라이언트 측 export가 병목이면 측정 대상(서버)이 직접 세는 것이 정확하다는 결론으로 위 서버 측 계측을 도입 (셋업은 [`loadtest/`](loadtest/)에 보존, Grafana는 sustain 안정성 패턴 확인 용도)
+- **InfluxDB 시계열 측정의 한계 (서버 측 계측 전환의 계기):** 1초 단위 max를 측정하려 InfluxDB + Grafana를 도입했으나, 5,000 VU 부하에서 k6 → InfluxDB write가 backpressure로 **sample의 약 1.5%만 적재**되어 실패. 클라이언트 측 export가 병목이면 측정 대상(서버)이 직접 세는 것이 정확하다는 결론으로 위 서버 측 계측을 도입하고 해당 스택은 제거
 - **Run-to-run 변동성:** 동일 환경 반복 측정 시 평균 throughput 약 ±5% 변동. 표의 값은 단일 대표 run의 실측값
