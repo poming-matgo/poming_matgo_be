@@ -74,7 +74,10 @@ function connectPlayer(userId, playerType, roomId, result) {
 
             switch (status) {
                 case 'CONNECT':
-                    ws.send(JSON.stringify({ eventType: { type: 'ROOM', subType: 'READY' } }));
+                    // 자기 접속 ack에만 READY — 상대 접속 브로드캐스트에 반응하면 중복 READY가 게임 시작과 경합해 INVALID_GAME_PHASE로 거부된다
+                    if (res.player === playerType) {
+                        ws.send(JSON.stringify({ eventType: { type: 'ROOM', subType: 'READY' } }));
+                    }
                     break;
 
                 case 'START': {

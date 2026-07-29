@@ -126,7 +126,10 @@ export default async function () {
 
                     switch (status) {
                         case 'CONNECT':
-                            sendReq({ eventType: { type: "ROOM", subType: "READY" } }, "ROOM_READY (준비)");
+                            // 자기 접속 ack에만 READY — 상대 접속 브로드캐스트에 반응하면 중복 READY가 게임 시작과 경합해 INVALID_GAME_PHASE로 거부된다
+                            if (res.player === playerType) {
+                                sendReq({ eventType: { type: "ROOM", subType: "READY" } }, "ROOM_READY (준비)");
+                            }
                             break;
 
                         case 'START':
