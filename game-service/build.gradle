@@ -28,6 +28,10 @@ dependencies {
     implementation 'org.springframework.boot:spring-boot-starter-webflux'
     implementation 'org.redisson:redisson-spring-boot-starter:3.52.0'
     implementation 'org.springframework.boot:spring-boot-starter-aop'
+    // durable 커맨드 로그(game.log.store=postgres) 전용 — JDBC 배제는 취향이 아니라 BlockHound 런타임 검증 사항
+    implementation 'org.springframework:spring-r2dbc'
+    implementation 'org.postgresql:r2dbc-postgresql'
+    implementation 'io.r2dbc:r2dbc-pool'
     implementation 'io.projectreactor.tools:blockhound:1.0.9.RELEASE'
     runtimeOnly 'io.projectreactor:reactor-tools'
     //implementation 'org.springframework.boot:spring-boot-starter-websocket'
