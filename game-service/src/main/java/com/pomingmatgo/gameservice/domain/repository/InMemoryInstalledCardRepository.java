@@ -107,6 +107,14 @@ public class InMemoryInstalledCardRepository implements InstalledCardRepository 
     }
 
     @Override
+    public Mono<List<Card>> getHiddenCards(long roomId) {
+        return Mono.fromCallable(() -> {
+            ArrayDeque<Card> deck = hiddenDeck.get(roomId);
+            return deck != null ? new ArrayList<>(deck) : Collections.emptyList();
+        });
+    }
+
+    @Override
     public Mono<List<Card>> getPlayerCards(long roomId, Player player) {
         return Mono.fromCallable(() -> {
             ConcurrentHashMap<String, List<Card>> room = playerCards.get(roomId);

@@ -20,6 +20,8 @@ public interface InstalledCardRepository {
     Mono<List<Card>> getAllRevealedCards(long roomId);
     /** 더미 맨 위 카드를 꺼낸다(소모). 더미가 비어 있으면 empty */
     Mono<Card> drawTopCard(long roomId);
+    /** 더미 전체를 draw 순서 그대로 비소모 조회 — 스냅샷 캡처용 */
+    Mono<List<Card>> getHiddenCards(long roomId);
     Mono<List<Card>> getPlayerCards(long roomId, Player player);
     Mono<Void> updatePlayerCards(long roomId, Player player, List<Card> cards);
 }

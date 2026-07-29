@@ -140,6 +140,10 @@ public class RedisInstalledCardRepository implements InstalledCardRepository {
                 .map(Card::valueOf);
     }
 
+    public Mono<List<Card>> getHiddenCards(long roomId) {
+        return getCards(generateHiddenCardKey(roomId));
+    }
+
     private Mono<List<Card>> getCards(String redisKey) {
         return redisOps.opsForList()
                 .range(redisKey, 0, -1)
