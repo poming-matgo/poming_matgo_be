@@ -6,6 +6,7 @@ import com.pomingmatgo.gameservice.domain.gamelog.GameCommandLog;
 import com.pomingmatgo.gameservice.domain.gamelog.GameCommandType;
 import com.pomingmatgo.gameservice.domain.gamelog.GameLogRecord;
 import com.pomingmatgo.gameservice.domain.repository.GameLogRepository;
+import com.pomingmatgo.gameservice.global.config.GameLogBatchProperties;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import reactor.core.publisher.Flux;
@@ -25,6 +26,8 @@ class GameCommandLogWriterTest {
     private static final long ROOM_ID = 960_001L;
     private static final int RECORD_COUNT = 200;
     private static final int BATCH_MAX_SIZE = 64;
+    private static final GameLogBatchProperties BATCH_PROPERTIES =
+            new GameLogBatchProperties(BATCH_MAX_SIZE, Duration.ofMillis(20));
 
     private static class RecordingRepository implements GameLogRepository {
         final List<List<GameLogRecord>> batches = Collections.synchronizedList(new ArrayList<>());
@@ -62,7 +65,7 @@ class GameCommandLogWriterTest {
     @DisplayName("빠른 emit + 느린 append에도 전 레코드가 seq 순서대로, 배치 상한을 지켜 저장된다")
     void appendsAllRecordsInSeqOrder() {
         RecordingRepository repository = new RecordingRepository(Duration.ofMillis(5));
-        GameCommandLog commandLog = new GameCommandLog(repository);
+        GameCommandLog commandLog = new GameCommandLog(repository, BATCH_PROPERTIES);
 
         for (int i = 0; i < RECORD_COUNT; i++) {
             commandLog.logCommand(ROOM_ID, GameCommandType.NORMAL_SUBMIT, Player.PLAYER_1, i % 10,
@@ -109,7 +112,7 @@ class GameCommandLogWriterTest {
                 return false;
             }
         };
-        GameCommandLog commandLog = new GameCommandLog(noOp);
+        GameCommandLog commandLog = new GameCommandLog(noOp, BATCH_PROPERTIES);
 
         commandLog.logDeckInit(ROOM_ID, List.of()).block();
         commandLog.logCommand(ROOM_ID, GameCommandType.GO_STOP, Player.PLAYER_1, 0,

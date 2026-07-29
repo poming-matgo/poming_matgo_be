@@ -4,13 +4,13 @@ import com.pomingmatgo.gameservice.domain.GamePhase;
 import com.pomingmatgo.gameservice.domain.Player;
 import com.pomingmatgo.gameservice.domain.card.Card;
 import com.pomingmatgo.gameservice.domain.repository.GameLogRepository;
+import com.pomingmatgo.gameservice.global.config.GameLogBatchProperties;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 import reactor.core.publisher.Mono;
 import reactor.core.publisher.Sinks;
 
-import java.time.Duration;
 import java.util.List;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.LongFunction;
@@ -21,11 +21,9 @@ import java.util.function.LongFunction;
 @RequiredArgsConstructor
 @Slf4j
 public class GameCommandLog {
-    // 배치 크기/주기가 곧 유실 창 — durability 곡선의 측정 변수
-    private static final int BATCH_MAX_SIZE = 64;
-    private static final Duration FLUSH_INTERVAL = Duration.ofMillis(20);
-
     private final GameLogRepository gameLogRepository;
+    // 배치 크기/주기가 곧 유실 창 — durability 곡선의 측정 변수 (game.log.batch.*)
+    private final GameLogBatchProperties batchProperties;
     private final ConcurrentHashMap<Long, RoomLogChannel> channels = new ConcurrentHashMap<>();
 
     // 방마다 Sink 하나 + concatMap — 세션 backpressure(GameWebSocketHandler)와 같은 패턴으로 append 순서를 보장한다
@@ -36,7 +34,7 @@ public class GameCommandLog {
 
         private RoomLogChannel(long roomId) {
             sink.asFlux()
-                    .bufferTimeout(BATCH_MAX_SIZE, FLUSH_INTERVAL)
+                    .bufferTimeout(batchProperties.maxSize(), batchProperties.flushInterval())
                     .onBackpressureBuffer()
                     .concatMap(batch -> gameLogRepository.append(roomId, batch))
                     .then(Mono.defer(() -> gameLogRepository.markCompleted(roomId)))
@@ -55,6 +53,9 @@ public class GameCommandLog {
             Sinks.EmitResult result = sink.tryEmitNext(record);
             if (result.isFailure()) {
                 log.warn("게임 로그 emit 실패({}) — roomId={}, seq={}", result, record.roomId(), record.seq());
+            } else {
+                // RPO 실측용 ground truth — kill -9 후 이 로그와 저장소 diff로 유실 커맨드를 센다 (평소 TRACE라 무비용)
+                log.trace("emit roomId={} seq={}", record.roomId(), record.seq());
             }
             return record.seq();
         }
