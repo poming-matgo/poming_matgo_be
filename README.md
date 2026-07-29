@@ -175,7 +175,7 @@ k6 run gostop-afk-test.js
 
 ### 환경
 
-- **하드웨어:** Intel i7-14700 (20 코어 / 28 스레드), RAM 32GB, Windows — **부하 도구(k6)와 서버가 동일 머신에서 실행** *(k6 자체의 CPU 사용이 포함된 단일 데스크톱 기준 처리량 상한 측정값으로, 프로덕션 서버 환경의 절대 수치가 아닌 최적화 효과 비교용 지표)*
+- **하드웨어:** Intel i7-14700 (20 코어 / 28 스레드), RAM 32GB — **부하 도구(k6)와 서버가 동일 머신에서 실행** *(k6 자체의 CPU 사용이 포함된 단일 데스크톱 기준 처리량 상한 측정값으로, 프로덕션 서버 환경의 절대 수치가 아닌 최적화 효과 비교용 지표)*
 - **JVM:** Java 21 (G1GC, default)
 - **부하 도구:** [k6](https://k6.io/) v1.7.1 — 시나리오 코드: [`gostop-test.js`](gostop-test.js)
 - **서버 측 계측:** 초당 송신 WS 메시지를 서버가 직접 측정 — [`ThroughputRecorder`](game-service/src/main/java/com/pomingmatgo/gameservice/global/metrics/ThroughputRecorder.java) (`GET /internal/metrics/throughput`)
