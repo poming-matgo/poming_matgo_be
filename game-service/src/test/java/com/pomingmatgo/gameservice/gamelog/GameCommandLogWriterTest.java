@@ -31,7 +31,7 @@ class GameCommandLogWriterTest {
     private static final int RECORD_COUNT = 200;
     private static final int BATCH_MAX_SIZE = 64;
     private static final GameLogBatchProperties BATCH_PROPERTIES =
-            new GameLogBatchProperties(BATCH_MAX_SIZE, Duration.ofMillis(20), false, 8);
+            new GameLogBatchProperties(BATCH_MAX_SIZE, Duration.ofMillis(20), false, 8, false);
 
     private static class RecordingRepository implements GameLogRepository {
         final List<List<GameLogRecord>> batches = Collections.synchronizedList(new ArrayList<>());
@@ -118,7 +118,7 @@ class GameCommandLogWriterTest {
         };
         // cross-room 모드여도 enabled=false면 채널 자체가 만들어지지 않아야 한다
         GameCommandLog commandLog = new GameCommandLog(noOp,
-                new GameLogBatchProperties(BATCH_MAX_SIZE, Duration.ofMillis(20), true, 8));
+                new GameLogBatchProperties(BATCH_MAX_SIZE, Duration.ofMillis(20), true, 8, false));
 
         commandLog.logDeckInit(ROOM_ID, List.of()).block();
         commandLog.logCommand(ROOM_ID, GameCommandType.GO_STOP, Player.PLAYER_1, 0,
@@ -166,7 +166,7 @@ class GameCommandLogWriterTest {
         long roomB = 960_102L;
         CrossRoomRecordingRepository repository = new CrossRoomRecordingRepository();
         GameCommandLog commandLog = new GameCommandLog(repository,
-                new GameLogBatchProperties(BATCH_MAX_SIZE, Duration.ofMillis(20), true, 1));
+                new GameLogBatchProperties(BATCH_MAX_SIZE, Duration.ofMillis(20), true, 1, false));
 
         for (int i = 0; i < RECORD_COUNT; i++) {
             long roomId = i % 2 == 0 ? roomA : roomB;

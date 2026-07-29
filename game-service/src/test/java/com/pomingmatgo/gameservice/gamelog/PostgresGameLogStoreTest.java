@@ -217,6 +217,32 @@ class PostgresGameLogStoreTest {
     }
 
     @Test
+    @DisplayName("cross-room 스냅샷 배치: 여러 방이 한 saveAll로 저장되고 세대 없는 방 것만 버려진다")
+    void crossRoomSnapshotSaveAll() {
+        long roomA = newRoomId();
+        long roomB = newRoomId();
+        long roomWithoutGeneration = newRoomId();
+        logRepository.append(roomA, List.of(GameLogRecord.deckInit(roomA, 1, List.of(Card.JAN_1)))).block(TIMEOUT);
+        logRepository.append(roomB, List.of(GameLogRecord.deckInit(roomB, 1, List.of(Card.FEB_1)))).block(TIMEOUT);
+
+        GameSnapshot latestA = snapshotAt(roomA, 5, 3);
+        snapshotRepository.saveAll(List.of(
+                snapshotAt(roomA, 2, 2),
+                latestA,
+                snapshotAt(roomB, 2, 2),
+                snapshotAt(roomWithoutGeneration, 1, 1))).block(TIMEOUT);
+
+        GameSnapshot restoredA = snapshotRepository.findLatest(roomA).block(TIMEOUT);
+        assertNotNull(restoredA);
+        assertEquals(latestA.seq(), restoredA.seq());
+        assertEquals(latestA.p1Hand(), restoredA.p1Hand());
+        GameSnapshot restoredB = snapshotRepository.findLatest(roomB).block(TIMEOUT);
+        assertNotNull(restoredB);
+        assertEquals(2, restoredB.seq());
+        assertNull(snapshotRepository.findLatest(roomWithoutGeneration).block(TIMEOUT));
+    }
+
+    @Test
     @DisplayName("세대가 없는 방의 스냅샷 저장은 조용히 버려진다 (유실 = replay 연장일 뿐)")
     void snapshotWithoutGenerationIsDropped() {
         long roomId = newRoomId();

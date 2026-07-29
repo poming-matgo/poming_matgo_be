@@ -8,20 +8,18 @@ import com.pomingmatgo.gameservice.domain.repository.GameSnapshotRepository;
 import com.pomingmatgo.gameservice.domain.repository.GameStateRepository;
 import com.pomingmatgo.gameservice.domain.repository.InstalledCardRepository;
 import lombok.RequiredArgsConstructor;
-import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import reactor.core.publisher.Mono;
-import reactor.core.scheduler.Schedulers;
 
 @Service
 @RequiredArgsConstructor
-@Slf4j
 public class GameSnapshotService {
 
     private final GameStateRepository gameStateRepository;
     private final InstalledCardRepository installedCardRepository;
     private final AcquiredCardRepository acquiredCardRepository;
     private final GameSnapshotRepository snapshotRepository;
+    private final GameSnapshotWriter snapshotWriter;
 
     /**
      * 라운드 경계에서 seq 시점 스냅샷을 캡처한다 — @GameLock 안에서 호출해야 4개 저장소가 같은 seq 시점이다(torn 방지).
@@ -40,10 +38,7 @@ public class GameSnapshotService {
                         acquiredCardRepository.getAllCards(roomId, 2))
                 .map(t -> new GameSnapshot(roomId, seq, nextState,
                         t.getT1(), t.getT2(), t.getT3(), t.getT4(), t.getT5(), t.getT6()))
-                .doOnNext(snapshot -> snapshotRepository.save(snapshot)
-                        .subscribeOn(Schedulers.boundedElastic())
-                        .subscribe(unused -> { },
-                                e -> log.error("스냅샷 저장 실패 — roomId={}, seq={}", roomId, seq, e)))
+                .doOnNext(snapshotWriter::submit)
                 .then();
     }
 

@@ -100,7 +100,7 @@ public class GameCommandLog {
                         .onBackpressureBuffer()
                         .concatMap(batch -> gameLogRepository
                                 .appendAll(batch.stream().map(EnqueuedRecord::record).toList())
-                                // 로그 실패가 게임 진행을 막으면 안 된다 — 실패 배치도 drain으로 간주 (1-C 계약)
+                                // 로그 실패가 게임 진행을 막으면 안 된다 — 실패 배치도 drain으로 간주
                                 .onErrorResume(e -> {
                                     log.error("cross-room 로그 배치 실패 — {}건", batch.size(), e);
                                     return Mono.empty();

@@ -7,7 +7,10 @@ import com.pomingmatgo.gameservice.domain.snapshot.GameSnapshot;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.r2dbc.core.DatabaseClient;
 import org.springframework.stereotype.Component;
+import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
+
+import java.util.List;
 
 // 스냅샷 = 최신 세대의 seq 시점 상태 JSON. 세대 조회가 실패하면 버린다 — 유실은 replay 연장일 뿐 (인터페이스 계약)
 @Component
@@ -37,18 +40,42 @@ public class PostgresGameSnapshotRepository implements GameSnapshotRepository {
 
     @Override
     public Mono<Void> save(GameSnapshot snapshot) {
+        return saveAll(List.of(snapshot));
+    }
+
+    // cross-room 배치 = insert 1왕복. 세대 조회는 대부분 캐시 hit이고, 세대 없는 방의 스냅샷은 버린다 (인터페이스 계약)
+    @Override
+    public Mono<Void> saveAll(List<GameSnapshot> batch) {
+        return Flux.fromIterable(batch)
+                .concatMap(snapshot -> generations.currentGeneration(snapshot.roomId())
+                        .map(gameId -> new Row(gameId, snapshot)))
+                .collectList()
+                .flatMap(this::insertRows);
+    }
+
+    private record Row(long gameId, GameSnapshot snapshot) {}
+
+    private Mono<Void> insertRows(List<Row> rows) {
+        if (rows.isEmpty()) {
+            return Mono.empty();
+        }
+        StringBuilder sql = new StringBuilder("INSERT INTO game_snapshot (game_id, seq, room_id, state) VALUES ");
+        for (int i = 0; i < rows.size(); i++) {
+            sql.append(i > 0 ? ", " : "")
+                    .append("(:gameId").append(i).append(", :seq").append(i)
+                    .append(", :roomId").append(i).append(", CAST(:state").append(i).append(" AS jsonb))");
+        }
         // 같은 (game_id, seq) 재도착은 무시 — 스냅샷은 write-once
-        return generations.currentGeneration(snapshot.roomId())
-                .flatMap(gameId -> gameLogDatabaseClient.sql("""
-                                INSERT INTO game_snapshot (game_id, seq, room_id, state)
-                                VALUES (:gameId, :seq, :roomId, CAST(:state AS jsonb))
-                                ON CONFLICT DO NOTHING
-                                """)
-                        .bind("gameId", gameId)
-                        .bind("seq", snapshot.seq())
-                        .bind("roomId", snapshot.roomId())
-                        .bind("state", toJson(snapshot))
-                        .then());
+        sql.append(" ON CONFLICT DO NOTHING");
+        DatabaseClient.GenericExecuteSpec spec = gameLogDatabaseClient.sql(sql.toString());
+        for (int i = 0; i < rows.size(); i++) {
+            GameSnapshot snapshot = rows.get(i).snapshot();
+            spec = spec.bind("gameId" + i, rows.get(i).gameId())
+                    .bind("seq" + i, snapshot.seq())
+                    .bind("roomId" + i, snapshot.roomId())
+                    .bind("state" + i, toJson(snapshot));
+        }
+        return spec.then();
     }
 
     @Override
