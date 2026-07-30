@@ -111,15 +111,20 @@ public class PreGameService {
                 });
     }
 
-    public Mono<InstalledCard> distributeCards(long roomId) {
+    // GameState를 받는 이유: 이 시점 저장소엔 leadingPlayer가 아직 없다(setFirstTurn에서 저장) — 흐름 중인 상태가 원천
+    public Mono<InstalledCard> distributeCards(GameState gameState) {
+        long roomId = gameState.getRoomId();
         return Mono.fromCallable(() -> {
                     List<Card> deck = new ArrayList<>(Arrays.asList(Card.values()));
                     Collections.shuffle(deck);
                     return deck;
                 })
                 .flatMap(deck -> distributeCards(roomId, deck)
-                        // 배분 확정 후 셔플 덱을 로그 첫 레코드로 고정 — replay 경로(아래 seam)는 기록하지 않는다
-                        .delayUntil(cards -> gameCommandLog.logDeckInit(roomId, deck)));
+                        // 배분 확정 후 셔플 덱 + 초기 상태를 로그 첫 레코드로 고정 — replay 경로(아래 seam)는 기록하지 않는다
+                        .delayUntil(cards -> gameCommandLog.logDeckInit(roomId, deck,
+                                gameState.getPlayerState(Player.PLAYER_1).getUserId(),
+                                gameState.getPlayerState(Player.PLAYER_2).getUserId(),
+                                gameState.getLeadingPlayer())));
     }
 
     /** 셔플 결과를 값으로 받는 결정적 경로 — 커맨드 로그의 덱 고정 레코드와 replay가 이 seam을 쓴다 */

@@ -22,8 +22,17 @@ CREATE TABLE IF NOT EXISTS game_log (
     deck       TEXT,
     prev_phase TEXT,
     next_phase TEXT,
+    -- DECK_INIT 전용(세대 출생 기록) — 스냅샷 없는(라운드 1) 복구가 초기 GameState를 로그만으로 복원하는 근거
+    user1_id       BIGINT,
+    user2_id       BIGINT,
+    leading_player INT NOT NULL DEFAULT 0,
     PRIMARY KEY (game_id, seq)
 );
+
+-- 기존 DB 마이그레이션 (CREATE IF NOT EXISTS는 기존 테이블에 컬럼을 더하지 않는다)
+ALTER TABLE game_log ADD COLUMN IF NOT EXISTS user1_id BIGINT;
+ALTER TABLE game_log ADD COLUMN IF NOT EXISTS user2_id BIGINT;
+ALTER TABLE game_log ADD COLUMN IF NOT EXISTS leading_player INT NOT NULL DEFAULT 0;
 
 CREATE TABLE IF NOT EXISTS game_snapshot (
     game_id BIGINT NOT NULL,

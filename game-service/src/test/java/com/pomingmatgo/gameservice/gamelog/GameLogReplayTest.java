@@ -66,8 +66,8 @@ class GameLogReplayTest {
     @DisplayName("라이브 완주(무작위 셔플) → cleanup 후 남은 로그로 blind replay → 전 저장소 상태 동등")
     void persistedLogAloneReconstructsFinishedGame() throws JsonProcessingException {
         // 라이브 경로 — 무작위 셔플이 DECK_INIT 레코드로 고정되는지가 검증 대상이므로 시드 덱을 쓰지 않는다
-        createRoom(ROOM_LIVE);
-        preGameService.distributeCards(ROOM_LIVE).block();
+        GameState liveState = createRoom(ROOM_LIVE);
+        preGameService.distributeCards(liveState).block();
         int commandCount = playLiveGame(ROOM_LIVE);
         RoomFinalState liveFinal = captureFinalState(ROOM_LIVE);
 
@@ -108,14 +108,16 @@ class GameLogReplayTest {
         assertEquals(GamePhase.END, commands.get(commands.size() - 1).nextPhase(), "마지막 커맨드는 게임을 끝내야 한다");
     }
 
-    private void createRoom(long roomId) {
-        gameStateRepository.create(GameState.builder()
+    private GameState createRoom(long roomId) {
+        GameState state = GameState.builder()
                 .roomId(roomId)
                 .leadingPlayer(1)
                 .currentTurn(1)
                 .round(1)
                 .phase(GamePhase.IN_PROGRESS)
-                .build()).block();
+                .build();
+        gameStateRepository.create(state).block();
+        return state;
     }
 
     /** 상태를 보고 커맨드를 결정·실행 — 자동플레이와 같은 정책(항상 0번, 첫 기회 GO 이후 STOP) */

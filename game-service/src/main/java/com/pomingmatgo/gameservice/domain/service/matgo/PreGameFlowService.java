@@ -60,7 +60,7 @@ public class PreGameFlowService {
 
     private Mono<GameState> distributeCardsAndNotify(GameState gameState) {
         long roomId = gameState.getRoomId();
-        return Mono.defer(() -> preGameService.distributeCards(roomId))
+        return Mono.defer(() -> preGameService.distributeCards(gameState))
                 .delayUntil(cards -> gameMessageSender.sendDistributedCardInfo(roomId, cards))
                 .flatMap(cards -> checkFloorDrawAndProceed(gameState, cards));
     }

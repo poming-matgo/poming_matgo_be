@@ -128,7 +128,7 @@ class PreGameFloorDrawTest {
 
     /** 판정 대상은 바닥뿐이라 손패/더미는 비워 둔다 */
     private void stubDeal(List<Card> floorCards) {
-        when(preGameService.distributeCards(anyLong()))
+        when(preGameService.distributeCards(any(GameState.class)))
                 .thenReturn(Mono.just(new InstalledCard(List.of(), List.of(), floorCards, List.of())));
     }
 

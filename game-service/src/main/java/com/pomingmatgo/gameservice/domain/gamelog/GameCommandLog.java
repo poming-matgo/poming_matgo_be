@@ -11,6 +11,7 @@ import reactor.core.publisher.Mono;
 import reactor.core.publisher.Sinks;
 
 import java.util.List;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.LongFunction;
 
@@ -25,6 +26,8 @@ public class GameCommandLog {
     private final ConcurrentHashMap<Long, RoomLogChannel> channels = new ConcurrentHashMap<>();
     // cross-room 모드: 전역 writer 1개가 여러 방을 한 배치(=insert 1왕복)로 묶는다 — 방 단위 배치는 cadence상 배치≈1
     private final CrossRoomChannel crossRoomChannel;
+    // 복구 replay 중인 방 — replay는 이미 영속된 커맨드의 재실행이라 다시 기록하면 안 된다
+    private final Set<Long> replaying = ConcurrentHashMap.newKeySet();
 
     public GameCommandLog(GameLogRepository gameLogRepository, GameLogBatchProperties batchProperties) {
         this.gameLogRepository = gameLogRepository;
@@ -59,6 +62,10 @@ public class GameCommandLog {
             logEmitResult(sink.tryEmitNext(record), record);
             return record.seq();
         }
+
+        private synchronized void seed(long lastPersistedSeq) {
+            this.seq = lastPersistedSeq;
+        }
     }
 
     // 방 해시로 shard 고정 — 방 단위 순서는 shard 안의 단일 writer가, shard 간은 병렬로 insert 왕복을 나눈다.
@@ -89,6 +96,14 @@ public class GameCommandLog {
                 return Mono.empty();
             }
             return progress.drained().then(gameLogRepository.markCompleted(roomId));
+        }
+
+        private void seed(long roomId, long lastPersistedSeq) {
+            rooms.compute(roomId, (k, prev) -> {
+                RoomProgress progress = prev != null ? prev : new RoomProgress();
+                progress.seed(lastPersistedSeq);
+                return progress;
+            });
         }
 
         private final class Shard {
@@ -127,6 +142,12 @@ public class GameCommandLog {
             return ++emitted;
         }
 
+        // 복구 재개 지점 — flushed도 같이 당겨야 drained()가 replay 이전 커맨드를 기다리지 않는다
+        private synchronized void seed(long lastPersistedSeq) {
+            emitted = lastPersistedSeq;
+            flushed = lastPersistedSeq;
+        }
+
         private synchronized void markFlushed(long seq) {
             flushed = seq;
             if (waiter != null && flushed >= target) {
@@ -159,8 +180,9 @@ public class GameCommandLog {
         }
     }
 
-    public Mono<Long> logDeckInit(long roomId, List<Card> deck) {
-        return enqueue(roomId, seq -> GameLogRecord.deckInit(roomId, seq, deck));
+    /** 초기 상태(userIds·선플레이어)를 함께 고정 — 스냅샷 없는 복구(라운드 1 크래시)의 유일한 초기 상태 원천 */
+    public Mono<Long> logDeckInit(long roomId, List<Card> deck, Long user1Id, Long user2Id, int leadingPlayer) {
+        return enqueue(roomId, seq -> GameLogRecord.deckInit(roomId, seq, deck, user1Id, user2Id, leadingPlayer));
     }
 
     /** 부여된 seq를 반환한다 — 스냅샷의 일관성 지점(seq N 시점)이 이 값으로 정의된다. 비활성이면 empty */
@@ -173,11 +195,41 @@ public class GameCommandLog {
         if (!gameLogRepository.enabled()) {
             return Mono.empty();
         }
+        // 복구 replay는 이미 영속된 커맨드의 재실행 — 다시 기록하면 seq 재시작으로 (game_id, seq) 충돌 + 이력 중복
+        if (replaying.contains(roomId)) {
+            return Mono.empty();
+        }
         if (crossRoomChannel != null) {
             return Mono.fromCallable(() -> crossRoomChannel.emit(roomId, recordFactory));
         }
         return Mono.fromCallable(() ->
                 channels.computeIfAbsent(roomId, RoomLogChannel::new).emit(recordFactory));
+    }
+
+    /** 복구 replay 시작 — restore 착수 전에 호출해 replay 커맨드의 재기록을 차단한다 */
+    public void beginRecovery(long roomId) {
+        replaying.add(roomId);
+    }
+
+    /** 복구 실패 — 억제만 푼다. seq 재개는 없으며 재시도가 다시 begin부터 밟는다 */
+    public void abortRecovery(long roomId) {
+        replaying.remove(roomId);
+    }
+
+    /** 복구 완료 — seq를 마지막 영속 seq에서 재개해 이후 라이브 커맨드가 같은 세대의 seq 사슬을 잇는다 */
+    public void endRecovery(long roomId, long lastPersistedSeq) {
+        if (gameLogRepository.enabled()) {
+            if (crossRoomChannel != null) {
+                crossRoomChannel.seed(roomId, lastPersistedSeq);
+            } else {
+                channels.compute(roomId, (k, prev) -> {
+                    RoomLogChannel channel = prev != null ? prev : new RoomLogChannel(roomId);
+                    channel.seed(lastPersistedSeq);
+                    return channel;
+                });
+            }
+        }
+        replaying.remove(roomId);
     }
 
     /** 잔여 배치 drain 완료까지 대기 후 완료 표시 — cleanup ≠ delete, 레코드는 저장소에 남는다 */

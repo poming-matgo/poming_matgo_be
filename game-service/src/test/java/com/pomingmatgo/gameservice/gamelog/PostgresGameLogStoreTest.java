@@ -71,7 +71,7 @@ class PostgresGameLogStoreTest {
     // lease 비활성(noop) — 이 테스트는 fencing 이전의 저장소 계약을 검증한다 (fencing은 PostgresRoomLeaseTest)
     private static RoomLeaseManager noFencing() {
         return new RoomLeaseManager(new NoOpRoomLeaseRepository(),
-                new RoomLeaseProperties(Duration.ofSeconds(15), Duration.ofSeconds(5)), event -> {});
+                new RoomLeaseProperties(Duration.ofSeconds(15), Duration.ofSeconds(5), Duration.ofMillis(20)), event -> {});
     }
 
     @AfterAll
@@ -101,7 +101,7 @@ class PostgresGameLogStoreTest {
     void roundTrip() {
         long roomId = newRoomId();
         List<Card> deck = Arrays.asList(Card.values());
-        GameLogRecord deckInit = GameLogRecord.deckInit(roomId, 1, deck);
+        GameLogRecord deckInit = GameLogRecord.deckInit(roomId, 1, deck, 101L, 202L, 2);
         GameLogRecord submit = GameLogRecord.command(roomId, 2, GameCommandType.NORMAL_SUBMIT,
                 Player.PLAYER_1, 3, false, GamePhase.IN_PROGRESS, GamePhase.IN_PROGRESS);
         GameLogRecord goStop = GameLogRecord.command(roomId, 3, GameCommandType.GO_STOP,
@@ -122,12 +122,12 @@ class PostgresGameLogStoreTest {
     void generationSeparation() {
         long roomId = newRoomId();
         logRepository.append(roomId, List.of(
-                GameLogRecord.deckInit(roomId, 1, List.of(Card.JAN_1, Card.FEB_2)),
+                GameLogRecord.deckInit(roomId, 1, List.of(Card.JAN_1, Card.FEB_2), null, null, 1),
                 GameLogRecord.command(roomId, 2, GameCommandType.NORMAL_SUBMIT, Player.PLAYER_1, 0, false,
                         GamePhase.IN_PROGRESS, GamePhase.END))).block(TIMEOUT);
         logRepository.markCompleted(roomId).block(TIMEOUT);
 
-        GameLogRecord gen2Init = GameLogRecord.deckInit(roomId, 1, List.of(Card.MAR_1, Card.APR_2));
+        GameLogRecord gen2Init = GameLogRecord.deckInit(roomId, 1, List.of(Card.MAR_1, Card.APR_2), null, null, 1);
         GameLogRecord gen2Submit = GameLogRecord.command(roomId, 2, GameCommandType.NORMAL_SUBMIT,
                 Player.PLAYER_2, 1, false, GamePhase.IN_PROGRESS, GamePhase.IN_PROGRESS);
         logRepository.append(roomId, List.of(gen2Init, gen2Submit)).block(TIMEOUT);
@@ -156,13 +156,13 @@ class PostgresGameLogStoreTest {
         long roomA = newRoomId();
         long roomB = newRoomId();
         logRepository.appendAll(List.of(
-                GameLogRecord.deckInit(roomA, 1, List.of(Card.JAN_1)),
-                GameLogRecord.deckInit(roomB, 1, List.of(Card.FEB_1)),
+                GameLogRecord.deckInit(roomA, 1, List.of(Card.JAN_1), null, null, 1),
+                GameLogRecord.deckInit(roomB, 1, List.of(Card.FEB_1), null, null, 1),
                 command(roomA, 2),
                 command(roomB, 2))).block(TIMEOUT);
 
         // 같은 배치 안에 roomA의 1세대 마지막 커맨드 + 새 게임(DECK_INIT) + 2세대 커맨드가 섞인 경우
-        GameLogRecord gen2Init = GameLogRecord.deckInit(roomA, 1, List.of(Card.MAR_1));
+        GameLogRecord gen2Init = GameLogRecord.deckInit(roomA, 1, List.of(Card.MAR_1), null, null, 1);
         GameLogRecord gen2Command = command(roomA, 2);
         logRepository.appendAll(List.of(
                 command(roomA, 3),
@@ -195,7 +195,7 @@ class PostgresGameLogStoreTest {
     @DisplayName("스냅샷은 JSON 왕복 후에도 상태가 보존되고 findLatest는 최신 세대의 최고 seq를 반환한다")
     void snapshotRoundTripAndLatest() {
         long roomId = newRoomId();
-        logRepository.append(roomId, List.of(GameLogRecord.deckInit(roomId, 1, List.of(Card.JAN_1)))).block(TIMEOUT);
+        logRepository.append(roomId, List.of(GameLogRecord.deckInit(roomId, 1, List.of(Card.JAN_1), null, null, 1))).block(TIMEOUT);
 
         snapshotRepository.save(snapshotAt(roomId, 2, 3)).block(TIMEOUT);
         GameSnapshot expected = snapshotAt(roomId, 5, 7);
@@ -231,8 +231,8 @@ class PostgresGameLogStoreTest {
         long roomA = newRoomId();
         long roomB = newRoomId();
         long roomWithoutGeneration = newRoomId();
-        logRepository.append(roomA, List.of(GameLogRecord.deckInit(roomA, 1, List.of(Card.JAN_1)))).block(TIMEOUT);
-        logRepository.append(roomB, List.of(GameLogRecord.deckInit(roomB, 1, List.of(Card.FEB_1)))).block(TIMEOUT);
+        logRepository.append(roomA, List.of(GameLogRecord.deckInit(roomA, 1, List.of(Card.JAN_1), null, null, 1))).block(TIMEOUT);
+        logRepository.append(roomB, List.of(GameLogRecord.deckInit(roomB, 1, List.of(Card.FEB_1), null, null, 1))).block(TIMEOUT);
 
         GameSnapshot latestA = snapshotAt(roomA, 5, 3);
         snapshotRepository.saveAll(List.of(
@@ -263,7 +263,7 @@ class PostgresGameLogStoreTest {
     @DisplayName("캐시 miss(재시작 상황)여도 DB 폴백으로 현재 세대를 찾아 append/조회가 이어진다")
     void cacheMissFallsBackToDb() {
         long roomId = newRoomId();
-        logRepository.append(roomId, List.of(GameLogRecord.deckInit(roomId, 1, List.of(Card.JAN_1)))).block(TIMEOUT);
+        logRepository.append(roomId, List.of(GameLogRecord.deckInit(roomId, 1, List.of(Card.JAN_1), null, null, 1))).block(TIMEOUT);
 
         // 재시작한 인스턴스 = 캐시가 빈 새 컴포넌트
         PostgresGameGenerations freshGenerations = new PostgresGameGenerations(db);

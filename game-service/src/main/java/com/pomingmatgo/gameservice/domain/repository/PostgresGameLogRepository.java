@@ -102,17 +102,21 @@ public class PostgresGameLogRepository implements GameLogRepository {
             return Mono.just(0L);
         }
         boolean fenced = roomTokens != null;
+        String columns = "game_id, seq, room_id, type, player, card_index, go, deck, prev_phase, next_phase, "
+                + "user1_id, user2_id, leading_player";
         StringBuilder sql = new StringBuilder(fenced
-                ? "INSERT INTO game_log (game_id, seq, room_id, type, player, card_index, go, deck, prev_phase, next_phase) "
-                        + "SELECT v.game_id, v.seq, v.room_id, v.type, v.player, v.card_index, v.go, v.deck, v.prev_phase, v.next_phase "
+                ? "INSERT INTO game_log (" + columns + ") "
+                        + "SELECT v.game_id, v.seq, v.room_id, v.type, v.player, v.card_index, v.go, v.deck, "
+                        + "v.prev_phase, v.next_phase, v.user1_id, v.user2_id, v.leading_player "
                         + "FROM (VALUES "
-                : "INSERT INTO game_log (game_id, seq, room_id, type, player, card_index, go, deck, prev_phase, next_phase) VALUES ");
+                : "INSERT INTO game_log (" + columns + ") VALUES ");
         for (int i = 0; i < rows.size(); i++) {
             sql.append(i > 0 ? ", " : "")
                     .append("(:gameId").append(i).append(", :seq").append(i).append(", :roomId").append(i)
                     .append(", :type").append(i).append(", :player").append(i).append(", :cardIndex").append(i)
                     .append(", :go").append(i).append(", :deck").append(i)
-                    .append(", :prevPhase").append(i).append(", :nextPhase").append(i);
+                    .append(", :prevPhase").append(i).append(", :nextPhase").append(i)
+                    .append(", :user1Id").append(i).append(", :user2Id").append(i).append(", :leadingPlayer").append(i);
             if (fenced) {
                 sql.append(", :fencingToken").append(i);
             }
@@ -120,7 +124,8 @@ public class PostgresGameLogRepository implements GameLogRepository {
         }
         if (fenced) {
             // 좀비의 낡은 토큰은 join에 걸리지 않아 그 방의 행만 통째로 빠진다 — 거부 판정은 rowsUpdated로
-            sql.append(") AS v(game_id, seq, room_id, type, player, card_index, go, deck, prev_phase, next_phase, fencing_token) ")
+            sql.append(") AS v(game_id, seq, room_id, type, player, card_index, go, deck, prev_phase, next_phase, "
+                            + "user1_id, user2_id, leading_player, fencing_token) ")
                     .append("JOIN room_lease l ON l.room_id = v.room_id AND l.fencing_token = v.fencing_token");
         }
         DatabaseClient.GenericExecuteSpec spec = gameLogDatabaseClient.sql(sql.toString());
@@ -136,6 +141,9 @@ public class PostgresGameLogRepository implements GameLogRepository {
             spec = bindText(spec, "deck" + i, serializeDeck(r.deck()));
             spec = bindText(spec, "prevPhase" + i, r.prevPhase() == null ? null : r.prevPhase().name());
             spec = bindText(spec, "nextPhase" + i, r.nextPhase() == null ? null : r.nextPhase().name());
+            spec = bindLong(spec, "user1Id" + i, r.user1Id());
+            spec = bindLong(spec, "user2Id" + i, r.user2Id());
+            spec = spec.bind("leadingPlayer" + i, r.leadingPlayer());
             if (fenced) {
                 spec = spec.bind("fencingToken" + i, roomTokens.get(r.roomId()));
             }
@@ -147,6 +155,10 @@ public class PostgresGameLogRepository implements GameLogRepository {
         return value != null ? spec.bind(name, value) : spec.bindNull(name, String.class);
     }
 
+    private DatabaseClient.GenericExecuteSpec bindLong(DatabaseClient.GenericExecuteSpec spec, String name, Long value) {
+        return value != null ? spec.bind(name, value) : spec.bindNull(name, Long.class);
+    }
+
     private String serializeDeck(List<Card> deck) {
         return deck == null ? null : deck.stream().map(Enum::name).collect(Collectors.joining(","));
     }
@@ -154,7 +166,8 @@ public class PostgresGameLogRepository implements GameLogRepository {
     @Override
     public Flux<GameLogRecord> findAllFromSeq(long roomId, long fromSeq) {
         return gameLogDatabaseClient.sql("""
-                        SELECT seq, type, player, card_index, go, deck, prev_phase, next_phase
+                        SELECT seq, type, player, card_index, go, deck, prev_phase, next_phase,
+                               user1_id, user2_id, leading_player
                         FROM game_log
                         WHERE room_id = :roomId
                           AND game_id = (SELECT max(game_id) FROM game_generation WHERE room_id = :roomId)
@@ -165,6 +178,19 @@ public class PostgresGameLogRepository implements GameLogRepository {
                 .bind("fromSeq", fromSeq)
                 .map(row -> toRecord(roomId, row))
                 .all();
+    }
+
+    @Override
+    public Mono<Boolean> latestGenerationCompleted(long roomId) {
+        return gameLogDatabaseClient.sql("""
+                        SELECT completed FROM game_generation
+                        WHERE room_id = :roomId
+                        ORDER BY game_id DESC
+                        LIMIT 1
+                        """)
+                .bind("roomId", roomId)
+                .map(row -> row.get("completed", Boolean.class))
+                .one();
     }
 
     private GameLogRecord toRecord(long roomId, Readable row) {
@@ -181,7 +207,10 @@ public class PostgresGameLogRepository implements GameLogRepository {
                 Boolean.TRUE.equals(row.get("go", Boolean.class)),
                 deck == null ? null : Arrays.stream(deck.split(",")).map(Card::valueOf).toList(),
                 prevPhase == null ? null : GamePhase.valueOf(prevPhase),
-                nextPhase == null ? null : GamePhase.valueOf(nextPhase));
+                nextPhase == null ? null : GamePhase.valueOf(nextPhase),
+                row.get("user1_id", Long.class),
+                row.get("user2_id", Long.class),
+                row.get("leading_player", Integer.class));
     }
 
     @Override

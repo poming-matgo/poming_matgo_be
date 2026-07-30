@@ -92,6 +92,32 @@ public class RoomLeaseManager {
         });
     }
 
+    /** 인수 후보 스캔(2-D) — 만료됐지만 정상 해제는 아닌 방 */
+    public Flux<Long> findExpiredRooms() {
+        return leaseRepository.findExpiredRoomIds();
+    }
+
+    /**
+     * 만료 lease 원자적 인수 — 성공 시 새 token을 캐시에 채워 이후 쓰기(로그·완료 표시)가 이 인스턴스 소유로 통과한다.
+     * owner를 자기 instanceId로 넣으므로 heartbeat가 인수한 방도 함께 연장한다
+     */
+    public Mono<RoomLeaseRepository.Takeover> takeover(long roomId) {
+        return leaseRepository.takeover(roomId, instanceId, properties.duration())
+                .doOnNext(result -> tokens.put(roomId, result.fencingToken()));
+    }
+
+    /** 복구 실패 시 — 즉시 만료로 되돌려 다음 스캔(이 노드든 타 노드든)이 재시도하게 한다 */
+    public Mono<Void> abandon(long roomId) {
+        // release와 같은 이유로 defer 필수 — 부수효과(캐시 회수)는 구독 시점에
+        return Mono.defer(() -> {
+            Long token = tokens.remove(roomId);
+            if (token == null) {
+                return Mono.empty();
+            }
+            return leaseRepository.abandon(roomId, token);
+        });
+    }
+
     /** fencing 거부 후 호출 — DB 토큰과 대조해 상실이 확인된 방만 캐시 회수 + LeaseLostEvent 발행 */
     public Mono<Void> verifyOwnership(Collection<Long> roomIds) {
         return Flux.fromIterable(roomIds)

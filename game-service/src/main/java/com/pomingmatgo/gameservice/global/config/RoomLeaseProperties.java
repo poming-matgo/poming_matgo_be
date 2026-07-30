@@ -9,6 +9,8 @@ import java.time.Duration;
 @ConfigurationProperties(prefix = "game.lease")
 public record RoomLeaseProperties(
         @DefaultValue("15s") Duration duration,
-        @DefaultValue("5s") Duration heartbeatInterval
+        @DefaultValue("5s") Duration heartbeatInterval,
+        // deadline conflate flush 주기 — 커맨드마다 단건 UPDATE하면 스냅샷 단건 insert와 같은 지배 항이 된다 (§11.6 교훈)
+        @DefaultValue("20ms") Duration deadlineFlushInterval
 ) {
 }

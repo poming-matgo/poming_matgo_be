@@ -122,8 +122,8 @@ class GameSnapshotRestoreTest {
 
     private GameState playUntilMultiRoundGame() {
         for (int attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
-            createRoom();
-            preGameService.distributeCards(ROOM).block();
+            GameState created = createRoom();
+            preGameService.distributeCards(created).block();
             playLiveGame();
             GameState end = gameStateRepository.findById(ROOM).block();
             if (end.getRound() >= 2) {
@@ -147,14 +147,16 @@ class GameSnapshotRestoreTest {
         assertEquals(expected, store.count(ROOM), "스냅샷 수 = 라운드 경계 수(최종 라운드 - 1)");
     }
 
-    private void createRoom() {
-        gameStateRepository.create(GameState.builder()
+    private GameState createRoom() {
+        GameState state = GameState.builder()
                 .roomId(ROOM)
                 .leadingPlayer(1)
                 .currentTurn(1)
                 .round(1)
                 .phase(GamePhase.IN_PROGRESS)
-                .build()).block();
+                .build();
+        gameStateRepository.create(state).block();
+        return state;
     }
 
     /** 상태를 보고 커맨드를 결정·실행 — 자동플레이와 같은 정책(항상 0번, 첫 기회 GO 이후 STOP) */

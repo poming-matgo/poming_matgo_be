@@ -120,7 +120,7 @@ class GameCommandLogWriterTest {
         GameCommandLog commandLog = new GameCommandLog(noOp,
                 new GameLogBatchProperties(BATCH_MAX_SIZE, Duration.ofMillis(20), true, 8, false));
 
-        commandLog.logDeckInit(ROOM_ID, List.of()).block();
+        commandLog.logDeckInit(ROOM_ID, List.of(), null, null, 1).block();
         commandLog.logCommand(ROOM_ID, GameCommandType.GO_STOP, Player.PLAYER_1, 0,
                 true, GamePhase.AWAITING_GO_STOP_CHOICE, GamePhase.IN_PROGRESS).block();
         assertDoesNotThrow(() -> commandLog.close(ROOM_ID).block(Duration.ofSeconds(1)));
@@ -199,6 +199,33 @@ class GameCommandLogWriterTest {
     }
 
     @Test
+    @DisplayName("복구(2-D): begin 중 emit은 억제되고 end 후 emit은 마지막 영속 seq에서 이어진다 — per-room·cross-room 공통")
+    void recoverySuppressesReplayAndResumesSeq() {
+        for (boolean crossRoom : new boolean[]{false, true}) {
+            RecordingRepository repository = new RecordingRepository(Duration.ZERO);
+            GameCommandLog commandLog = new GameCommandLog(repository,
+                    new GameLogBatchProperties(BATCH_MAX_SIZE, Duration.ofMillis(20), crossRoom, 1, false));
+
+            commandLog.beginRecovery(ROOM_ID);
+            assertNull(commandLog.logCommand(ROOM_ID, GameCommandType.NORMAL_SUBMIT, Player.PLAYER_1, 0,
+                            false, GamePhase.IN_PROGRESS, GamePhase.IN_PROGRESS).block(),
+                    "복구 replay 중 emit은 억제돼야 한다 (재기록 = seq 충돌 + 이력 중복)");
+            commandLog.endRecovery(ROOM_ID, 41);
+
+            Long resumedSeq = commandLog.logCommand(ROOM_ID, GameCommandType.NORMAL_SUBMIT, Player.PLAYER_2, 1,
+                    false, GamePhase.IN_PROGRESS, GamePhase.IN_PROGRESS).block();
+            assertEquals(42L, resumedSeq, "복구 후 라이브 커맨드는 마지막 영속 seq 다음을 받아야 한다 (crossRoom=" + crossRoom + ")");
+
+            commandLog.close(ROOM_ID).block(Duration.ofSeconds(5));
+            List<Long> storedSeqs;
+            synchronized (repository.batches) {
+                storedSeqs = repository.batches.stream().flatMap(List::stream).map(GameLogRecord::seq).toList();
+            }
+            assertEquals(List.of(42L), storedSeqs, "억제된 replay 커맨드는 저장소에 도달하면 안 된다");
+        }
+    }
+
+    @Test
     @DisplayName("기본 appendAll은 DECK_INIT 경계로 세그먼트를 끊는다 — 한 배치에 섞인 세대 교체가 in-memory 스토어에 올바르게 반영")
     void defaultAppendAllSegmentsAtGenerationBoundary() {
         long roomA = 960_201L;
@@ -206,12 +233,12 @@ class GameCommandLogWriterTest {
         InMemoryGameLogRepository repository = new InMemoryGameLogRepository();
 
         repository.appendAll(List.of(
-                GameLogRecord.deckInit(roomA, 1, List.of(Card.JAN_1)),
+                GameLogRecord.deckInit(roomA, 1, List.of(Card.JAN_1), null, null, 1),
                 GameLogRecord.command(roomA, 2, GameCommandType.NORMAL_SUBMIT, Player.PLAYER_1, 0,
                         false, GamePhase.IN_PROGRESS, GamePhase.END),
-                GameLogRecord.deckInit(roomB, 1, List.of(Card.FEB_1)),
+                GameLogRecord.deckInit(roomB, 1, List.of(Card.FEB_1), null, null, 1),
                 // 같은 배치 안에서 roomA의 새 게임 시작 — 이전 세대와 같은 세그먼트로 묶이면 안 된다
-                GameLogRecord.deckInit(roomA, 1, List.of(Card.MAR_1)),
+                GameLogRecord.deckInit(roomA, 1, List.of(Card.MAR_1), null, null, 1),
                 GameLogRecord.command(roomA, 2, GameCommandType.NORMAL_SUBMIT, Player.PLAYER_2, 1,
                         false, GamePhase.IN_PROGRESS, GamePhase.IN_PROGRESS)
         )).block(Duration.ofSeconds(5));

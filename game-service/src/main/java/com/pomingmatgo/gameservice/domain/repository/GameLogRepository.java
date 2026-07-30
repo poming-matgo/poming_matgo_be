@@ -43,6 +43,11 @@ public interface GameLogRepository {
     /** cleanup ≠ delete — 게임 종료는 완료 표시만, 물리 삭제는 저장소 정책(파티션 drop)에 맡긴다 */
     Mono<Void> markCompleted(long roomId);
 
+    /** 인수 스캔의 복구 대상 판정 — crash와 clean end의 구분은 lease가 아니라 이 표시다. 세대가 없으면 empty */
+    default Mono<Boolean> latestGenerationCompleted(long roomId) {
+        return Mono.empty();
+    }
+
     /** false면 로그 경로 전체를 무비용 통과 — no-op 기본값에서 부하 기준선이 재현돼야 한다(직교성 검증) */
     default boolean enabled() {
         return true;

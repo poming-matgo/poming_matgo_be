@@ -12,6 +12,7 @@ import com.pomingmatgo.gameservice.domain.repository.PostgresGameGenerations;
 import com.pomingmatgo.gameservice.domain.repository.PostgresGameLogRepository;
 import com.pomingmatgo.gameservice.domain.repository.PostgresGameSnapshotRepository;
 import com.pomingmatgo.gameservice.domain.repository.PostgresRoomLeaseRepository;
+import com.pomingmatgo.gameservice.domain.repository.RoomLeaseRepository;
 import com.pomingmatgo.gameservice.domain.snapshot.GameSnapshot;
 import com.pomingmatgo.gameservice.global.config.RoomLeaseProperties;
 import io.r2dbc.pool.ConnectionPool;
@@ -48,7 +49,7 @@ class PostgresRoomLeaseTest {
             "GAME_LOG_PG_URL", "r2dbc:postgresql://postgres:postgres@localhost:15432/postgres");
     private static final Duration TIMEOUT = Duration.ofSeconds(10);
     private static final RoomLeaseProperties PROPS =
-            new RoomLeaseProperties(Duration.ofSeconds(30), Duration.ofSeconds(5));
+            new RoomLeaseProperties(Duration.ofSeconds(30), Duration.ofSeconds(5), Duration.ofMillis(20));
 
     private static ConnectionPool pool;
     private static DatabaseClient db;
@@ -177,7 +178,7 @@ class PostgresRoomLeaseTest {
 
         zombie.acquire(roomId).block(TIMEOUT);
         repository.appendAll(List.of(
-                GameLogRecord.deckInit(roomId, 1, List.of(Card.JAN_1)),
+                GameLogRecord.deckInit(roomId, 1, List.of(Card.JAN_1), null, null, 1),
                 command(roomId, 2))).block(TIMEOUT);
         assertEquals(2, repository.findAllFromSeq(roomId, 1).collectList().block(TIMEOUT).size());
 
@@ -207,12 +208,12 @@ class PostgresRoomLeaseTest {
         PostgresGameLogRepository repository = new PostgresGameLogRepository(db, generations, zombie);
 
         zombie.acquire(roomId).block(TIMEOUT);
-        repository.appendAll(List.of(GameLogRecord.deckInit(roomId, 1, List.of(Card.JAN_1)))).block(TIMEOUT);
+        repository.appendAll(List.of(GameLogRecord.deckInit(roomId, 1, List.of(Card.JAN_1), null, null, 1))).block(TIMEOUT);
 
         forceExpire(roomId);
         newManager().acquire(roomId).block(TIMEOUT);
 
-        repository.appendAll(List.of(GameLogRecord.deckInit(roomId, 1, List.of(Card.FEB_1)))).block(TIMEOUT);
+        repository.appendAll(List.of(GameLogRecord.deckInit(roomId, 1, List.of(Card.FEB_1), null, null, 1))).block(TIMEOUT);
 
         Long generationCount = db.sql("SELECT count(*) AS cnt FROM game_generation WHERE room_id = :roomId")
                 .bind("roomId", roomId).map(row -> row.get("cnt", Long.class)).one().block(TIMEOUT);
@@ -232,8 +233,8 @@ class PostgresRoomLeaseTest {
         manager.acquire(ownedRoom).block(TIMEOUT);
         manager.acquire(hijackedRoom).block(TIMEOUT);
         repository.appendAll(List.of(
-                GameLogRecord.deckInit(ownedRoom, 1, List.of(Card.JAN_1)),
-                GameLogRecord.deckInit(hijackedRoom, 1, List.of(Card.FEB_1)))).block(TIMEOUT);
+                GameLogRecord.deckInit(ownedRoom, 1, List.of(Card.JAN_1), null, null, 1),
+                GameLogRecord.deckInit(hijackedRoom, 1, List.of(Card.FEB_1), null, null, 1))).block(TIMEOUT);
 
         forceExpire(hijackedRoom);
         newManager().acquire(hijackedRoom).block(TIMEOUT);
@@ -258,7 +259,7 @@ class PostgresRoomLeaseTest {
         PostgresGameSnapshotRepository snapshotRepository = new PostgresGameSnapshotRepository(db, generations, zombie);
 
         zombie.acquire(roomId).block(TIMEOUT);
-        logRepository.appendAll(List.of(GameLogRecord.deckInit(roomId, 1, List.of(Card.JAN_1)))).block(TIMEOUT);
+        logRepository.appendAll(List.of(GameLogRecord.deckInit(roomId, 1, List.of(Card.JAN_1), null, null, 1))).block(TIMEOUT);
         snapshotRepository.save(snapshotAt(roomId, 1)).block(TIMEOUT);
         assertNotNull(snapshotRepository.findLatest(roomId).block(TIMEOUT));
 
@@ -293,7 +294,7 @@ class PostgresRoomLeaseTest {
         PostgresGameLogRepository repository = new PostgresGameLogRepository(db, generations, manager);
 
         manager.acquire(roomId).block(TIMEOUT);
-        repository.appendAll(List.of(GameLogRecord.deckInit(roomId, 1, List.of(Card.JAN_1)))).block(TIMEOUT);
+        repository.appendAll(List.of(GameLogRecord.deckInit(roomId, 1, List.of(Card.JAN_1), null, null, 1))).block(TIMEOUT);
         repository.markCompleted(roomId).block(TIMEOUT);
         manager.release(roomId).block(TIMEOUT);
 
@@ -301,6 +302,89 @@ class PostgresRoomLeaseTest {
                 .bind("roomId", roomId).map(row -> row.get("completed", Boolean.class)).one().block(TIMEOUT));
         assertTrue(remainingSeconds(roomId) <= 0);
         assertTrue(publishedEvents.isEmpty());
+    }
+
+    // ── 2-C/2-D: 턴 deadline 기록 · 만료 스캔 · 인수(takeover) ─────────────────
+
+    @Test
+    @DisplayName("takeover: 만료 lease만 인수된다 — 유효 lease·released·인수 직후 재인수 모두 거부, token은 이어서 증가")
+    void takeoverOnlyClaimsExpiredLeases() {
+        long roomId = newRoomId();
+        leaseRepository.acquire(roomId, "A", PROPS.duration()).block(TIMEOUT);
+        assertNull(leaseRepository.takeover(roomId, "B", PROPS.duration()).block(TIMEOUT));
+
+        forceExpire(roomId);
+        RoomLeaseRepository.Takeover takeover = leaseRepository.takeover(roomId, "B", PROPS.duration()).block(TIMEOUT);
+        assertEquals(2L, takeover.fencingToken());
+        assertNull(takeover.turnDeadlineEpochMillis());
+        // 인수 성공 = 새 유효 lease — 경쟁자의 뒤늦은 인수는 거부된다 (UPDATE의 만료 조건이 상호 배제)
+        assertNull(leaseRepository.takeover(roomId, "C", PROPS.duration()).block(TIMEOUT));
+
+        // 정상 해제된 lease는 인수 대상이 아니다 — 해제는 cleanup 완주의 증거
+        long released = newRoomId();
+        long releasedToken = leaseRepository.acquire(released, "A", PROPS.duration()).block(TIMEOUT);
+        leaseRepository.release(released, releasedToken).block(TIMEOUT);
+        assertNull(leaseRepository.takeover(released, "B", PROPS.duration()).block(TIMEOUT));
+    }
+
+    @Test
+    @DisplayName("findExpiredRoomIds: 만료+미해제 방만 잡힌다 — 유효 lease와 released는 제외")
+    void expiredScanSkipsValidAndReleased() {
+        long expired = newRoomId();
+        long valid = newRoomId();
+        long released = newRoomId();
+        leaseRepository.acquire(expired, "A", PROPS.duration()).block(TIMEOUT);
+        forceExpire(expired);
+        leaseRepository.acquire(valid, "A", PROPS.duration()).block(TIMEOUT);
+        long releasedToken = leaseRepository.acquire(released, "A", PROPS.duration()).block(TIMEOUT);
+        leaseRepository.release(released, releasedToken).block(TIMEOUT);
+
+        List<Long> found = leaseRepository.findExpiredRoomIds().collectList().block(TIMEOUT);
+        assertTrue(found.contains(expired));
+        assertFalse(found.contains(valid));
+        assertFalse(found.contains(released));
+    }
+
+    @Test
+    @DisplayName("recordDeadlines: 소유 token 방만 갱신되고(fencing) 인수가 그 값을 돌려준다 — 2-C의 왕복")
+    void deadlineRoundTripsThroughTakeover() {
+        long owned = newRoomId();
+        long hijacked = newRoomId();
+        long ownedToken = leaseRepository.acquire(owned, "A", PROPS.duration()).block(TIMEOUT);
+        long staleToken = leaseRepository.acquire(hijacked, "A", PROPS.duration()).block(TIMEOUT);
+        forceExpire(hijacked);
+        leaseRepository.acquire(hijacked, "B", PROPS.duration()).block(TIMEOUT);
+
+        long deadline = 1_700_000_000_000L;
+        leaseRepository.recordDeadlines(List.of(
+                new RoomLeaseRepository.RoomDeadline(owned, ownedToken, deadline),
+                new RoomLeaseRepository.RoomDeadline(hijacked, staleToken, 9L))).block(TIMEOUT);
+
+        assertEquals(deadline, recordedDeadline(owned));
+        assertNull(recordedDeadline(hijacked));
+
+        forceExpire(owned);
+        RoomLeaseRepository.Takeover takeover = leaseRepository.takeover(owned, "B", PROPS.duration()).block(TIMEOUT);
+        assertEquals(deadline, takeover.turnDeadlineEpochMillis());
+    }
+
+    @Test
+    @DisplayName("abandon: owner를 남긴 채 즉시 만료 — 스캔에 다시 잡혀 재인수(복구 재시도)가 가능하다")
+    void abandonKeepsRoomRecoverable() {
+        long roomId = newRoomId();
+        long token = leaseRepository.acquire(roomId, "A", PROPS.duration()).block(TIMEOUT);
+        leaseRepository.abandon(roomId, token).block(TIMEOUT);
+
+        assertTrue(leaseRepository.findExpiredRoomIds().collectList().block(TIMEOUT).contains(roomId));
+        assertEquals(token + 1, leaseRepository.takeover(roomId, "B", PROPS.duration()).block(TIMEOUT).fencingToken());
+    }
+
+    private Long recordedDeadline(long roomId) {
+        // r2dbc map은 null 반환을 허용하지 않으므로 Optional로 감싼다
+        return db.sql("SELECT turn_deadline_epoch_millis FROM room_lease WHERE room_id = :roomId")
+                .bind("roomId", roomId)
+                .map(row -> java.util.Optional.ofNullable(row.get("turn_deadline_epoch_millis", Long.class)))
+                .one().block(TIMEOUT).orElse(null);
     }
 
     private GameLogRecord command(long roomId, long seq) {

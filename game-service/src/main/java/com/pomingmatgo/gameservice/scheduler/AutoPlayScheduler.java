@@ -5,6 +5,7 @@ import com.pomingmatgo.gameservice.domain.GameState;
 import com.pomingmatgo.gameservice.domain.Player;
 import com.pomingmatgo.gameservice.domain.TurnTiming;
 import com.pomingmatgo.gameservice.domain.event.RoomCleanedUpEvent;
+import com.pomingmatgo.gameservice.domain.lease.TurnDeadlineRecorder;
 import com.pomingmatgo.gameservice.domain.service.matgo.GameService;
 import com.pomingmatgo.gameservice.domain.service.matgo.TurnFlowService;
 import com.pomingmatgo.gameservice.global.lock.InFlightManager;
@@ -36,6 +37,7 @@ public class AutoPlayScheduler implements TurnScheduler {
     private final InFlightManager inFlightManager;
     private final GameService gameService;
     private final TurnFlowService turnFlowService;
+    private final TurnDeadlineRecorder turnDeadlineRecorder;
 
     // 등록 시 교체 판정(순서 비교)과 발사 시 상태 재검증(matches)이 공유하는 타이머 정체성.
     // 순서는 GamePhase.turnStepOrder — 낡은 앞 단계 등록이 먼저 등록된 뒤 단계 타이머를 파괴하지 못하게 한다
@@ -100,6 +102,11 @@ public class AutoPlayScheduler implements TurnScheduler {
 
         if (toDispose[0] != null && !toDispose[0].isDisposed()) {
             toDispose[0].dispose();
+        }
+
+        // 채택된 등록만 기록 — 버려진 낡은 등록으로 deadline을 되감으면 안 된다
+        if (toDispose[0] != newTask) {
+            turnDeadlineRecorder.record(roomId, deadlineNanos);
         }
     }
 

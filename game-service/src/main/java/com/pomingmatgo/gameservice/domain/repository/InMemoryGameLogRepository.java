@@ -64,6 +64,14 @@ public class InMemoryGameLogRepository implements GameLogRepository {
         });
     }
 
+    @Override
+    public Mono<Boolean> latestGenerationCompleted(long roomId) {
+        return Mono.defer(() -> {
+            RoomLog roomLog = logs.get(roomId);
+            return roomLog == null ? Mono.empty() : Mono.just(roomLog.completed);
+        });
+    }
+
     public boolean isCompleted(long roomId) {
         RoomLog roomLog = logs.get(roomId);
         return roomLog != null && roomLog.completed;
