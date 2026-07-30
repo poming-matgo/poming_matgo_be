@@ -32,3 +32,13 @@ CREATE TABLE IF NOT EXISTS game_snapshot (
     state   JSONB  NOT NULL,
     PRIMARY KEY (game_id, seq)
 );
+
+-- 방 소유권 lease (game.lease.store=postgres) — 만료 판정 시계는 DB now()로 단일화 (노드 간 시계 오차 배제)
+-- 정상 해제도 행을 지우지 않고 만료 처리만 한다 — fencing_token 단조 증가 보존 (좀비의 낡은 토큰이 재사용 방에서 유효해지는 것 방지)
+CREATE TABLE IF NOT EXISTS room_lease (
+    room_id                    BIGINT PRIMARY KEY,
+    owner_instance             TEXT        NOT NULL,
+    fencing_token              BIGINT      NOT NULL,
+    expires_at                 TIMESTAMPTZ NOT NULL,
+    turn_deadline_epoch_millis BIGINT
+);

@@ -33,6 +33,22 @@ public class PostgresGameGenerations {
                 .doOnNext(gameId -> current.put(roomId, gameId));
     }
 
+    /** fencing 가드된 세대 발급 — 좀비의 DECK_INIT이 새 소유자의 세대 조회(max game_id)를 오염시키지 못한다. 거부되면 empty */
+    public Mono<Long> startNew(long roomId, long fencingToken) {
+        return gameLogDatabaseClient
+                .sql("""
+                        INSERT INTO game_generation (room_id)
+                        SELECT :roomId
+                        WHERE EXISTS (SELECT 1 FROM room_lease WHERE room_id = :roomId AND fencing_token = :fencingToken)
+                        RETURNING game_id
+                        """)
+                .bind("roomId", roomId)
+                .bind("fencingToken", fencingToken)
+                .map(row -> row.get("game_id", Long.class))
+                .one()
+                .doOnNext(gameId -> current.put(roomId, gameId));
+    }
+
     /** 방의 현재 세대. 캐시 miss(evict·재시작 후)면 DB 최신 세대 폴백, 세대가 없으면 empty */
     public Mono<Long> currentGeneration(long roomId) {
         Long cached = current.get(roomId);
@@ -51,7 +67,7 @@ public class PostgresGameGenerations {
         current.remove(roomId);
     }
 
-    // 방 정리 시 캐시 회수 — writer 실패로 markCompleted가 건너뛰어져도 새지 않는다 (CLAUDE.md 규칙 6)
+    // 방 정리 시 캐시 회수 — writer 실패로 markCompleted가 건너뛰어져도 새지 않는다
     @EventListener
     public void onRoomCleanedUp(RoomCleanedUpEvent event) {
         evict(event.roomId());

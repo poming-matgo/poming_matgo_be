@@ -8,6 +8,7 @@ import com.pomingmatgo.gameservice.api.request.websocket.JoinRoomReq;
 import com.pomingmatgo.gameservice.domain.GamePhase;
 import com.pomingmatgo.gameservice.domain.GameState;
 import com.pomingmatgo.gameservice.domain.Player;
+import com.pomingmatgo.gameservice.domain.event.LeaseLostEvent;
 import com.pomingmatgo.gameservice.domain.messaging.ResponseEvent;
 import com.pomingmatgo.gameservice.domain.service.matgo.GameService;
 import com.pomingmatgo.gameservice.domain.service.matgo.ReconnectService;
@@ -22,6 +23,7 @@ import com.pomingmatgo.gameservice.global.lock.InFlightManager;
 import com.pomingmatgo.gameservice.global.session.SessionManager;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.context.event.EventListener;
 import org.springframework.stereotype.Component;
 import org.springframework.web.reactive.socket.WebSocketHandler;
 import org.springframework.web.reactive.socket.WebSocketMessage;
@@ -233,6 +235,21 @@ public class GameWebSocketHandler implements WebSocketHandler {
                     log.warn("Disconnect handling failed for session [{}]", session.getId(), e);
                     return Mono.empty();
                 });
+    }
+
+    // fencing 거부로 소유권 상실이 확인된 방 — 이 인스턴스의 사본은 더 이상 진실이 아니므로 즉시 통째로 정리한다.
+    // 세션도 닫아 클라이언트가 재접속(→ 새 소유자 라우팅, 추후 구현 예정)하게 한다
+    @EventListener
+    public void onLeaseLost(LeaseLostEvent event) {
+        long roomId = event.roomId();
+        Mono.defer(() -> {
+                    var sessions = sessionManager.getAllUser(roomId);
+                    return roomCleanupService.cleanupRoomData(roomId)
+                            .then(sessionManager.removeRoom(roomId))
+                            .then(Mono.fromRunnable(() -> sessions.forEach(session -> session.close().subscribe())));
+                })
+                .subscribeOn(Schedulers.boundedElastic())
+                .subscribe(v -> {}, e -> log.error("lease 상실 방 정리 실패 — roomId={}", roomId, e));
     }
 
     private Mono<Void> routeEvent(RequestEvent<?> event, GameState gameState, Player player) {

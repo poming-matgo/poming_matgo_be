@@ -3,6 +3,7 @@ package com.pomingmatgo.gameservice.domain.service.matgo;
 import com.pomingmatgo.gameservice.domain.GameState;
 import com.pomingmatgo.gameservice.domain.InstalledCard;
 import com.pomingmatgo.gameservice.domain.Player;
+import com.pomingmatgo.gameservice.domain.lease.RoomLeaseManager;
 import com.pomingmatgo.gameservice.domain.messaging.GameMessageSender;
 import com.pomingmatgo.gameservice.scheduler.TurnScheduler;
 import lombok.RequiredArgsConstructor;
@@ -22,6 +23,7 @@ public class PreGameFlowService {
     private final GameMessageSender gameMessageSender;
     private final TurnFlowService turnFlowService;
     private final TurnScheduler turnScheduler;
+    private final RoomLeaseManager roomLeaseManager;
 
     public Mono<Void> processLeaderSelection(GameState gameState, Player player, int cardIndex) {
         long roomId = gameState.getRoomId();
@@ -35,7 +37,9 @@ public class PreGameFlowService {
     }
 
     private Mono<Void> proceedToGameStart(GameState gameState) {
-        return finalizeLeaderSelection(gameState)
+        // durable 기록(DECK_INIT)이 시작되기 전에 소유권(lease)부터 확보한다 — 실패는 게임 시작 중단(fail-fast)
+        return roomLeaseManager.acquire(gameState.getRoomId())
+                .then(finalizeLeaderSelection(gameState))
                 .flatMap(this::distributeCardsAndNotify)
                 .flatMap(this::checkChongtongAndProceed)
                 .flatMap(this::startFirstTurn);

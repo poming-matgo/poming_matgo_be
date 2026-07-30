@@ -8,9 +8,12 @@ import com.pomingmatgo.gameservice.domain.PlayerState;
 import com.pomingmatgo.gameservice.domain.card.Card;
 import com.pomingmatgo.gameservice.domain.gamelog.GameCommandType;
 import com.pomingmatgo.gameservice.domain.gamelog.GameLogRecord;
+import com.pomingmatgo.gameservice.domain.lease.RoomLeaseManager;
+import com.pomingmatgo.gameservice.domain.repository.NoOpRoomLeaseRepository;
 import com.pomingmatgo.gameservice.domain.repository.PostgresGameGenerations;
 import com.pomingmatgo.gameservice.domain.repository.PostgresGameLogRepository;
 import com.pomingmatgo.gameservice.domain.repository.PostgresGameSnapshotRepository;
+import com.pomingmatgo.gameservice.global.config.RoomLeaseProperties;
 import com.pomingmatgo.gameservice.domain.score.ScoreBreakdown;
 import com.pomingmatgo.gameservice.domain.snapshot.GameSnapshot;
 import io.r2dbc.pool.ConnectionPool;
@@ -61,8 +64,14 @@ class PostgresGameLogStoreTest {
         db = DatabaseClient.create(pool);
         new ResourceDatabasePopulator(new ClassPathResource("db/game-log-schema.sql")).populate(pool).block(TIMEOUT);
         generations = new PostgresGameGenerations(db);
-        logRepository = new PostgresGameLogRepository(db, generations);
-        snapshotRepository = new PostgresGameSnapshotRepository(db, generations);
+        logRepository = new PostgresGameLogRepository(db, generations, noFencing());
+        snapshotRepository = new PostgresGameSnapshotRepository(db, generations, noFencing());
+    }
+
+    // lease 비활성(noop) — 이 테스트는 fencing 이전의 저장소 계약을 검증한다 (fencing은 PostgresRoomLeaseTest)
+    private static RoomLeaseManager noFencing() {
+        return new RoomLeaseManager(new NoOpRoomLeaseRepository(),
+                new RoomLeaseProperties(Duration.ofSeconds(15), Duration.ofSeconds(5)), event -> {});
     }
 
     @AfterAll
@@ -258,7 +267,7 @@ class PostgresGameLogStoreTest {
 
         // 재시작한 인스턴스 = 캐시가 빈 새 컴포넌트
         PostgresGameGenerations freshGenerations = new PostgresGameGenerations(db);
-        PostgresGameLogRepository freshRepository = new PostgresGameLogRepository(db, freshGenerations);
+        PostgresGameLogRepository freshRepository = new PostgresGameLogRepository(db, freshGenerations, noFencing());
 
         GameLogRecord late = GameLogRecord.command(roomId, 2, GameCommandType.FLOOR_SELECT,
                 Player.PLAYER_1, 0, false, GamePhase.AWAITING_FLOOR_CARD_CHOICE, GamePhase.IN_PROGRESS);
