@@ -14,16 +14,19 @@ import reactor.core.publisher.Mono;
 
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.*;
 
 class ClusterRingTest {
 
     private static final NodeRegistryProperties PROPS =
-            new NodeRegistryProperties(Duration.ofSeconds(15), Duration.ofSeconds(5), 128);
+            new NodeRegistryProperties(Duration.ofSeconds(15), Duration.ofSeconds(5), 128, "");
 
     private final List<String> activeMembers = new ArrayList<>();
+    private final Map<String, String> advertisedAddresses = new HashMap<>();
     private NodeIdentity identity;
     private ClusterRing clusterRing;
 
@@ -31,7 +34,7 @@ class ClusterRingTest {
     private NodeRegistryRepository fakeRepository() {
         return new NodeRegistryRepository() {
             @Override
-            public Mono<Void> register(String instanceId) {
+            public Mono<Void> register(String instanceId, String advertiseAddress) {
                 return Mono.empty();
             }
 
@@ -46,8 +49,9 @@ class ClusterRingTest {
             }
 
             @Override
-            public Flux<String> findActiveNodeIds(Duration ttl) {
-                return Flux.fromIterable(List.copyOf(activeMembers));
+            public Flux<ActiveNode> findActiveNodes(Duration ttl) {
+                return Flux.fromIterable(List.copyOf(activeMembers))
+                        .map(id -> new ActiveNode(id, advertisedAddresses.get(id)));
             }
         };
     }
@@ -90,6 +94,22 @@ class ClusterRingTest {
                 assertEquals(before.get((int) roomId), planned);
             }
         }
+    }
+
+    @Test
+    @DisplayName("addressOf: 같은 멤버십 스냅샷에서 갱신 — 주소 미광고 노드는 empty, 이탈 노드는 주소도 사라진다")
+    void addressFollowsMembershipSnapshot() {
+        activeMembers.addAll(List.of(identity.id(), "node-a", "node-b"));
+        advertisedAddresses.put("node-a", "host-a:8084");
+        clusterRing.refresh().block();
+
+        assertEquals("host-a:8084", clusterRing.addressOf("node-a").orElseThrow());
+        assertTrue(clusterRing.addressOf("node-b").isEmpty());
+        assertTrue(clusterRing.addressOf("ghost").isEmpty());
+
+        activeMembers.remove("node-a");
+        clusterRing.refresh().block();
+        assertTrue(clusterRing.addressOf("node-a").isEmpty());
     }
 
     @Test

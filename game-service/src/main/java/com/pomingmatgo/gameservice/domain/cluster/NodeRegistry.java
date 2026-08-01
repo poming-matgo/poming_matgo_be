@@ -63,13 +63,13 @@ public class NodeRegistry {
     public Mono<Void> beat() {
         return repository.heartbeat(identity.id())
                 .filter(rows -> rows == 0)
-                .flatMap(rows -> repository.register(identity.id()))
+                .flatMap(rows -> repository.register(identity.id(), properties.advertiseAddress()))
                 .then();
     }
 
-    /** 링의 멤버 목록 — 판정 시계는 DB now() */
-    public Flux<String> activeNodes() {
-        return repository.findActiveNodeIds(properties.ttl());
+    /** 링의 멤버 목록(리다이렉트 주소 포함) — 판정 시계는 DB now() */
+    public Flux<NodeRegistryRepository.ActiveNode> activeNodes() {
+        return repository.findActiveNodes(properties.ttl());
     }
 
     public String instanceId() {

@@ -18,6 +18,9 @@ public interface RoomLeaseRepository {
     /** 소유권 상실 판정용 현재 token. lease 행이 없으면 empty */
     Mono<Long> currentToken(long roomId);
 
+    /** 접속 라우팅용 현재 유효 소유자 — 만료·정상 해제(released)면 empty. 권위 조회라 캐시 없이 매번 DB */
+    Mono<String> findActiveOwner(long roomId);
+
     /** 즉시 만료 처리 — 행은 남겨 fencing token 단조 증가를 보존한다. token 불일치면 no-op */
     Mono<Void> release(long roomId, long fencingToken);
 

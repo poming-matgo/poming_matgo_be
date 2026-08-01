@@ -4,8 +4,10 @@ import com.pomingmatgo.gameservice.api.request.CreateRoomRequest;
 import com.pomingmatgo.gameservice.api.request.DeleteRoomRequest;
 import com.pomingmatgo.gameservice.api.request.JoinRoomRequest;
 import com.pomingmatgo.gameservice.api.request.LeaveRoomRequest;
+import com.pomingmatgo.gameservice.domain.cluster.ConnectionRouter;
 import com.pomingmatgo.gameservice.domain.service.matgo.RoomService;
 import com.pomingmatgo.gameservice.global.ApiResponseDto;
+import com.pomingmatgo.gameservice.global.RedirectRes;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Component;
@@ -20,12 +22,22 @@ import java.net.URI;
 public class RoomHandler {
 
     private final RoomService roomService;
+    private final ConnectionRouter connectionRouter;
+
     public Mono<ServerResponse> createRoom(ServerRequest request) {
         return request.bodyToMono(CreateRoomRequest.class)
-                .flatMap(req -> roomService.createRoom(req.getRoomId()))
-                .flatMap(roomId -> ServerResponse
-                        .created(URI.create(String.format("/room/%d", roomId)))
-                        .bodyValue(new ApiResponseDto<>(HttpStatus.CREATED.value(), String.format("%d번 게임방이 생성됐습니다.", roomId))));
+                .flatMap(req -> connectionRouter.route(req.getRoomId())
+                        .flatMap(decision -> {
+                            if (!decision.isLocal()) {
+                                return ServerResponse.status(421)
+                                        .bodyValue(new RedirectRes(decision.redirectAddress()));
+                            }
+                            return roomService.createRoom(req.getRoomId())
+                                    .flatMap(roomId -> ServerResponse
+                                            .created(URI.create(String.format("/room/%d", roomId)))
+                                            .bodyValue(new ApiResponseDto<>(HttpStatus.CREATED.value(),
+                                                    String.format("%d번 게임방이 생성됐습니다.", roomId))));
+                        }));
     }
 
     public Mono<ServerResponse> joinRoom(ServerRequest request) {

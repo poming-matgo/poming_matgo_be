@@ -64,6 +64,18 @@ public class PostgresRoomLeaseRepository implements RoomLeaseRepository {
     }
 
     @Override
+    public Mono<String> findActiveOwner(long roomId) {
+        return gameLogDatabaseClient.sql("""
+                        SELECT owner_instance FROM room_lease
+                        WHERE room_id = :roomId AND expires_at > now() AND owner_instance <> :releasedOwner
+                        """)
+                .bind("roomId", roomId)
+                .bind("releasedOwner", RELEASED_OWNER)
+                .map(row -> row.get("owner_instance", String.class))
+                .one();
+    }
+
+    @Override
     public Mono<Void> release(long roomId, long fencingToken) {
         return gameLogDatabaseClient.sql("""
                         UPDATE room_lease

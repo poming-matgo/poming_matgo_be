@@ -107,6 +107,27 @@ class PostgresRoomLeaseTest {
     // ── 2-A: lease 획득/연장/해제 의미론 ─────────────────────────────────────────
 
     @Test
+    @DisplayName("findActiveOwner: 유효 lease만 소유자를 답한다 — 만료·정상 해제(released)·행 없음은 전부 empty (3-C 접속 라우팅의 권위 조회)")
+    void findActiveOwnerOnlyForValidLease() {
+        long roomId = newRoomId();
+        assertNull(leaseRepository.findActiveOwner(roomId).block(TIMEOUT));
+
+        long token = leaseRepository.acquire(roomId, "A", PROPS.duration()).block(TIMEOUT);
+        assertEquals("A", leaseRepository.findActiveOwner(roomId).block(TIMEOUT));
+
+        forceExpire(roomId);
+        assertNull(leaseRepository.findActiveOwner(roomId).block(TIMEOUT));
+
+        forceExpire(roomId);
+        long takenToken = leaseRepository.takeover(roomId, "B", PROPS.duration()).block(TIMEOUT).fencingToken();
+        assertEquals("B", leaseRepository.findActiveOwner(roomId).block(TIMEOUT));
+
+        leaseRepository.release(roomId, takenToken).block(TIMEOUT);
+        assertNull(leaseRepository.findActiveOwner(roomId).block(TIMEOUT));
+        assertTrue(token < takenToken);
+    }
+
+    @Test
     @DisplayName("acquire: 최초 1, 같은 소유자 재획득(같은 방 새 게임)·만료 후 인수 모두 token이 단조 증가한다")
     void acquireTokenIsMonotonic() {
         long roomId = newRoomId();

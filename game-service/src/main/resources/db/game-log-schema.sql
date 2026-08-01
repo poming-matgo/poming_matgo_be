@@ -45,10 +45,14 @@ CREATE TABLE IF NOT EXISTS game_snapshot (
 -- 노드 레지스트리 (game.cluster.store=postgres) — membership 판정 시계도 DB now() (lease와 같은 시계). 별도 gossip/합의 없음
 -- 행은 지우지 않는다: leave는 state 전이(최종 상태)만 — instance_id가 프로세스 고유(UUID)라 재기동은 항상 새 행
 CREATE TABLE IF NOT EXISTS node_registry (
-    instance_id    TEXT        PRIMARY KEY,
-    state          TEXT        NOT NULL,
-    last_heartbeat TIMESTAMPTZ NOT NULL
+    instance_id       TEXT        PRIMARY KEY,
+    state             TEXT        NOT NULL,
+    last_heartbeat    TIMESTAMPTZ NOT NULL,
+    -- 클라 리다이렉트용 광고 주소(host:port) — 서버는 해석하지 않는 불투명 문자열, 없으면 이 노드로는 리다이렉트 불가
+    advertise_address TEXT
 );
+
+ALTER TABLE node_registry ADD COLUMN IF NOT EXISTS advertise_address TEXT;
 
 -- 방 소유권 lease (game.lease.store=postgres) — 만료 판정 시계는 DB now()로 단일화 (노드 간 시계 오차 배제)
 -- 정상 해제도 행을 지우지 않고 만료 처리만 한다 — fencing_token 단조 증가 보존 (좀비의 낡은 토큰이 재사용 방에서 유효해지는 것 방지)

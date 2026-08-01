@@ -28,6 +28,11 @@ public class NoOpRoomLeaseRepository implements RoomLeaseRepository {
     }
 
     @Override
+    public Mono<String> findActiveOwner(long roomId) {
+        return Mono.empty();
+    }
+
+    @Override
     public Mono<Void> release(long roomId, long fencingToken) {
         return Mono.empty();
     }

@@ -2,6 +2,7 @@ package com.pomingmatgo.gameservice.cluster;
 
 import com.pomingmatgo.gameservice.domain.cluster.NodeIdentity;
 import com.pomingmatgo.gameservice.domain.cluster.NodeRegistry;
+import com.pomingmatgo.gameservice.domain.repository.NodeRegistryRepository;
 import com.pomingmatgo.gameservice.domain.repository.PostgresNodeRegistryRepository;
 import com.pomingmatgo.gameservice.global.config.NodeRegistryProperties;
 import io.r2dbc.pool.ConnectionPool;
@@ -36,7 +37,7 @@ class PostgresNodeRegistryTest {
             "GAME_LOG_PG_URL", "r2dbc:postgresql://postgres:postgres@localhost:15432/postgres");
     private static final Duration TIMEOUT = Duration.ofSeconds(10);
     private static final NodeRegistryProperties PROPS =
-            new NodeRegistryProperties(Duration.ofSeconds(30), Duration.ofSeconds(5), 128);
+            new NodeRegistryProperties(Duration.ofSeconds(30), Duration.ofSeconds(5), 128, "");
 
     private static ConnectionPool pool;
     private static DatabaseClient db;
@@ -74,7 +75,16 @@ class PostgresNodeRegistryTest {
     }
 
     private List<String> activeNodes(Duration ttl) {
-        return repository.findActiveNodeIds(ttl).collectList().block(TIMEOUT);
+        return repository.findActiveNodes(ttl)
+                .map(NodeRegistryRepository.ActiveNode::instanceId)
+                .collectList().block(TIMEOUT);
+    }
+
+    private String addressOf(String nodeId, Duration ttl) {
+        return repository.findActiveNodes(ttl)
+                .filter(node -> node.instanceId().equals(nodeId))
+                .blockFirst(TIMEOUT)
+                .address();
     }
 
     // heartbeat 정체를 기다리지 않고 강제 — 죽은 노드 상황 재현
@@ -96,8 +106,8 @@ class PostgresNodeRegistryTest {
     @DisplayName("register: 멤버십에 편입되고, active 상태의 재등록은 멱등하다(행 1개 유지)")
     void registerJoinsMembership() {
         String node = newNodeId();
-        repository.register(node).block(TIMEOUT);
-        repository.register(node).block(TIMEOUT);
+        repository.register(node, null).block(TIMEOUT);
+        repository.register(node, null).block(TIMEOUT);
 
         assertTrue(activeNodes(PROPS.ttl()).contains(node));
         Long rows = db.sql("SELECT count(*) AS cnt FROM node_registry WHERE instance_id = :id")
@@ -109,7 +119,7 @@ class PostgresNodeRegistryTest {
     @DisplayName("멤버십 판정은 DB 시계 기준 ttl — heartbeat가 정체된 노드는 leave 없이도 빠지고, heartbeat로 복귀한다")
     void staleNodeDropsOutAndHeartbeatRevives() {
         String node = newNodeId();
-        repository.register(node).block(TIMEOUT);
+        repository.register(node, null).block(TIMEOUT);
         forceStale(node, Duration.ofSeconds(10));
 
         // 같은 행이 ttl에 따라 갈린다 — 판정이 등록 여부가 아니라 시계라는 증거
@@ -124,13 +134,13 @@ class PostgresNodeRegistryTest {
     @DisplayName("leave: heartbeat가 신선해도 멤버십에서 빠지고, 이후 heartbeat(0행)·register 모두 되살리지 못한다(최종 상태)")
     void leaveIsFinal() {
         String node = newNodeId();
-        repository.register(node).block(TIMEOUT);
+        repository.register(node, null).block(TIMEOUT);
         repository.leave(node).block(TIMEOUT);
 
         assertFalse(activeNodes(PROPS.ttl()).contains(node));
         // 종료 경합 가드 — leave 직후 늦게 도착한 heartbeat/register(자기 치유)가 유령 멤버를 만들지 못한다
         assertEquals(0L, repository.heartbeat(node).block(TIMEOUT));
-        repository.register(node).block(TIMEOUT);
+        repository.register(node, null).block(TIMEOUT);
         assertEquals("left", stateOf(node));
         assertFalse(activeNodes(PROPS.ttl()).contains(node));
     }
@@ -141,12 +151,35 @@ class PostgresNodeRegistryTest {
         NodeRegistry registry = new NodeRegistry(repository, PROPS, new NodeIdentity());
 
         registry.beat().block(TIMEOUT);
-        assertTrue(registry.activeNodes().collectList().block(TIMEOUT).contains(registry.instanceId()));
+        assertTrue(registryNodeIds(registry).contains(registry.instanceId()));
 
         forceStale(registry.instanceId(), Duration.ofMinutes(10));
-        assertFalse(registry.activeNodes().collectList().block(TIMEOUT).contains(registry.instanceId()));
+        assertFalse(registryNodeIds(registry).contains(registry.instanceId()));
         registry.beat().block(TIMEOUT);
-        assertTrue(registry.activeNodes().collectList().block(TIMEOUT).contains(registry.instanceId()));
+        assertTrue(registryNodeIds(registry).contains(registry.instanceId()));
         assertEquals("active", stateOf(registry.instanceId()));
+    }
+
+    private List<String> registryNodeIds(NodeRegistry registry) {
+        return registry.activeNodes()
+                .map(NodeRegistryRepository.ActiveNode::instanceId)
+                .collectList().block(TIMEOUT);
+    }
+
+    @Test
+    @DisplayName("advertise_address: 등록 시 광고한 주소가 멤버 목록에 실려 오고, 재등록(자기 치유)이 갱신하며, 미광고면 null")
+    void advertiseAddressRoundTrip() {
+        String node = newNodeId();
+        repository.register(node, "host-a:8084").block(TIMEOUT);
+        assertEquals("host-a:8084", addressOf(node, PROPS.ttl()));
+
+        // 같은 프로세스의 재등록 = 자기 치유 — 주소 변경(설정 변경 후 재기동은 새 행이지만, upsert 계약 자체를 검증)
+        repository.register(node, "host-a:9000").block(TIMEOUT);
+        assertEquals("host-a:9000", addressOf(node, PROPS.ttl()));
+
+        String silent = newNodeId();
+        repository.register(silent, null).block(TIMEOUT);
+        assertTrue(activeNodes(PROPS.ttl()).contains(silent));
+        assertNull(addressOf(silent, PROPS.ttl()));
     }
 }

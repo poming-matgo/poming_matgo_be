@@ -12,7 +12,7 @@ import java.time.Duration;
 public class NoOpNodeRegistryRepository implements NodeRegistryRepository {
 
     @Override
-    public Mono<Void> register(String instanceId) {
+    public Mono<Void> register(String instanceId, String advertiseAddress) {
         return Mono.empty();
     }
 
@@ -27,7 +27,7 @@ public class NoOpNodeRegistryRepository implements NodeRegistryRepository {
     }
 
     @Override
-    public Flux<String> findActiveNodeIds(Duration ttl) {
+    public Flux<ActiveNode> findActiveNodes(Duration ttl) {
         return Flux.empty();
     }
 

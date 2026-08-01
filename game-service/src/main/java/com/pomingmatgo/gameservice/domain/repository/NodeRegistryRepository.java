@@ -10,7 +10,7 @@ import java.time.Duration;
 public interface NodeRegistryRepository {
 
     /** 멤버십 편입 upsert. left 행은 되살리지 않는다 — instance_id는 프로세스 고유라 재기동은 새 행, 되살리기는 종료 경합의 유령만 만든다 */
-    Mono<Void> register(String instanceId);
+    Mono<Void> register(String instanceId, String advertiseAddress);
 
     /** 자기 행의 last_heartbeat 갱신. left면 0행 — 갱신 시각은 DB now() (lease와 같은 시계) */
     Mono<Long> heartbeat(String instanceId);
@@ -18,8 +18,11 @@ public interface NodeRegistryRepository {
     /** 정상 종료 — 행은 남기고 상태 전이만(최종 상태). 죽은 노드는 leave 없이 heartbeat 정체로 멤버십에서 빠진다 */
     Mono<Void> leave(String instanceId);
 
-    /** 살아있는 멤버 = active + last_heartbeat가 ttl 이내 — 판정 시계는 DB now() */
-    Flux<String> findActiveNodeIds(Duration ttl);
+    /** 살아있는 멤버(주소 포함) = active + last_heartbeat가 ttl 이내 — 판정 시계는 DB now() */
+    Flux<ActiveNode> findActiveNodes(Duration ttl);
+
+    /** address = 클라 리다이렉트용 광고 주소 — 미설정 노드는 null (그 노드로는 리다이렉트 불가) */
+    record ActiveNode(String instanceId, String address) {}
 
     /** false면 멤버십 경로 전체를 무비용 통과 — no-op 기본값에서 기존 수치가 재현돼야 한다(직교성) */
     default boolean enabled() {

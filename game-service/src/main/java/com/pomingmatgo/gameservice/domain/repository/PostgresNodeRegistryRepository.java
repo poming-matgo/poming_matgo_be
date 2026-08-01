@@ -23,20 +23,24 @@ public class PostgresNodeRegistryRepository implements NodeRegistryRepository {
     private final DatabaseClient gameLogDatabaseClient;
 
     @Override
-    public Mono<Void> register(String instanceId) {
+    public Mono<Void> register(String instanceId, String advertiseAddress) {
         // left 미부활 가드 — leave와 마지막 heartbeat tick의 종료 경합이 유령 멤버를 만들지 못하게 (행 주인은 자기 프로세스뿐)
-        return gameLogDatabaseClient.sql("""
-                        INSERT INTO node_registry (instance_id, state, last_heartbeat)
-                        VALUES (:instanceId, :active, now())
+        DatabaseClient.GenericExecuteSpec spec = gameLogDatabaseClient.sql("""
+                        INSERT INTO node_registry (instance_id, state, last_heartbeat, advertise_address)
+                        VALUES (:instanceId, :active, now(), :address)
                         ON CONFLICT (instance_id) DO UPDATE SET
                             state = EXCLUDED.state,
-                            last_heartbeat = EXCLUDED.last_heartbeat
+                            last_heartbeat = EXCLUDED.last_heartbeat,
+                            advertise_address = EXCLUDED.advertise_address
                         WHERE node_registry.state <> :left
                         """)
                 .bind("instanceId", instanceId)
                 .bind("active", ACTIVE)
-                .bind("left", LEFT)
-                .then();
+                .bind("left", LEFT);
+        spec = advertiseAddress == null || advertiseAddress.isBlank()
+                ? spec.bindNull("address", String.class)
+                : spec.bind("address", advertiseAddress);
+        return spec.then();
     }
 
     @Override
@@ -63,15 +67,17 @@ public class PostgresNodeRegistryRepository implements NodeRegistryRepository {
     }
 
     @Override
-    public Flux<String> findActiveNodeIds(Duration ttl) {
+    public Flux<ActiveNode> findActiveNodes(Duration ttl) {
         return gameLogDatabaseClient.sql("""
-                        SELECT instance_id FROM node_registry
+                        SELECT instance_id, advertise_address FROM node_registry
                         WHERE state = :active
                           AND last_heartbeat > now() - make_interval(secs => :ttlSeconds)
                         """)
                 .bind("active", ACTIVE)
                 .bind("ttlSeconds", ttl.toMillis() / 1000.0)
-                .map(row -> row.get("instance_id", String.class))
+                .map(row -> new ActiveNode(
+                        row.get("instance_id", String.class),
+                        row.get("advertise_address", String.class)))
                 .all();
     }
 }
