@@ -27,7 +27,7 @@ import static org.junit.jupiter.api.Assertions.*;
 import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 /**
- * 노드 레지스트리 membership 통합 테스트 (3-A) — 실물 Postgres 대상, 미기동이면 전체 skip.
+ * 노드 레지스트리 membership 통합 테스트 — 실물 Postgres 대상, 미기동이면 전체 skip.
  * 기동 예: docker run -d --name gostop-pg-test -e POSTGRES_PASSWORD=postgres -p 15432:5432 postgres:16-alpine
  */
 class PostgresNodeRegistryTest {
@@ -36,7 +36,7 @@ class PostgresNodeRegistryTest {
             "GAME_LOG_PG_URL", "r2dbc:postgresql://postgres:postgres@localhost:15432/postgres");
     private static final Duration TIMEOUT = Duration.ofSeconds(10);
     private static final NodeRegistryProperties PROPS =
-            new NodeRegistryProperties(Duration.ofSeconds(30), Duration.ofSeconds(5));
+            new NodeRegistryProperties(Duration.ofSeconds(30), Duration.ofSeconds(5), 128);
 
     private static ConnectionPool pool;
     private static DatabaseClient db;

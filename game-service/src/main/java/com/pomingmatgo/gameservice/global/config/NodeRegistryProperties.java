@@ -9,6 +9,8 @@ import java.time.Duration;
 @ConfigurationProperties(prefix = "game.cluster")
 public record NodeRegistryProperties(
         @DefaultValue("15s") Duration ttl,
-        @DefaultValue("5s") Duration heartbeatInterval
+        @DefaultValue("5s") Duration heartbeatInterval,
+        // 128 = 분포 편차 측정 결과(HashRingTest)로 선택 — 편차 개선이 체감 둔화되는 지점.
+        @DefaultValue("128") int virtualNodes
 ) {
 }

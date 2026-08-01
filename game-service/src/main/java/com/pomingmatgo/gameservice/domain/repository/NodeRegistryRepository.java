@@ -6,7 +6,7 @@ import reactor.core.publisher.Mono;
 import java.time.Duration;
 
 // membership 직교 축 — 프로파일이 아니라 game.cluster.store 속성으로 선택한다.
-// 레지스트리는 배치 힌트(3-B 링의 멤버 목록)일 뿐 — 배타성의 권위는 여전히 lease + fencing token이다
+// 레지스트리는 배치 힌트일 뿐 — 배타성의 권위는 여전히 lease + fencing token이다
 public interface NodeRegistryRepository {
 
     /** 멤버십 편입 upsert. left 행은 되살리지 않는다 — instance_id는 프로세스 고유라 재기동은 새 행, 되살리기는 종료 경합의 유령만 만든다 */
