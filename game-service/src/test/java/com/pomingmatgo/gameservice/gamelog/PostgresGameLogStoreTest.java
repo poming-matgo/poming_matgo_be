@@ -6,6 +6,7 @@ import com.pomingmatgo.gameservice.domain.GameState;
 import com.pomingmatgo.gameservice.domain.Player;
 import com.pomingmatgo.gameservice.domain.PlayerState;
 import com.pomingmatgo.gameservice.domain.card.Card;
+import com.pomingmatgo.gameservice.domain.cluster.NodeIdentity;
 import com.pomingmatgo.gameservice.domain.gamelog.GameCommandType;
 import com.pomingmatgo.gameservice.domain.gamelog.GameLogRecord;
 import com.pomingmatgo.gameservice.domain.lease.RoomLeaseManager;
@@ -71,7 +72,8 @@ class PostgresGameLogStoreTest {
     // lease 비활성(noop) — 이 테스트는 fencing 이전의 저장소 계약을 검증한다 (fencing은 PostgresRoomLeaseTest)
     private static RoomLeaseManager noFencing() {
         return new RoomLeaseManager(new NoOpRoomLeaseRepository(),
-                new RoomLeaseProperties(Duration.ofSeconds(15), Duration.ofSeconds(5), Duration.ofMillis(20)), event -> {});
+                new RoomLeaseProperties(Duration.ofSeconds(15), Duration.ofSeconds(5), Duration.ofMillis(20)),
+                event -> {}, new NodeIdentity());
     }
 
     @AfterAll

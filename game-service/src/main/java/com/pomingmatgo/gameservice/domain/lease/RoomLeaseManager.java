@@ -1,5 +1,6 @@
 package com.pomingmatgo.gameservice.domain.lease;
 
+import com.pomingmatgo.gameservice.domain.cluster.NodeIdentity;
 import com.pomingmatgo.gameservice.domain.event.LeaseLostEvent;
 import com.pomingmatgo.gameservice.domain.repository.RoomLeaseRepository;
 import com.pomingmatgo.gameservice.global.config.RoomLeaseProperties;
@@ -14,7 +15,6 @@ import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 
 import java.util.Collection;
-import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 
 // 배타성의 권위는 DB lease + fencing token이다 — 이 캐시는 쓰기 가드에 실을 토큰을 기억할 뿐, 소유권을 판정하지 않는다.
@@ -27,7 +27,7 @@ public class RoomLeaseManager {
     private final RoomLeaseRepository leaseRepository;
     private final RoomLeaseProperties properties;
     private final ApplicationEventPublisher eventPublisher;
-    private final String instanceId = UUID.randomUUID().toString();
+    private final NodeIdentity nodeIdentity;
     private final ConcurrentHashMap<Long, Long> tokens = new ConcurrentHashMap<>();
     private Disposable heartbeat;
 
@@ -39,15 +39,15 @@ public class RoomLeaseManager {
         heartbeat = Flux.interval(properties.heartbeatInterval())
                 // DB 지연으로 밀린 tick은 버린다 — interval은 backpressure를 못 받아 밀리면 overflow로 루프째 죽는다
                 .onBackpressureDrop()
-                .concatMap(tick -> leaseRepository.heartbeat(instanceId, properties.duration())
+                .concatMap(tick -> leaseRepository.heartbeat(nodeIdentity.id(), properties.duration())
                         // heartbeat 실패는 곧 lease 만료 → 인수 대상이 될 뿐 — 쓰기 배타성은 fencing이 지키므로 재시도만 한다
                         .onErrorResume(e -> {
-                            log.warn("lease heartbeat 실패 — instanceId={}", instanceId, e);
+                            log.warn("lease heartbeat 실패 — instanceId={}", nodeIdentity.id(), e);
                             return Mono.empty();
                         }))
                 .subscribe();
         log.info("room lease 활성 — instanceId={}, duration={}, heartbeatInterval={}",
-                instanceId, properties.duration(), properties.heartbeatInterval());
+                nodeIdentity.id(), properties.duration(), properties.heartbeatInterval());
     }
 
     @PreDestroy
@@ -67,7 +67,7 @@ public class RoomLeaseManager {
         if (!leaseRepository.enabled()) {
             return Mono.empty();
         }
-        return leaseRepository.acquire(roomId, instanceId, properties.duration())
+        return leaseRepository.acquire(roomId, nodeIdentity.id(), properties.duration())
                 .doOnNext(token -> tokens.put(roomId, token))
                 .switchIfEmpty(Mono.error(() ->
                         new IllegalStateException("방 lease 획득 실패 — 다른 인스턴스가 소유 중, roomId=" + roomId)))
@@ -92,7 +92,7 @@ public class RoomLeaseManager {
         });
     }
 
-    /** 인수 후보 스캔(2-D) — 만료됐지만 정상 해제는 아닌 방 */
+    /** 인수 후보 스캔 — 만료됐지만 정상 해제는 아닌 방 */
     public Flux<Long> findExpiredRooms() {
         return leaseRepository.findExpiredRoomIds();
     }
@@ -102,7 +102,7 @@ public class RoomLeaseManager {
      * owner를 자기 instanceId로 넣으므로 heartbeat가 인수한 방도 함께 연장한다
      */
     public Mono<RoomLeaseRepository.Takeover> takeover(long roomId) {
-        return leaseRepository.takeover(roomId, instanceId, properties.duration())
+        return leaseRepository.takeover(roomId, nodeIdentity.id(), properties.duration())
                 .doOnNext(result -> tokens.put(roomId, result.fencingToken()));
     }
 

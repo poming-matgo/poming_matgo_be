@@ -4,6 +4,7 @@ import com.pomingmatgo.gameservice.domain.GamePhase;
 import com.pomingmatgo.gameservice.domain.GameState;
 import com.pomingmatgo.gameservice.domain.Player;
 import com.pomingmatgo.gameservice.domain.card.Card;
+import com.pomingmatgo.gameservice.domain.cluster.NodeIdentity;
 import com.pomingmatgo.gameservice.domain.event.LeaseLostEvent;
 import com.pomingmatgo.gameservice.domain.gamelog.GameCommandType;
 import com.pomingmatgo.gameservice.domain.gamelog.GameLogRecord;
@@ -94,7 +95,7 @@ class PostgresRoomLeaseTest {
     }
 
     private RoomLeaseManager newManager() {
-        return new RoomLeaseManager(leaseRepository, PROPS, publishedEvents::add);
+        return new RoomLeaseManager(leaseRepository, PROPS, publishedEvents::add, new NodeIdentity());
     }
 
     // 만료를 기다리지 않고 강제 — 인수(takeover) 상황 재현
