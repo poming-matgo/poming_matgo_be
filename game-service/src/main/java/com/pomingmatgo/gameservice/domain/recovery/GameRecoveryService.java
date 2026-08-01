@@ -235,6 +235,8 @@ public class GameRecoveryService {
                 .flatMap(state -> {
                     // 이후 라이브 커맨드가 같은 세대의 seq 사슬을 잇도록 마지막 영속 seq에서 재개
                     gameCommandLog.endRecovery(roomId, durable.lastSeq());
+                    // RTO 계측점 — kill 시각과 이 시각의 차가 방별 RTO
+                    log.info("방 복구 완료 — roomId={}, lastSeq={}, phase={}", roomId, durable.lastSeq(), state.getPhase());
                     if (state.getPhase() == GamePhase.END) {
                         // 마지막 커맨드가 게임을 끝냈는데 cleanup 전에 죽은 경우 — 완료 표시·lease 해제만 마저 한다
                         return roomCleanupService.cleanupRoomData(roomId);
