@@ -203,18 +203,6 @@ k6 run gostop-afk-test.js
 
 > **게임 액션 RTT** = 카드 제출/바닥 선택/고·스톱 선택 전송 → 그 처리 결과를 서버가 처음 push할 때까지의 시간 (k6 custom `Trend`로 측정). 실시간 게임의 체감 품질을 대표하는 지표로, 부하 상태에서도 P99 114ms를 유지.
 
-### durable 커맨드 로그 + 스냅샷을 켠 경우
-
-프로세스가 죽어도 진행 중인 게임을 복원할 수 있도록, 모든 게임 커맨드를 PostgreSQL에 durable 로그로 남기고 라운드 경계마다 스냅샷을 저장하는 축을 구현했습니다 (R2DBC, 기본값은 no-op — 위 표가 no-op 기준). 여러 방의 레코드를 방 해시 shard 단위로 묶는 **cross-room 배치**(multi-row insert)로 DB 왕복을 커맨드 수에서 분리해, `synchronous_commit=on`(fsync-per-commit)에서도 손실을 한 자릿수 %로 억제했습니다.
-
-| 지표 | 값 (동일 시나리오, sync=on + cross-room 배치 + pool 30) |
-| :--- | :--- |
-| 초당 WS 송신 메시지 — sustain 평균 | **86,304 msg/s (no-op 대비 -3.5%)** |
-| 게임 액션 RTT P95 / P99 | 79ms / **132ms** |
-| 서버 에러 / 무응답 타임아웃 | **0건 / 0건** |
-| RPO (부하 중 서버 `kill -9` 실측) | 유실 커맨드 39 / 80,828건, **방당 최대 1건** (스냅샷+tail replay로 복구 시 되감기 ≤1턴) |
-| RPO (DB 전원 손실) | **0건** (`synchronous_commit=on`) |
-
 ### 측정 방법론
 
 - **서버 측 1초 단위 실측:** 초기엔 k6 콘솔 평균(ramp up/down이 희석한 값)에 구간 가중치를 두어 sustain 피크를 *추정*했으나, 추정치는 방어가 어렵다고 판단해 **서버가 송신 메시지를 직접 세도록 계측을 추가**(`LongAdder` 카운트 + 1초 샘플링, hot path 비용은 increment 1회). 표의 sustain 평균/피크는 램프업 완료 후 7분 구간의 실측 시계열 통계
