@@ -16,12 +16,15 @@ import com.pomingmatgo.gameservice.scheduler.AutoPlayScheduler;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.Mockito;
 import org.reactivestreams.Publisher;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.web.reactive.socket.WebSocketMessage;
 import org.springframework.web.reactive.socket.WebSocketSession;
+import reactor.core.Disposable;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 import reactor.core.publisher.Sinks;
@@ -68,7 +71,8 @@ class DisconnectReconnectTest {
     private record TestSession(WebSocketSession session,
                                Sinks.Many<WebSocketMessage> inbound,
                                List<String> outbox,
-                               AtomicBoolean closed) {
+                               AtomicBoolean closed,
+                               Disposable subscription) {
 
         void emit(String json) {
             WebSocketMessage msg = Mockito.mock(WebSocketMessage.class);
@@ -111,9 +115,9 @@ class DisconnectReconnectTest {
             inbound.tryEmitComplete();
         }));
 
-        TestSession ts = new TestSession(s, inbound, outbox, closed);
-        handler.handle(s).subscribe();
-        return ts;
+        Disposable subscription = handler.handle(s)
+                .subscribe(ignored -> {}, error -> closed.set(true));
+        return new TestSession(s, inbound, outbox, closed, subscription);
     }
 
     private String connectJson(long userId) {
@@ -316,6 +320,33 @@ class DisconnectReconnectTest {
         awaitTrue(() -> sessionManager.getPlayerContext(p2.session()).block() == null, 3000,
                 "죽은 방의 잔여 세션 매핑이 정리되지 않음");
         assertTrue(sessionManager.getAllUser(roomId).isEmpty());
+    }
+
+
+    @ParameterizedTest
+    @ValueSource(booleans = {true, false})
+    @DisplayName("오류 종료와 구독 취소에서도 이탈자 정리와 마지막 접속자 방 정리가 수행된다")
+    void errorAndCancellationDisconnect(boolean error) throws Exception {
+        roomId = 920_009L;
+        seedInGameRoom();
+        TestSession p1 = connect("terminated-s1", USER_1, 1);
+        TestSession p2 = connect("remaining-s2", USER_2, 2);
+
+        if (error) {
+            p1.inbound().tryEmitError(new IllegalStateException("connection failed"));
+        } else {
+            p1.subscription().dispose();
+        }
+
+        awaitTrue(() -> sessionManager.getSession(roomId, 1) == null, 3000, "이탈 세션 정리 실패");
+        awaitTrue(() -> p2.received("OPPONENT_DISCONNECTED"), 3000, "이탈 알림 미수신");
+        assertFalse(sessionManager.getPlayerContext(p1.session()).hasElement().block());
+        assertSame(p2.session(), sessionManager.getSession(roomId, 2));
+        assertNotNull(gameStateRepository.findById(roomId).block());
+
+        p2.drop();
+        awaitTrue(() -> gameStateRepository.findById(roomId).block() == null
+                && sessionManager.getAllUser(roomId).isEmpty(), 3000, "마지막 접속자 이탈 후 정리 실패");
     }
 
     private void awaitTrue(BooleanSupplier condition, long timeoutMillis, String message) throws InterruptedException {

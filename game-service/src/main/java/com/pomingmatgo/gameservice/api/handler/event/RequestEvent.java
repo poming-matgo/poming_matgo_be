@@ -12,7 +12,7 @@ public class RequestEvent<T> {
     private EventType eventType;
     private T data;
 
-    // 역직렬화(GameWebSocketHandler.handleMessage) 시 한 번 확정 — 이후 핸들러들은 문자열 재파싱 없이 공유
+    // 역직렬화(RequestEventDecoder.decode) 시 한 번 확정 — 이후 핸들러들은 문자열 재파싱 없이 공유
     @JsonIgnore
     private SubCategory subCategory;
 
