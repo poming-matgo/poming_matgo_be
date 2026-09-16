@@ -27,9 +27,9 @@ public class GamePlayService {
                                     Card submittedCard = tuple.getT1();
                                     Card topCard = tuple.getT2();
                                     return gameService.submitCard(freshState, submittedCard, topCard)
-                                            .flatMap(processResult -> settleTurn(roomId, freshState, processResult)
+                                            .flatMap(processed -> settleTurn(roomId, processed.updatedGameState(), processed.cardResult())
                                                     .map(nextState -> new TurnExecutionResult(
-                                                            submittedCard, topCard, processResult, nextState)));
+                                                            submittedCard, topCard, processed.cardResult(), nextState)));
                                 }))
                 .doOnNext(result -> actionSucceeded(onActionSucceeded));
     }
@@ -38,8 +38,8 @@ public class GamePlayService {
     public Mono<FloorSelectionResult> executeFloorSelection(long roomId, Player player, int cardIdx, Runnable onActionSucceeded) {
         return validatedFreshState(roomId, GamePhase.AWAITING_FLOOR_CARD_CHOICE, player)
                 .flatMap(freshState -> gameService.selectFloorCard(freshState, player, cardIdx)
-                        .flatMap(result -> settleTurn(roomId, freshState, result)
-                                .map(nextState -> new FloorSelectionResult(result, nextState))))
+                        .flatMap(processed -> settleTurn(roomId, processed.updatedGameState(), processed.cardResult())
+                                .map(nextState -> new FloorSelectionResult(processed.cardResult(), nextState))))
                 .doOnNext(result -> actionSucceeded(onActionSucceeded));
     }
 

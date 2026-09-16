@@ -71,7 +71,7 @@ class FloorChoiceCarryoverTest {
         given(acquiredCardRepository.getAllCards(ROOM_ID, 2)).willReturn(Mono.just(List.of()));
         given(gameStateRepository.save(any())).willReturn(Mono.just(ROOM_ID));
 
-        StepVerifier.create(gameService.submitCard(inProgressState(), JAN_1, FEB_1))
+        StepVerifier.create(gameService.submitCard(inProgressState(), JAN_1, FEB_1).map(processed -> processed.cardResult()))
                 .assertNext(result -> assertThat(result.isChoiceRequired()).isTrue())
                 .verifyComplete();
 
@@ -105,7 +105,7 @@ class FloorChoiceCarryoverTest {
         given(acquiredCardRepository.getAllCards(ROOM_ID, 2)).willReturn(Mono.just(List.of()));
         given(gameStateRepository.save(any())).willReturn(Mono.just(ROOM_ID));
 
-        StepVerifier.create(gameService.selectFloorCard(state, PLAYER_1, 0))
+        StepVerifier.create(gameService.selectFloorCard(state, PLAYER_1, 0).map(processed -> processed.cardResult()))
                 .assertNext(result -> {
                     assertThat(result.isChoiceRequired()).isFalse();
                     assertThat(result.getAcquiredCards())
@@ -144,7 +144,7 @@ class FloorChoiceCarryoverTest {
         given(acquiredCardRepository.getAllCards(ROOM_ID, 2)).willReturn(Mono.just(List.of()));
         given(gameStateRepository.save(any())).willReturn(Mono.just(ROOM_ID));
 
-        StepVerifier.create(gameService.selectFloorCard(state, PLAYER_1, 0))
+        StepVerifier.create(gameService.selectFloorCard(state, PLAYER_1, 0).map(processed -> processed.cardResult()))
                 .assertNext(result -> assertThat(result.isChoiceRequired()).isTrue())
                 .verifyComplete();
 

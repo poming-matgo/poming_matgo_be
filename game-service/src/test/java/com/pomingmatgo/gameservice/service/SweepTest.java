@@ -64,7 +64,7 @@ class SweepTest {
         given(installedCardRepository.getAllRevealedCards(ROOM_ID)).willReturn(Mono.just(List.of()));
         given(acquiredCardRepository.getAllCards(ROOM_ID, 2)).willReturn(Mono.just(List.of(MAR_3)));
 
-        StepVerifier.create(gameService.submitCard(inProgressState(), JAN_1, FEB_1))
+        StepVerifier.create(gameService.submitCard(inProgressState(), JAN_1, FEB_1).map(processed -> processed.cardResult()))
                 .assertNext(result -> {
                     assertThat(result.getSpecialEvents()).containsExactly(SpecialEvent.SWEEP);
                     assertThat(result.getAcquiredCards())
@@ -86,7 +86,7 @@ class SweepTest {
         given(installedCardRepository.getAllRevealedCards(ROOM_ID)).willReturn(Mono.just(List.of(FEB_1)));
         given(acquiredCardRepository.getAllCards(ROOM_ID, 2)).willReturn(Mono.just(List.of(MAR_3)));
 
-        StepVerifier.create(gameService.submitCard(inProgressState(), JAN_1, FEB_1))
+        StepVerifier.create(gameService.submitCard(inProgressState(), JAN_1, FEB_1).map(processed -> processed.cardResult()))
                 .assertNext(result -> {
                     assertThat(result.getSpecialEvents()).isEmpty();
                     assertThat(result.getMoveCards()).isEmpty();
@@ -104,7 +104,7 @@ class SweepTest {
         given(installedCardRepository.getAllRevealedCards(ROOM_ID)).willReturn(Mono.just(List.of()));
         given(acquiredCardRepository.getAllCards(ROOM_ID, 2)).willReturn(Mono.just(List.of(MAR_3, MAR_4)));
 
-        StepVerifier.create(gameService.submitCard(inProgressState(), JAN_1, JAN_2))
+        StepVerifier.create(gameService.submitCard(inProgressState(), JAN_1, JAN_2).map(processed -> processed.cardResult()))
                 .assertNext(result -> {
                     assertThat(result.getSpecialEvents())
                             .containsExactly(SpecialEvent.JJOK, SpecialEvent.SWEEP);
@@ -122,7 +122,7 @@ class SweepTest {
         given(installedCardRepository.getAllRevealedCards(ROOM_ID)).willReturn(Mono.just(List.of()));
         given(acquiredCardRepository.getAllCards(ROOM_ID, 2)).willReturn(Mono.just(List.of(MAY_1)));
 
-        StepVerifier.create(gameService.submitCard(inProgressState(), JAN_1, FEB_1))
+        StepVerifier.create(gameService.submitCard(inProgressState(), JAN_1, FEB_1).map(processed -> processed.cardResult()))
                 .assertNext(result -> {
                     assertThat(result.getSpecialEvents()).isEmpty();
                     assertThat(result.getMoveCards()).isEmpty();

@@ -88,7 +88,7 @@ public class GameService {
                 });
     }
 
-    public Mono<ProcessCardResult> submitCard(GameState gameState, Card submittedCard, Card turnedCard) {
+    public Mono<CardProcessingResult> submitCard(GameState gameState, Card submittedCard, Card turnedCard) {
         long roomId = gameState.getRoomId();
         Mono<List<Card>> submittedStack = installedCardRepository.getRevealedCardByMonth(roomId, submittedCard.getMonth());
         Mono<List<Card>> turnedStack = turnedCard.hasSameMonthAs(submittedCard)
@@ -101,7 +101,7 @@ public class GameService {
                 .flatMap(outcome -> applyOutcome(gameState, outcome));
     }
 
-    public Mono<ProcessCardResult> selectFloorCard(GameState gameState, Player player, int cardIndex) {
+    public Mono<CardProcessingResult> selectFloorCard(GameState gameState, Player player, int cardIndex) {
         validateFloorCardSelection(gameState, player, cardIndex);
 
         ChoiceInfo choiceInfo = gameState.getChoiceInfo();
@@ -123,10 +123,11 @@ public class GameService {
         return acquiredCardRepository.getAllCards(gameState.getRoomId(), gameState.getOtherPlayer().getNumber());
     }
 
-    private Mono<ProcessCardResult> applyOutcome(GameState gameState, MatchOutcome outcome) {
+    private Mono<CardProcessingResult> applyOutcome(GameState gameState, MatchOutcome outcome) {
         return applyFloorEffects(gameState.getRoomId(), outcome.effects())
                 .then(saveResultingPhase(gameState, outcome))
-                .then(applySweepIfFloorCleared(gameState, outcome.result()));
+                .flatMap(updatedState -> applySweepIfFloorCleared(updatedState, outcome.result())
+                        .map(result -> new CardProcessingResult(result, updatedState)));
     }
 
     // 판쓸이 판정 대상은 FloorEffect가 모두 반영된 뒤의 바닥이다.
@@ -153,20 +154,20 @@ public class GameService {
     }
 
     // phase가 바뀔 때만 저장한다 — 선택 없이 끝난 정상 제출의 점수 저장은 settleTurn 담당
-    private Mono<Void> saveResultingPhase(GameState gameState, MatchOutcome outcome) {
+    private Mono<GameState> saveResultingPhase(GameState gameState, MatchOutcome outcome) {
         if (outcome.pendingChoice() != null) {
-            return gameStateRepository.save(gameState.toBuilder()
+            return saveState(gameState.toBuilder()
                     .phase(GamePhase.AWAITING_FLOOR_CARD_CHOICE)
                     .choiceInfo(outcome.pendingChoice())
-                    .build()).then();
+                    .build());
         }
         if (gameState.getPhase() == GamePhase.AWAITING_FLOOR_CARD_CHOICE) {
-            return gameStateRepository.save(gameState.toBuilder()
+            return saveState(gameState.toBuilder()
                     .phase(GamePhase.IN_PROGRESS)
                     .choiceInfo(null)
-                    .build()).then();
+                    .build());
         }
-        return Mono.empty();
+        return Mono.just(gameState);
     }
 
     private void validateFloorCardSelection(GameState gameState, Player player, int cardIndex) {

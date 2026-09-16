@@ -401,4 +401,57 @@ class ConcurrentGameActionTest {
         }
         return last;
     }
+
+    @Test
+    @DisplayName("제출과 연속 바닥 선택의 반환 상태가 저장 상태와 일치한다")
+    void floorChoicesReturnPersistedState() {
+        roomId = 930_010L;
+        GameState initial = GameState.builder()
+                .roomId(roomId).leadingPlayer(1).currentTurn(1).round(1)
+                .phase(GamePhase.IN_PROGRESS)
+                .build();
+        gameStateRepository.create(initial).block();
+        installedCardRepository.savePlayerCards(List.of(Card.JAN_3), roomId, Player.PLAYER_1).block();
+        installedCardRepository.saveHiddenCard(List.of(Card.FEB_1), roomId).block();
+        installedCardRepository.saveRevealedCard(
+                List.of(Card.JAN_1, Card.JAN_2, Card.FEB_2, Card.FEB_3), roomId).block();
+
+        var submitted = gamePlayService.executeNormalSubmit(roomId, Player.PLAYER_1, 0, null).block();
+        assertNotNull(submitted);
+        assertTrue(submitted.isChoiceRequired());
+        assertPersistedState(submitted.updatedGameState());
+        assertEquals(GamePhase.AWAITING_FLOOR_CARD_CHOICE, submitted.updatedGameState().getPhase());
+        assertEquals(List.of(Card.JAN_1, Card.JAN_2),
+                submitted.updatedGameState().getChoiceInfo().getSelectableCards());
+        assertEquals(Card.FEB_1, submitted.updatedGameState().getChoiceInfo().getTurnedCard());
+
+        var selected = gamePlayService.executeFloorSelection(roomId, Player.PLAYER_1, 0, null).block();
+        assertNotNull(selected);
+        assertTrue(selected.isChoiceRequired());
+        assertPersistedState(selected.updatedGameState());
+        assertEquals(GamePhase.AWAITING_FLOOR_CARD_CHOICE, selected.updatedGameState().getPhase());
+        assertEquals(1, selected.updatedGameState().getCurrentTurn());
+        ChoiceInfo nextChoice = selected.updatedGameState().getChoiceInfo();
+        assertEquals(Card.FEB_1, nextChoice.getSubmittedCard());
+        assertEquals(List.of(Card.FEB_2, Card.FEB_3), nextChoice.getSelectableCards());
+        org.assertj.core.api.Assertions.assertThat(nextChoice.getPrevCards())
+                .containsExactlyInAnyOrder(Card.JAN_3, Card.JAN_1);
+        assertNull(nextChoice.getTurnedCard());
+
+        var completed = gamePlayService.executeFloorSelection(roomId, Player.PLAYER_1, 0, null).block();
+        assertNotNull(completed);
+        assertFalse(completed.isChoiceRequired());
+        assertPersistedState(completed.updatedGameState());
+        assertEquals(GamePhase.IN_PROGRESS, completed.updatedGameState().getPhase());
+        assertEquals(2, completed.updatedGameState().getCurrentTurn());
+        assertNull(completed.updatedGameState().getChoiceInfo());
+        assertEquals(GamePhase.IN_PROGRESS, initial.getPhase());
+        assertNull(initial.getChoiceInfo());
+    }
+
+    private void assertPersistedState(GameState returned) {
+        GameState stored = gameStateRepository.findById(roomId).block();
+        org.assertj.core.api.Assertions.assertThat(returned)
+                .usingRecursiveComparison().isEqualTo(stored);
+    }
 }
