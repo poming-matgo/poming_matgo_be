@@ -19,8 +19,8 @@ public class GamePlayService {
     private final GameService gameService;
 
     @GameLock
-    public Mono<TurnExecutionResult> executeNormalSubmit(long roomId, Player player, int cardIdx, Runnable onLockAcquired) {
-        return validatedFreshState(roomId, GamePhase.IN_PROGRESS, player, onLockAcquired)
+    public Mono<TurnExecutionResult> executeNormalSubmit(long roomId, Player player, int cardIdx, Runnable onActionSucceeded) {
+        return validatedFreshState(roomId, GamePhase.IN_PROGRESS, player)
                 .flatMap(freshState ->
                         Mono.zip(gameService.takeCardFromHand(roomId, player, cardIdx), gameService.drawTopCard(roomId))
                                 .flatMap(tuple -> {
@@ -30,25 +30,28 @@ public class GamePlayService {
                                             .flatMap(processResult -> settleTurn(roomId, freshState, processResult)
                                                     .map(nextState -> new TurnExecutionResult(
                                                             submittedCard, topCard, processResult, nextState)));
-                                }));
+                                }))
+                .doOnNext(result -> actionSucceeded(onActionSucceeded));
     }
 
     @GameLock
-    public Mono<FloorSelectionResult> executeFloorSelection(long roomId, Player player, int cardIdx, Runnable onLockAcquired) {
-        return validatedFreshState(roomId, GamePhase.AWAITING_FLOOR_CARD_CHOICE, player, onLockAcquired)
+    public Mono<FloorSelectionResult> executeFloorSelection(long roomId, Player player, int cardIdx, Runnable onActionSucceeded) {
+        return validatedFreshState(roomId, GamePhase.AWAITING_FLOOR_CARD_CHOICE, player)
                 .flatMap(freshState -> gameService.selectFloorCard(freshState, player, cardIdx)
                         .flatMap(result -> settleTurn(roomId, freshState, result)
-                                .map(nextState -> new FloorSelectionResult(result, nextState))));
+                                .map(nextState -> new FloorSelectionResult(result, nextState))))
+                .doOnNext(result -> actionSucceeded(onActionSucceeded));
+    }
+
+    private void actionSucceeded(Runnable callback) {
+        // 실패 요청은 기존 마감과 타이머를 보존한다. 성공 시에도 락 해제 전에 취소해야
+        // 다음 액션이 등록한 새 타이머를 이전 액션이 취소하지 않는다.
+        if (callback != null) callback.run();
     }
 
     // 락 통과 후에도 자동플레이 race로 상태가 이미 진행됐을 수 있어 fresh 상태로 재검증한다
-    private Mono<GameState> validatedFreshState(long roomId, GamePhase expectedPhase, Player player, Runnable onLockAcquired) {
-        return Mono.defer(() -> {
-            if (onLockAcquired != null) {
-                onLockAcquired.run();
-            }
-            return gameService.findGameState(roomId);
-        }).flatMap(freshState -> {
+    private Mono<GameState> validatedFreshState(long roomId, GamePhase expectedPhase, Player player) {
+        return Mono.defer(() -> gameService.findGameState(roomId)).flatMap(freshState -> {
             if (freshState.getPhase() != expectedPhase) {
                 return Mono.error(new WebSocketBusinessException(INVALID_GAME_PHASE));
             }
@@ -109,12 +112,13 @@ public class GamePlayService {
     }
 
     @GameLock
-    public Mono<GameState> executeGoStop(long roomId, Player player, boolean go, Runnable onLockAcquired) {
-        return validatedFreshState(roomId, GamePhase.AWAITING_GO_STOP_CHOICE, player, onLockAcquired)
+    public Mono<GameState> executeGoStop(long roomId, Player player, boolean go, Runnable onActionSucceeded) {
+        return validatedFreshState(roomId, GamePhase.AWAITING_GO_STOP_CHOICE, player)
                 .flatMap(freshState -> go
                         ? gameService.applyGo(freshState, player).flatMap(this::proceedToNextTurn)
                         // STOP도 락 안에서 END를 저장 — 저장 없이 반환하면 락 해제~cleanup 사이 낡은 GO가 재검증을 통과한다
-                        : markEnded(freshState));
+                        : markEnded(freshState))
+                .doOnNext(result -> actionSucceeded(onActionSucceeded));
     }
 
     public Mono<GameState> gameOver(GameState gameState) {

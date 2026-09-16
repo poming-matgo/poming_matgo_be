@@ -1,5 +1,13 @@
 package com.pomingmatgo.gameservice.scheduler;
 
+import com.pomingmatgo.gameservice.api.handler.websocket.WsGameHandler;
+import com.pomingmatgo.gameservice.api.handler.event.RequestEvent;
+import com.pomingmatgo.gameservice.api.handler.event.category.SubCategory;
+import com.pomingmatgo.gameservice.api.request.websocket.NormalSubmitReq;
+import com.pomingmatgo.gameservice.global.exception.WebSocketBusinessException;
+import com.pomingmatgo.gameservice.global.exception.WebSocketErrorCode;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import com.pomingmatgo.gameservice.domain.messaging.GameMessageSender;
 import com.pomingmatgo.gameservice.domain.ChoiceInfo;
 import com.pomingmatgo.gameservice.domain.GamePhase;
@@ -48,6 +56,7 @@ class AutoPlayFloorSelectionTest {
         }
     }
 
+    @Autowired WsGameHandler wsGameHandler;
     @Autowired AutoPlayScheduler autoPlayScheduler;
     @Autowired TurnFlowService turnFlowService;
     @Autowired GameStateRepository gameStateRepository;
@@ -176,6 +185,39 @@ class AutoPlayFloorSelectionTest {
         GameState result = awaitState(gs -> gs.getPhase() == GamePhase.IN_PROGRESS && gs.getCurrentTurn() == 2, 6000);
         assertNotNull(result);
         assertEquals(2, result.getCurrentTurn());
+    }
+
+    @ParameterizedTest
+    @CsvSource({"false,-1", "false,99", "true,-1", "true,99"})
+    @DisplayName("잘못된 제출/선택 요청 뒤에도 기존 마감에 자동플레이가 진행된다")
+    void invalidRequestPreservesAutoPlay(boolean floorChoice, int invalidIndex) throws Exception {
+        roomId = 910_006L;
+        if (floorChoice) {
+            seedChoicePendingRoom();
+        } else {
+            gameStateRepository.create(GameState.builder()
+                    .roomId(roomId).leadingPlayer(1).currentTurn(1).round(1)
+                    .phase(GamePhase.IN_PROGRESS).build()).block();
+            installedCardRepository.savePlayerCards(List.of(Card.JAN_3), roomId, Player.PLAYER_1).block();
+            installedCardRepository.saveHiddenCard(List.of(Card.FEB_3), roomId).block();
+        }
+        GameState before = gameStateRepository.findById(roomId).block();
+        autoPlayScheduler.scheduleAutoPlay(roomId, 1, 1, Player.PLAYER_1,
+                System.nanoTime() + TimeUnit.SECONDS.toNanos(1), before.getPhase());
+        var event = new RequestEvent<NormalSubmitReq>();
+        event.setSubCategory(floorChoice
+                ? SubCategory.FLOOR_SELECT
+                : SubCategory.NORMAL_SUBMIT);
+        event.setData(new NormalSubmitReq(invalidIndex));
+
+        var error = assertThrows(WebSocketBusinessException.class,
+                () -> wsGameHandler.handleGameEvent(event, before, Player.PLAYER_1).block());
+        assertEquals(WebSocketErrorCode.INVALID_CARD,
+                error.getWebsocketErrorCode());
+        assertEquals(1, gameStateRepository.findById(roomId).block().getCurrentTurn());
+        GameState after = awaitState(gs -> gs.getCurrentTurn() == 2, 3500);
+        assertNotNull(after);
+        assertEquals(2, after.getCurrentTurn(), "에러 응답 뒤에도 기존 타이머가 턴을 진행해야 한다");
     }
 
     private void seedChoicePendingRoom() {

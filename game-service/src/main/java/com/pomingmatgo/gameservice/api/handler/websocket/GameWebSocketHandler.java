@@ -98,7 +98,7 @@ public class GameWebSocketHandler implements WebSocketHandler {
                             .switchIfEmpty(Mono.error(new WebSocketBusinessException(NOT_EXISTED_ROOM)))
                             .flatMap(gameState -> {
                                 if (isGameAction(event, gameState, player)) {
-                                    // NORMAL 키만 사용 — 자동플레이 abort는 routeEvent의 onLockAcquired 콜백이 맡는다
+                                    // NORMAL 키만 사용 — 대기 타이머 취소는 게임 액션 성공 콜백이 맡는다
                                     String flagKey = InFlightManager.normalKey(roomId, player.getNumber());
                                     // 요청별 소유 토큰 — TTL 만료 후 다른 요청이 재획득해도 내 정리가 남의 플래그를 지우지 않는다
                                     String flagToken = Long.toHexString(ThreadLocalRandom.current().nextLong());

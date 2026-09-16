@@ -28,8 +28,8 @@ public class TurnFlowService {
     private final GameNotificationService gameNotificationService;
     private final PayoutCalculator payoutCalculator;
 
-    public Mono<Void> processNormalSubmit(long roomId, Player player, int cardIdx, Runnable onLockAcquired, TurnScheduler scheduler) {
-        return gamePlayService.executeNormalSubmit(roomId, player, cardIdx, onLockAcquired)
+    public Mono<Void> processNormalSubmit(long roomId, Player player, int cardIdx, Runnable onActionSucceeded, TurnScheduler scheduler) {
+        return gamePlayService.executeNormalSubmit(roomId, player, cardIdx, onActionSucceeded)
                 .flatMap(ctx -> {
                     Mono<Void> sendInfos = Mono.when(
                             gameMessageSender.sendSubmitCardInfo(roomId, player, ctx.submittedCard()),
@@ -44,16 +44,16 @@ public class TurnFlowService {
                 }).then();
     }
 
-    public Mono<Void> processFloorSelection(long roomId, Player player, int cardIdx, Runnable onLockAcquired, TurnScheduler scheduler) {
-        return gamePlayService.executeFloorSelection(roomId, player, cardIdx, onLockAcquired)
+    public Mono<Void> processFloorSelection(long roomId, Player player, int cardIdx, Runnable onActionSucceeded, TurnScheduler scheduler) {
+        return gamePlayService.executeFloorSelection(roomId, player, cardIdx, onActionSucceeded)
                 .flatMap(ctx -> ctx.isChoiceRequired()
                         // 뒤집은 카드가 또 선택을 요구한 경우 — 선택지 재전송 + 타이머 재등록
                         ? requestFloorChoice(roomId, ctx.updatedGameState(), player, ctx.cardResult().getSelectableCards(), scheduler)
                         : finishTurn(roomId, player, ctx.updatedGameState(), ctx.cardResult(), scheduler));
     }
 
-    public Mono<Void> processGoStopChoice(long roomId, Player player, boolean go, Runnable onLockAcquired, TurnScheduler scheduler) {
-        return gamePlayService.executeGoStop(roomId, player, go, onLockAcquired)
+    public Mono<Void> processGoStopChoice(long roomId, Player player, boolean go, Runnable onActionSucceeded, TurnScheduler scheduler) {
+        return gamePlayService.executeGoStop(roomId, player, go, onActionSucceeded)
                 .flatMap(nextState -> {
                     if (nextState.isPlaying()) {
                         return gameMessageSender.sendGoResultMessage(nextState, player)
