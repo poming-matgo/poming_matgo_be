@@ -4,7 +4,7 @@ package com.pomingmatgo.gameservice.domain.messaging;
 public enum ResponseEvent {
     // 방/접속
     CONNECT, READY, UNREADY, START,
-    RECONNECT, RECONNECT_STATE, OPPONENT_DISCONNECTED, REDIRECT,
+    RECONNECT, RECONNECT_STATE, OPPONENT_DISCONNECTED,
     // 선 선택/카드 배분
     LEADER_SELECTION, LEADER_SELECTION_RESULT, DISTRIBUTE_CARD, DISTRIBUTED_FLOOR_CARD,
     // 게임 진행

@@ -8,9 +8,6 @@ import com.pomingmatgo.gameservice.api.request.websocket.JoinRoomReq;
 import com.pomingmatgo.gameservice.domain.GamePhase;
 import com.pomingmatgo.gameservice.domain.GameState;
 import com.pomingmatgo.gameservice.domain.Player;
-import com.pomingmatgo.gameservice.domain.cluster.ConnectionRouter;
-import com.pomingmatgo.gameservice.domain.event.LeaseLostEvent;
-import com.pomingmatgo.gameservice.global.RedirectRes;
 import com.pomingmatgo.gameservice.domain.messaging.ResponseEvent;
 import com.pomingmatgo.gameservice.domain.service.matgo.GameService;
 import com.pomingmatgo.gameservice.domain.service.matgo.ReconnectService;
@@ -25,7 +22,6 @@ import com.pomingmatgo.gameservice.global.lock.InFlightManager;
 import com.pomingmatgo.gameservice.global.session.SessionManager;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.context.event.EventListener;
 import org.springframework.stereotype.Component;
 import org.springframework.web.reactive.socket.WebSocketHandler;
 import org.springframework.web.reactive.socket.WebSocketMessage;
@@ -53,7 +49,6 @@ public class GameWebSocketHandler implements WebSocketHandler {
     private final InFlightManager inFlightManager;
     private final RoomCleanupService roomCleanupService;
     private final ReconnectService reconnectService;
-    private final ConnectionRouter connectionRouter;
 
     @Override
     public Mono<Void> handle(WebSocketSession session) {
@@ -154,7 +149,7 @@ public class GameWebSocketHandler implements WebSocketHandler {
         long roomId = payload.roomId();
 
         return gameService.findGameState(roomId)
-                .switchIfEmpty(Mono.defer(() -> redirectOrFail(roomId, session).then(Mono.<GameState>empty())))
+                .switchIfEmpty(Mono.error(new WebSocketBusinessException(NOT_EXISTED_ROOM)))
                 .flatMap(gameState -> Mono.fromCallable(() -> gameState.getPlayerType(userId))
                         .flatMap(player -> sessionManager.addPlayer(roomId, player, userId, session)
                                 // 행동 대기 phase의 CONNECT는 진행 중인 게임으로의 재접속
@@ -162,20 +157,6 @@ public class GameWebSocketHandler implements WebSocketHandler {
                                         ? handleReconnect(roomId, player, session)
                                         : messageSender.sendMessageToAllUser(
                                                 roomId, WebSocketResDto.of(player, ResponseEvent.CONNECT, "접속했습니다.")))));
-    }
-
-    // 소유 노드(lease owner, 없으면 링 힌트)가 따로 있으면 재접속 지시 후 세션 종료 — 방 이전 프로토콜은 재접속으로 환원된다
-    private Mono<Void> redirectOrFail(long roomId, WebSocketSession session) {
-        return connectionRouter.route(roomId)
-                .flatMap(decision -> {
-                    if (decision.isLocal()) {
-                        return Mono.error(new WebSocketBusinessException(NOT_EXISTED_ROOM));
-                    }
-                    return messageSender.sendMessageToSession(session,
-                                    WebSocketResDto.of(null, ResponseEvent.REDIRECT, "다른 노드가 담당하는 방입니다.",
-                                            new RedirectRes(decision.redirectAddress())))
-                            .then(session.close());
-                });
     }
 
     private Mono<Void> handleReconnect(long roomId, Player player, WebSocketSession session) {
@@ -252,21 +233,6 @@ public class GameWebSocketHandler implements WebSocketHandler {
                     log.warn("Disconnect handling failed for session [{}]", session.getId(), e);
                     return Mono.empty();
                 });
-    }
-
-    // fencing 거부로 소유권 상실이 확인된 방 — 이 인스턴스의 사본은 더 이상 진실이 아니므로 즉시 통째로 정리한다.
-    // 세션도 닫아 클라이언트가 재접속하게 한다 — 재접속 CONNECT가 redirectOrFail을 타고 새 소유자에게 안내된다
-    @EventListener
-    public void onLeaseLost(LeaseLostEvent event) {
-        long roomId = event.roomId();
-        Mono.defer(() -> {
-                    var sessions = sessionManager.getAllUser(roomId);
-                    return roomCleanupService.cleanupRoomData(roomId)
-                            .then(sessionManager.removeRoom(roomId))
-                            .then(Mono.fromRunnable(() -> sessions.forEach(session -> session.close().subscribe())));
-                })
-                .subscribeOn(Schedulers.boundedElastic())
-                .subscribe(v -> {}, e -> log.error("lease 상실 방 정리 실패 — roomId={}", roomId, e));
     }
 
     private Mono<Void> routeEvent(RequestEvent<?> event, GameState gameState, Player player) {
