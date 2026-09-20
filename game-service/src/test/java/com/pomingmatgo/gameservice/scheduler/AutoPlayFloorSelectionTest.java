@@ -56,6 +56,7 @@ class AutoPlayFloorSelectionTest {
         }
     }
 
+    @Autowired GameMessageSender gameMessageSender;
     @Autowired WsGameHandler wsGameHandler;
     @Autowired AutoPlayScheduler autoPlayScheduler;
     @Autowired TurnFlowService turnFlowService;
@@ -218,6 +219,69 @@ class AutoPlayFloorSelectionTest {
         GameState after = awaitState(gs -> gs.getCurrentTurn() == 2, 3500);
         assertNotNull(after);
         assertEquals(2, after.getCurrentTurn(), "에러 응답 뒤에도 기존 타이머가 턴을 진행해야 한다");
+    }
+
+    @Test
+    @DisplayName("이전 턴의 송신 완료가 늦으면 상대의 선택 타이머 등록 뒤에 제출 타이머 등록이 도착한다")
+    void delayedTurnAnnouncementRegistersSubmitTimerAfterOpponentChoice() throws Exception {
+        roomId = 910_007L;
+        gameStateRepository.create(GameState.builder()
+                .roomId(roomId).leadingPlayer(1).currentTurn(1).round(1)
+                .phase(GamePhase.IN_PROGRESS).build()).block();
+        installedCardRepository.savePlayerCards(List.of(Card.JAN_3), roomId, Player.PLAYER_1).block();
+        installedCardRepository.savePlayerCards(List.of(Card.FEB_3), roomId, Player.PLAYER_2).block();
+        installedCardRepository.saveRevealedCard(List.of(Card.FEB_1, Card.FEB_2), roomId).block();
+        installedCardRepository.saveHiddenCard(List.of(Card.MAR_1, Card.APR_1), roomId).block();
+
+        // P2는 턴 안내를 받았지만 P1 쪽 송신 완료는 아직인 상황을 재현한다.
+        var announcementCompleted = reactor.core.publisher.Sinks.<Void>empty();
+        Mockito.doReturn(announcementCompleted.asMono()).when(gameMessageSender)
+                .sendTurnInfo(Mockito.argThat(state -> state.getRoomId() == roomId), Mockito.anyLong());
+        TurnScheduler recordingScheduler = Mockito.mock(TurnScheduler.class);
+        Mockito.doAnswer(invocation -> {
+            GamePhase phase = invocation.getArgument(5);
+            long deadline = phase == GamePhase.AWAITING_FLOOR_CARD_CHOICE
+                    ? System.nanoTime() + TimeUnit.SECONDS.toNanos(1)
+                    : invocation.<Long>getArgument(4);
+            autoPlayScheduler.scheduleAutoPlay(invocation.getArgument(0), invocation.getArgument(1),
+                    invocation.getArgument(2), invocation.getArgument(3), deadline, phase);
+            return null;
+        }).when(recordingScheduler).scheduleAutoPlay(Mockito.anyLong(), Mockito.anyInt(), Mockito.anyInt(),
+                Mockito.any(Player.class), Mockito.anyLong(), Mockito.any(GamePhase.class));
+
+        try {
+            reactor.test.StepVerifier.create(turnFlowService.processNormalSubmit(roomId, Player.PLAYER_1, 0,
+                            () -> autoPlayScheduler.cancelAutoPlay(roomId), recordingScheduler))
+                    .then(() -> {
+                        GameState nextTurn = gameStateRepository.findById(roomId).block();
+                        assertEquals(Player.PLAYER_2, nextTurn.getCurrentPlayer());
+                        assertEquals(GamePhase.IN_PROGRESS, nextTurn.getPhase());
+                        Mockito.verifyNoInteractions(recordingScheduler);
+
+                        // 상태 전이는 순차 실행하고, P1의 송신 후처리가 남은 상태에서 P2가 유효한 제출을 한다.
+                        turnFlowService.processNormalSubmit(roomId, Player.PLAYER_2, 0,
+                                () -> autoPlayScheduler.cancelAutoPlay(roomId), recordingScheduler)
+                                .block(Duration.ofSeconds(2));
+                        assertEquals(GamePhase.AWAITING_FLOOR_CARD_CHOICE,
+                                gameStateRepository.findById(roomId).block().getPhase());
+                        assertEquals(reactor.core.publisher.Sinks.EmitResult.OK, announcementCompleted.tryEmitEmpty());
+                    })
+                    .expectComplete()
+                    .verify(Duration.ofSeconds(5));
+
+            var order = Mockito.inOrder(recordingScheduler);
+            order.verify(recordingScheduler).scheduleAutoPlay(Mockito.eq(roomId), Mockito.eq(1), Mockito.eq(2),
+                    Mockito.eq(Player.PLAYER_2), Mockito.anyLong(), Mockito.eq(GamePhase.AWAITING_FLOOR_CARD_CHOICE));
+            order.verify(recordingScheduler).scheduleAutoPlay(Mockito.eq(roomId), Mockito.eq(1), Mockito.eq(2),
+                    Mockito.eq(Player.PLAYER_2), Mockito.anyLong(), Mockito.eq(GamePhase.IN_PROGRESS));
+
+            Mockito.reset(gameMessageSender);
+            GameState afterTimeout = awaitState(state -> state.getRound() == 2, 4000);
+            assertEquals(2, afterTimeout.getRound(), "지연된 제출 타이머 등록 후에도 선택 타이머가 살아 있어야 한다");
+            assertNull(afterTimeout.getChoiceInfo());
+        } finally {
+            Mockito.reset(gameMessageSender);
+        }
     }
 
     private void seedChoicePendingRoom() {
