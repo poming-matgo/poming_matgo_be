@@ -102,8 +102,7 @@ public class GameConnectionService {
                                         : Mono.empty();
 
                                 return notify
-                                        .then(roomCleanupService.cleanupRoomData(roomId))
-                                        .then(sessionManager.removeRoom(roomId));
+                                        .then(Mono.defer(() -> roomCleanupService.cleanupRoom(roomId)));
                             });
                 })
                 .onErrorResume(e -> {

@@ -7,10 +7,12 @@ import com.pomingmatgo.gameservice.domain.repository.InstalledCardRepository;
 import com.pomingmatgo.gameservice.domain.repository.LeadingPlayerRepository;
 import com.pomingmatgo.gameservice.global.lock.GameLockCleaner;
 import com.pomingmatgo.gameservice.global.lock.RoomLockManager;
+import com.pomingmatgo.gameservice.global.session.SessionManager;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.log4j.Log4j2;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
+import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 
 @Service
@@ -25,6 +27,15 @@ public class RoomCleanupService {
     private final RoomLockManager roomLockManager;
     private final GameLockCleaner gameLockCleaner;
     private final ApplicationEventPublisher eventPublisher;
+    private final SessionManager sessionManager;
+
+    public Mono<Void> cleanupRoom(long roomId) {
+        // 데이터 정리가 오류로 끝나도 세션 정리를 시도하고, 두 단계의 오류를 모두 보존한다.
+        return Flux.concatDelayError(
+                Mono.defer(() -> cleanupRoomData(roomId)),
+                Mono.defer(() -> sessionManager.removeRoom(roomId))
+        ).then().doOnError(error -> log.error("Room ({}) cleanup failed", roomId, error));
+    }
 
     public Mono<Void> cleanupRoomData(long roomId) {
         // 개별 오류가 다른 정리를 취소하지 않게 하고, 동기 예외도 구독 시 오류로 합산한다.

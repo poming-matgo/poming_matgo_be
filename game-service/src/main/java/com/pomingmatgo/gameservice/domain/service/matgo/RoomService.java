@@ -62,8 +62,7 @@ public class RoomService {
     }
 
     public Mono<Void> deleteRoom(long roomId) {
-        return roomCleanupService.cleanupRoomData(roomId)
-                .then(sessionManager.removeRoom(roomId));
+        return roomCleanupService.cleanupRoom(roomId);
     }
 
     private Mono<Void> saveWithUserId(GameState gameState, long userId) {

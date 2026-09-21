@@ -7,6 +7,7 @@ import com.pomingmatgo.gameservice.domain.repository.InstalledCardRepository;
 import com.pomingmatgo.gameservice.domain.repository.LeadingPlayerRepository;
 import com.pomingmatgo.gameservice.global.lock.GameLockCleaner;
 import com.pomingmatgo.gameservice.global.lock.RoomLockManager;
+import com.pomingmatgo.gameservice.global.session.SessionManager;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.context.ApplicationEventPublisher;
@@ -34,7 +35,7 @@ class RoomCleanupFailureTest {
     private final ApplicationEventPublisher events = mock(ApplicationEventPublisher.class);
     private final List<String> completed = new ArrayList<>();
     private final RoomCleanupService cleanup = new RoomCleanupService(
-            state, installed, acquired, leader, roomLock, gameLock, events);
+            state, installed, acquired, leader, roomLock, gameLock, events, new SessionManager());
 
     @BeforeEach
     void setUp() {
