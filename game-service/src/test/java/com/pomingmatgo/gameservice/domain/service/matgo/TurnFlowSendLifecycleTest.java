@@ -7,20 +7,25 @@ import com.pomingmatgo.gameservice.domain.card.Card;
 import com.pomingmatgo.gameservice.domain.repository.GameStateRepository;
 import com.pomingmatgo.gameservice.domain.repository.InstalledCardRepository;
 import com.pomingmatgo.gameservice.global.session.SessionManager;
+import com.pomingmatgo.gameservice.scheduler.AutoPlayScheduler;
 import com.pomingmatgo.gameservice.scheduler.TurnScheduler;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.reactivestreams.Publisher;
 import org.springframework.aop.support.AopUtils;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.core.io.buffer.DefaultDataBufferFactory;
 import org.springframework.test.context.ActiveProfiles;
+import org.springframework.test.util.ReflectionTestUtils;
 import org.springframework.web.reactive.socket.WebSocketMessage;
 import org.springframework.web.reactive.socket.WebSocketSession;
 import reactor.core.publisher.Flux;
+import reactor.core.Disposable;
 import reactor.core.publisher.Mono;
 import reactor.core.publisher.Sinks;
 import reactor.test.StepVerifier;
@@ -28,6 +33,7 @@ import reactor.test.StepVerifier;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -52,6 +58,7 @@ class TurnFlowSendLifecycleTest {
     @Autowired InstalledCardRepository installedCardRepository;
     @Autowired SessionManager sessionManager;
     @Autowired RoomCleanupService roomCleanupService;
+    @Autowired AutoPlayScheduler autoPlayScheduler;
 
     private TurnScheduler scheduler;
     private SessionProbe slow;
@@ -148,9 +155,98 @@ class TurnFlowSendLifecycleTest {
                 any(Player.class), anyLong(), any(GamePhase.class));
     }
 
+    @ParameterizedTest(name = "송신 실패={0}")
+    @ValueSource(booleans = {false, true})
+    @DisplayName("방 정리 후 송신 정상 완료 또는 오류 복구가 실제 타이머를 다시 만들고 발사 후에도 엔트리를 남긴다")
+    void lateSendTerminationRecreatesTimerAfterCleanup(boolean failSend) {
+        StepVerifier.withVirtualTime(() -> submit(ROOM_ID, autoPlayScheduler)
+                        .then(Mono.delay(Duration.ofSeconds(13))))
+                .then(() -> {
+                    assertEquals(1, slow.turnStarted.get());
+                    assertEquals(1, opponent.turnCompleted.get());
+                    assertNextTurnSaved();
+                    assertFalse(scheduledTimers().containsKey(ROOM_ID));
+
+                    cleanupRoom();
+                    assertRoomRemoved();
+                    assertFalse(scheduledTimers().containsKey(ROOM_ID));
+                    assertEquals(0, slow.turnCancelled.get());
+
+                    Sinks.EmitResult result = failSend
+                            ? slow.completion.tryEmitError(new IllegalStateException("controlled send failure"))
+                            : slow.completion.tryEmitEmpty();
+                    assertEquals(Sinks.EmitResult.OK, result);
+                    assertEquals(failSend ? 0 : 1, slow.turnCompleted.get());
+                    assertEquals(failSend ? 1 : 0, slow.turnFailed.get());
+                    assertFalse(scheduledTask().isDisposed(), "삭제된 방에 대기 타이머가 다시 생성된다");
+                    assertRoomRemoved();
+                })
+                // nanoTime deadline은 그대로 두고 Reactor delay만 가상 시간으로 발사한다.
+                .thenAwait(Duration.ofSeconds(13))
+                .expectNext(0L)
+                .then(() -> {
+                    assertRoomRemoved();
+                    assertTrue(scheduledTask().isDisposed(), "타이머는 발사됐지만 맵 엔트리는 남는다");
+                })
+                .expectComplete()
+                .verify(TIMEOUT);
+
+        cleanupRoom();
+        assertFalse(scheduledTimers().containsKey(ROOM_ID), "재정리 이벤트는 잔존 엔트리를 제거한다");
+    }
+
+    @Test
+    @DisplayName("송신 완료 후 방을 정리하면 실제 대기 타이머가 취소되고 엔트리도 제거된다")
+    void cleanupAfterSendCompletionRemovesRealTimer() {
+        Disposable[] pendingTask = new Disposable[1];
+        StepVerifier.withVirtualTime(() -> submit(ROOM_ID, autoPlayScheduler))
+                .then(() -> {
+                    assertEquals(1, slow.turnStarted.get());
+                    assertNextTurnSaved();
+                    assertEquals(Sinks.EmitResult.OK, slow.completion.tryEmitEmpty());
+                    pendingTask[0] = scheduledTask();
+                    assertFalse(pendingTask[0].isDisposed());
+                    cleanupRoom();
+                    assertTrue(pendingTask[0].isDisposed());
+                    assertFalse(scheduledTimers().containsKey(ROOM_ID));
+                    assertRoomRemoved();
+                })
+                .expectComplete()
+                .verify(TIMEOUT);
+    }
+
+    private void cleanupRoom() {
+        roomCleanupService.cleanupRoomData(ROOM_ID).block(TIMEOUT);
+        sessionManager.removeRoom(ROOM_ID).block(TIMEOUT);
+    }
+
+    private void assertRoomRemoved() {
+        assertNull(gameStateRepository.findById(ROOM_ID).block(TIMEOUT));
+        assertTrue(sessionManager.getAllUser(ROOM_ID).isEmpty());
+        assertNull(sessionManager.getPlayerContext(slow.session).block(TIMEOUT));
+        assertNull(sessionManager.getPlayerContext(opponent.session).block(TIMEOUT));
+        assertTrue(installedCardRepository.getPlayerCards(ROOM_ID, Player.PLAYER_1).block(TIMEOUT).isEmpty());
+        assertTrue(installedCardRepository.getPlayerCards(ROOM_ID, Player.PLAYER_2).block(TIMEOUT).isEmpty());
+    }
+
+    // 완료된 Disposable과 맵 엔트리의 잔존을 구분하기 위한 테스트 전용 관측이다.
+    private Map<?, ?> scheduledTimers() {
+        return (Map<?, ?>) ReflectionTestUtils.getField(autoPlayScheduler, "scheduled");
+    }
+
+    private Disposable scheduledTask() {
+        Object scheduled = scheduledTimers().get(ROOM_ID);
+        assertNotNull(scheduled, "해당 방의 타이머 엔트리가 있어야 한다");
+        return (Disposable) ReflectionTestUtils.getField(scheduled, "task");
+    }
+
     private Mono<Void> submit(long roomId) {
+        return submit(roomId, scheduler);
+    }
+
+    private Mono<Void> submit(long roomId, TurnScheduler targetScheduler) {
         return turnFlowService.processNormalSubmit(roomId, Player.PLAYER_1, 0,
-                () -> scheduler.cancelAutoPlay(roomId), scheduler);
+                () -> targetScheduler.cancelAutoPlay(roomId), targetScheduler);
     }
 
     private void assertWaitingForSend() {
@@ -194,6 +290,7 @@ class TurnFlowSendLifecycleTest {
         final AtomicInteger turnStarted = new AtomicInteger();
         final AtomicInteger turnCompleted = new AtomicInteger();
         final AtomicInteger turnCancelled = new AtomicInteger();
+        final AtomicInteger turnFailed = new AtomicInteger();
 
         SessionProbe(String id, boolean delayTurn) {
             when(session.getId()).thenReturn(id);
@@ -212,6 +309,7 @@ class TurnFlowSendLifecycleTest {
                         turnStarted.incrementAndGet();
                         return (delayTurn ? completion.asMono() : Mono.<Void>empty())
                                 .doOnSuccess(ignored -> turnCompleted.incrementAndGet())
+                                .doOnError(ignored -> turnFailed.incrementAndGet())
                                 .doOnCancel(turnCancelled::incrementAndGet);
                     });
                 }).then();
