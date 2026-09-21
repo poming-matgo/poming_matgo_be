@@ -31,15 +31,17 @@ public class InMemoryGameLockAspect implements GameLockCleaner {
             return Mono.error(new IllegalStateException("@GameLock은 Mono를 반환하는 메서드에만 사용할 수 있습니다."));
         }
 
-        Semaphore semaphore = locksByRoom.computeIfAbsent(GameLockKey.roomId(joinPoint), k -> new Semaphore(1));
-
-        // 한 턴엔 한 행위자뿐이라 정상 흐름엔 경쟁이 없다 — 경쟁은 자동플레이 race이므로 즉시 실패
-        if (!semaphore.tryAcquire()) {
-            return Mono.error(new WebSocketBusinessException(TRY_AGAIN));
-        }
+        long roomId = GameLockKey.roomId(joinPoint);
 
         return Mono.usingWhen(
-                Mono.just(semaphore),
+                Mono.fromSupplier(() -> {
+                    Semaphore semaphore = locksByRoom.computeIfAbsent(roomId, k -> new Semaphore(1));
+                    // 매 구독마다 획득하며, 경합 시 대기 없이 실패한다.
+                    if (!semaphore.tryAcquire()) {
+                        throw new WebSocketBusinessException(TRY_AGAIN);
+                    }
+                    return semaphore;
+                }),
                 s -> {
                     try {
                         return (Mono<Object>) joinPoint.proceed();
