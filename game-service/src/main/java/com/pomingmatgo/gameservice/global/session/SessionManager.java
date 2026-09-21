@@ -1,6 +1,7 @@
 package com.pomingmatgo.gameservice.global.session;
 
 import com.pomingmatgo.gameservice.domain.Player;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 import org.springframework.web.reactive.socket.WebSocketSession;
 import reactor.core.publisher.Mono;
@@ -10,6 +11,7 @@ import java.util.List;
 import java.util.concurrent.ConcurrentHashMap;
 
 @Component
+@Slf4j
 public class SessionManager {
     private final ConcurrentHashMap<Long, RoomSessionData> roomSessions = new ConcurrentHashMap<>();
     private final ConcurrentHashMap<String, Long> sessionToRoomMap = new ConcurrentHashMap<>();
@@ -27,7 +29,9 @@ public class SessionManager {
             // getPlayerContext에서 비어 no-op이 되고 새 세션을 지우지 못한다
             if (old != null && !old.getId().equals(session.getId())) {
                 sessionToRoomMap.remove(old.getId());
-                old.close().subscribe();
+                // 이전 연결의 종료 실패는 새 연결 등록과 분리하고, 독립 구독의 오류를 관찰한다.
+                Mono.defer(old::close).subscribe(ignored -> {}, error ->
+                        log.warn("Replaced session [{}] close failed in room [{}]", old.getId(), roomId, error));
             }
         });
     }
