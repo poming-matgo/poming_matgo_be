@@ -14,6 +14,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.web.reactive.socket.WebSocketSession;
+import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 
 import static com.pomingmatgo.gameservice.global.exception.WebSocketErrorCode.*;
@@ -96,13 +97,14 @@ public class GameConnectionService {
                                 boolean inProgress = phase != GamePhase.NONE && phase != GamePhase.END;
 
                                 Mono<Void> notify = inProgress
-                                        ? messageSender.sendMessageToAllUser(roomId,
+                                        ? Mono.defer(() -> messageSender.sendMessageToAllUser(roomId,
                                                 WebSocketResDto.of(disconnected, ResponseEvent.OPPONENT_DISCONNECTED,
-                                                        "상대방이 연결을 끊어 게임이 종료됩니다."))
+                                                        "상대방이 연결을 끊어 게임이 종료됩니다.")))
                                         : Mono.empty();
 
-                                return notify
-                                        .then(Mono.defer(() -> roomCleanupService.cleanupRoom(roomId)));
+                                // 종료 안내가 실패해도 정리를 마친 뒤 두 단계의 오류를 외곽에서 기록한다.
+                                return Flux.concatDelayError(notify,
+                                        Mono.defer(() -> roomCleanupService.cleanupRoom(roomId))).then();
                             });
                 })
                 .onErrorResume(e -> {

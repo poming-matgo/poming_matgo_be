@@ -120,6 +120,84 @@ class RoomTerminationFailureTest {
         assertMappingsRemoved();
     }
 
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void terminationNotificationFailureStillCleansRoom(boolean synchronous) {
+        MessageSender sender = mock(MessageSender.class);
+        RuntimeException failure = new IllegalStateException("termination notification failed");
+        if (synchronous) {
+            when(sender.sendMessageToAllUser(eq(ROOM_ID), any())).thenThrow(failure);
+        } else {
+            when(sender.sendMessageToAllUser(eq(ROOM_ID), any())).thenReturn(Mono.error(failure));
+        }
+        StepVerifier.create(disconnectInPhase(sender, GamePhase.DETERMINING_STARTING_PLAYER))
+                .expectComplete().verify(TIMEOUT);
+        verify(state).cleanup(ROOM_ID);
+        assertMappingsRemoved();
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void cleanupWaitsForNotificationTermination(boolean failure) {
+        Sinks.Empty<Void> notification = Sinks.empty();
+        MessageSender sender = mock(MessageSender.class);
+        when(sender.sendMessageToAllUser(eq(ROOM_ID), any())).thenReturn(notification.asMono());
+        Mono<Void> result = disconnectInPhase(sender, GamePhase.DETERMINING_STARTING_PLAYER);
+        verify(sender, never()).sendMessageToAllUser(eq(ROOM_ID), any());
+        StepVerifier.create(result)
+                .then(() -> {
+                    assertEquals(1, notification.currentSubscriberCount());
+                    verify(state, never()).cleanup(ROOM_ID);
+                    verify(sessions, never()).removeRoom(ROOM_ID);
+                    assertSame(second, sessions.getSession(ROOM_ID, 2));
+                    assertEquals(Sinks.EmitResult.OK, failure
+                            ? notification.tryEmitError(new IllegalStateException("send failed"))
+                            : notification.tryEmitEmpty());
+                })
+                .expectComplete().verify(TIMEOUT);
+        assertMappingsRemoved();
+    }
+
+    @Test
+    void notificationFailureWaitsForFailingCleanupAndRemovesMappings() {
+        Sinks.Empty<Void> pending = Sinks.empty();
+        when(installed.cleanup(ROOM_ID)).thenReturn(pending.asMono());
+        when(state.cleanup(ROOM_ID)).thenReturn(Mono.error(new IllegalStateException("cleanup failed")));
+        MessageSender sender = mock(MessageSender.class);
+        when(sender.sendMessageToAllUser(eq(ROOM_ID), any()))
+                .thenReturn(Mono.error(new IllegalStateException("send failed")));
+        // 행동 대기 중에도 마지막 접속자 이탈은 종료 경로를 사용한다.
+        sessions.deletePlayer(ROOM_ID, 2, second);
+        StepVerifier.create(disconnectInPhase(sender, GamePhase.IN_PROGRESS))
+                .then(() -> {
+                    assertEquals(1, pending.currentSubscriberCount());
+                    verify(sessions, never()).removeRoom(ROOM_ID);
+                    assertEquals(Sinks.EmitResult.OK, pending.tryEmitEmpty());
+                })
+                .expectComplete().verify(TIMEOUT);
+        assertMappingsRemoved();
+    }
+
+    @Test
+    void notificationFailurePreservesActionPhaseWithConnectedOpponent() {
+        MessageSender sender = mock(MessageSender.class);
+        when(sender.sendMessageToAllUser(eq(ROOM_ID), any()))
+                .thenReturn(Mono.error(new IllegalStateException("send failed")));
+        StepVerifier.create(disconnectInPhase(sender, GamePhase.IN_PROGRESS))
+                .expectComplete().verify(TIMEOUT);
+        verify(state, never()).cleanup(ROOM_ID);
+        verify(sessions, never()).removeRoom(ROOM_ID);
+        assertNull(sessions.getSession(ROOM_ID, 1));
+        assertSame(second, sessions.getSession(ROOM_ID, 2));
+    }
+
+    private Mono<Void> disconnectInPhase(MessageSender sender, GamePhase phase) {
+        when(game.findGameState(ROOM_ID)).thenReturn(Mono.just(
+                GameState.createEmptyRoom(ROOM_ID).toBuilder().phase(phase).build()));
+        return new GameConnectionService(game, sessions, sender, cleanup,
+                mock(ReconnectService.class)).disconnect(first);
+    }
+
     @Test
     void dataAndSynchronousSessionFailuresAreBothPreserved() {
         RuntimeException dataFailure = new IllegalStateException("data cleanup failed");
