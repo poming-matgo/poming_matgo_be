@@ -8,12 +8,16 @@ import com.pomingmatgo.gameservice.domain.event.RoomCleanedUpEvent;
 import com.pomingmatgo.gameservice.domain.service.matgo.GameService;
 import com.pomingmatgo.gameservice.domain.service.matgo.TurnFlowService;
 import com.pomingmatgo.gameservice.global.lock.InFlightManager;
+import jakarta.annotation.PreDestroy;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.log4j.Log4j2;
 import org.springframework.context.event.EventListener;
 import org.springframework.stereotype.Service;
 import reactor.core.Disposable;
+import reactor.core.Disposables;
+import reactor.core.publisher.BaseSubscriber;
 import reactor.core.publisher.Mono;
+import reactor.core.publisher.SignalType;
 
 import java.time.Duration;
 import java.util.Map;
@@ -21,15 +25,15 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.TimeUnit;
 
-// scheduled 맵과 Disposable 타이머가 모두 인스턴스 로컬 — 다중 인스턴스 배포는 방 단위 sticky routing 전제.
-// 깨지면 한 인스턴스의 cancelAutoPlay가 다른 인스턴스의 타이머를 취소하지 못해 false 자동플레이가 발사된다
+// 타이머는 서버 인스턴스별로 관리하므로 같은 방의 요청은 같은 인스턴스로 라우팅해야 한다.
+// 다른 인스턴스의 타이머는 취소할 수 없어 불필요한 자동플레이가 시작될 수 있다.
 @Service
 @RequiredArgsConstructor
 @Log4j2
 public class AutoPlayScheduler implements TurnScheduler {
 
     private static final int AUTO_PLAY_CARD_INDEX = 0;
-    // STOP: 확정 승리로 즉시 종료 — GO는 AFK 플레이어의 리스크를 키운다
+    // 응답이 없는 플레이어는 승리를 확정하도록 GO 대신 STOP을 선택한다.
     private static final boolean AUTO_GO_STOP_IS_GO = false;
     private static final long MIN_DELAY_MILLIS = 100;
 
@@ -37,8 +41,8 @@ public class AutoPlayScheduler implements TurnScheduler {
     private final GameService gameService;
     private final TurnFlowService turnFlowService;
 
-    // 등록 시 교체 판정(순서 비교)과 발사 시 상태 재검증(matches)이 공유하는 타이머 정체성.
-    // 순서는 GamePhase.turnStepOrder — 낡은 앞 단계 등록이 먼저 등록된 뒤 단계 타이머를 파괴하지 못하게 한다
+    // 타이머 교체 여부를 비교하고 실행 시 게임 상태를 재검증하는 기준이다.
+    // 같은 라운드와 턴에서는 GamePhase.turnStepOrder를 비교해 이전 단계의 타이머가 다음 단계의 타이머를 덮어쓰지 않게 한다.
     private record TurnStep(int round, int turn, GamePhase phase) implements Comparable<TurnStep> {
 
         @Override
@@ -60,8 +64,11 @@ public class AutoPlayScheduler implements TurnScheduler {
     private record Scheduled(TurnStep step, long deadlineNanos, Disposable task) {}
 
     private final Map<Long, Scheduled> scheduled = new ConcurrentHashMap<>();
+    private final Disposable.Composite runningAutoPlays = Disposables.composite();
+    private final Object lifecycleMonitor = new Object();
+    private boolean stopped;
 
-    /** 재접속 스냅샷 표시용 근사값 — deadline이 품은 GRACE_PERIOD를 뺀다. 실제 타임아웃 판정은 타이머 자신이 한다 */
+    /** 재접속 화면에 표시할 남은 시간의 근사값으로, 타이머 마감 시각에 포함된 유예 시간을 제외한다. */
     @Override
     public long getRemainingTurnMillis(long roomId) {
         Scheduled current = scheduled.get(roomId);
@@ -73,21 +80,25 @@ public class AutoPlayScheduler implements TurnScheduler {
 
     @Override
     public void scheduleAutoPlay(long roomId, int round, int currentTurn, Player currentPlayer, long deadlineNanos, GamePhase expectedPhase) {
+        // 서버 종료와 타이머 등록을 직렬화해 종료 처리 후 새 타이머가 등록되지 않게 한다.
+        synchronized (lifecycleMonitor) {
+            if (stopped) return;
+            registerAutoPlay(roomId, round, currentTurn, currentPlayer, deadlineNanos, expectedPhase);
+        }
+    }
+
+    private void registerAutoPlay(long roomId, int round, int currentTurn, Player currentPlayer, long deadlineNanos, GamePhase expectedPhase) {
         TurnStep newStep = new TurnStep(round, currentTurn, expectedPhase);
 
         long delayMillis = TimeUnit.NANOSECONDS.toMillis(deadlineNanos - System.nanoTime());
         if (delayMillis <= 0) delayMillis = MIN_DELAY_MILLIS;
 
-        // 발사 이후 실행은 독립 구독 — 실행 체인을 dispose하면 미전송 GAME_OVER/GO_STOP_CHOICE가 유실된다.
-        // 발사 이후 경합은 TurnStep 재검증 + InFlight + @GameLock이 방어하므로 취소 대상은 대기 중인 타이머뿐
+        // 대기 타이머 취소가 실행 중인 게임 처리와 GAME_OVER/GO_STOP_CHOICE 전송을 중단하지 않도록 구독을 분리한다.
+        // 실행 중 요청 경합은 TurnStep 재검증, InFlight, @GameLock으로 제어한다.
         Disposable newTask = Mono.delay(Duration.ofMillis(delayMillis))
-                .subscribe(v -> attemptAutoPlay(roomId, newStep, currentPlayer)
-                        .subscribe(
-                                success -> {},
-                                error -> log.error("[AutoPlay] 룸({}) 자동플레이 실행 중 에러 발생!", roomId, error)
-                        ));
+                .subscribe(v -> startAutoPlay(roomId, newStep, currentPlayer));
 
-        // 같은 단계의 재등록(연속 바닥 카드 선택)은 교체를 허용해야 하므로 초과(>)일 때만 기존 유지
+        // 기존 타이머가 더 나중 단계일 때만 유지한다. 연속 바닥 카드 선택을 위해 같은 단계의 타이머는 교체한다.
         Disposable[] toDispose = new Disposable[1];
         scheduled.compute(roomId, (k, prev) -> {
             if (prev != null && prev.step.compareTo(newStep) > 0) {
@@ -103,7 +114,40 @@ public class AutoPlayScheduler implements TurnScheduler {
         }
     }
 
-    // RoomCleanupService가 이 클래스를 직접 의존하면 DI cycle이 생기므로 이벤트로 수신한다
+    private void startAutoPlay(long roomId, TurnStep step, Player currentPlayer) {
+        BaseSubscriber<Void> execution = new BaseSubscriber<>() {
+            @Override
+            protected void hookOnError(Throwable error) {
+                log.error("[AutoPlay] 룸({}) 자동플레이 실행 중 에러 발생!", roomId, error);
+            }
+
+            @Override
+            protected void hookFinally(SignalType type) {
+                runningAutoPlays.remove(this);
+            }
+        };
+        // 구독 전에 등록해 즉시 완료된 구독이 남거나 서버 종료 시 회수에서 빠지는 일을 막는다.
+        if (runningAutoPlays.add(execution)) {
+            Mono.defer(() -> attemptAutoPlay(roomId, step, currentPlayer)).subscribe(execution);
+        }
+    }
+
+    @PreDestroy
+    public void shutdown() {
+        Scheduled[] pending;
+        synchronized (lifecycleMonitor) {
+            stopped = true;
+            pending = scheduled.values().toArray(Scheduled[]::new);
+            scheduled.clear();
+        }
+        // 서버 종료 시 실행 완료를 기다리지 않고 구독을 취소한다. 방 정리 시에는 실행을 취소하지 않는다.
+        runningAutoPlays.dispose();
+        for (Scheduled timer : pending) {
+            timer.task().dispose();
+        }
+    }
+
+    // RoomCleanupService의 직접 의존에 따른 순환 참조를 피하기 위해 방 정리 이벤트를 수신한다.
     @EventListener
     public void onRoomCleanedUp(RoomCleanedUpEvent event) {
         cancelAutoPlay(event.roomId());
@@ -124,7 +168,7 @@ public class AutoPlayScheduler implements TurnScheduler {
                         return Mono.empty();
                     }
 
-                    // 정상 요청이 진행 중이면 양보한다
+                    // 사용자 요청이 진행 중이면 1초 뒤에 다시 확인한다.
                     String normalFlagKey = InFlightManager.normalKey(roomId, currentPlayer.getNumber());
 
                     return inFlightManager.isSet(normalFlagKey)
@@ -140,10 +184,10 @@ public class AutoPlayScheduler implements TurnScheduler {
     }
 
     private Mono<Void> executeAutoPlayLogic(long roomId, TurnStep step, Player currentPlayer) {
-        // AUTOPLAY 키는 자동플레이끼리의 동시 시작만 막는다 (정상 요청과 키 분리)
+        // AUTOPLAY 키는 사용자 요청의 키와 분리하며, 자동플레이 간 동시 시작만 막는다.
         String autoplayFlagKey = InFlightManager.autoplayKey(roomId, currentPlayer.getNumber());
         String normalFlagKey = InFlightManager.normalKey(roomId, currentPlayer.getNumber());
-        // 발사별 소유 토큰 — TTL 만료 후 다른 발사가 플래그를 재획득해도 내 정리가 남의 플래그를 지우지 않는다
+        // 실행마다 소유 토큰을 발급해 TTL 만료 후 다른 실행이 획득한 플래그를 삭제하지 않게 한다.
         String autoplayToken = Long.toHexString(ThreadLocalRandom.current().nextLong());
         return inFlightManager.trySetFlag(autoplayFlagKey, autoplayToken, Duration.ofSeconds(2))
                 .flatMap(acquired -> {
@@ -151,7 +195,7 @@ public class AutoPlayScheduler implements TurnScheduler {
 
                     Mono<Void> mainProcess = Mono.defer(() -> inFlightManager.isSet(normalFlagKey)
                             .flatMap(normalInProgress -> {
-                                // attempt 이후 정상 요청이 막 도착했을 수 있어 진입 직전 재확인 (race 좁힘)
+                                // 앞선 확인 이후 사용자 요청이 시작됐을 수 있으므로 게임 실행 직전에 다시 확인한다.
                                 if (normalInProgress) return Mono.<Void>empty();
                                 return gameService.findGameState(roomId)
                                         .flatMap(gameState -> {
