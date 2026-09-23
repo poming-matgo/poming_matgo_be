@@ -1,5 +1,6 @@
 package com.pomingmatgo.gameservice.repository;
 
+import com.pomingmatgo.gameservice.scheduler.RoomTimerLifecycle;
 import com.pomingmatgo.gameservice.domain.GamePhase;
 import com.pomingmatgo.gameservice.domain.GameState;
 import com.pomingmatgo.gameservice.domain.repository.InMemoryGameStateRepository;
@@ -19,7 +20,7 @@ import static org.junit.jupiter.api.Assertions.*;
 @DisplayName("게임 상태 인메모리 저장소 동시성 단위 테스트")
 class InMemoryGameStateRepositoryTest {
 
-    private final InMemoryGameStateRepository repository = new InMemoryGameStateRepository();
+    private final InMemoryGameStateRepository repository = new InMemoryGameStateRepository(new RoomTimerLifecycle());
 
     @Test
     @DisplayName("같은 방의 동시 create는 정확히 하나만 성공한다")

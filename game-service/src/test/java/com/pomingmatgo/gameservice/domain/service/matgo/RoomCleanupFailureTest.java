@@ -57,7 +57,7 @@ class RoomCleanupFailureTest {
         Mono<Void> result = cleanup.cleanupRoomData(ROOM_ID);
         verifyNoInteractions(state, installed, acquired, leader, roomLock, gameLock, events);
         StepVerifier.create(result).expectComplete().verify(TIMEOUT);
-        assertEquals(List.of("state", "installed", "acquired", "leader", "roomLock", "gameLock", "event"), completed);
+        assertEquals(List.of("event", "state", "installed", "acquired", "leader", "roomLock", "gameLock"), completed);
     }
 
     @Test
@@ -66,7 +66,7 @@ class RoomCleanupFailureTest {
         when(state.cleanup(ROOM_ID)).thenReturn(Mono.error(failure));
         StepVerifier.create(cleanup.cleanupRoomData(ROOM_ID))
                 .expectErrorSatisfies(error -> assertSame(failure, error)).verify(TIMEOUT);
-        assertEquals(List.of("installed", "acquired", "leader", "roomLock", "gameLock", "event"), completed);
+        assertEquals(List.of("event", "installed", "acquired", "leader", "roomLock", "gameLock"), completed);
     }
 
     @Test
@@ -75,7 +75,7 @@ class RoomCleanupFailureTest {
         when(state.cleanup(ROOM_ID)).thenThrow(failure);
         StepVerifier.create(cleanup.cleanupRoomData(ROOM_ID))
                 .expectErrorSatisfies(error -> assertSame(failure, error)).verify(TIMEOUT);
-        assertEquals(List.of("installed", "acquired", "leader", "roomLock", "gameLock", "event"), completed);
+        assertEquals(List.of("event", "installed", "acquired", "leader", "roomLock", "gameLock"), completed);
     }
 
     @Test
@@ -88,7 +88,7 @@ class RoomCleanupFailureTest {
                 .expectErrorSatisfies(error -> assertEquals(
                         List.of(first, second), Exceptions.unwrapMultipleExcludingTracebacks(error)))
                 .verify(TIMEOUT);
-        assertEquals(List.of("installed", "acquired", "leader", "roomLock", "event"), completed);
+        assertEquals(List.of("event", "installed", "acquired", "leader", "roomLock"), completed);
     }
 
     @Test

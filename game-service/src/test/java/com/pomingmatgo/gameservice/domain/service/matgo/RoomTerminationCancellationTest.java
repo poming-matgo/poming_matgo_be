@@ -1,5 +1,6 @@
 package com.pomingmatgo.gameservice.domain.service.matgo;
 
+import com.pomingmatgo.gameservice.scheduler.RoomTimerLifecycle;
 import com.pomingmatgo.gameservice.domain.GamePhase;
 import com.pomingmatgo.gameservice.domain.GameState;
 import com.pomingmatgo.gameservice.domain.Player;
@@ -33,7 +34,7 @@ import static org.mockito.Mockito.*;
 class RoomTerminationCancellationTest {
     private static final long ROOM_ID = 18L;
     private static final Duration TIMEOUT = Duration.ofSeconds(3);
-    private final InMemoryGameStateRepository state = new InMemoryGameStateRepository();
+    private final InMemoryGameStateRepository state = new InMemoryGameStateRepository(new RoomTimerLifecycle());
     private final InMemoryInstalledCardRepository installed = spy(new InMemoryInstalledCardRepository());
     private final AcquiredCardRepository acquired = mock(AcquiredCardRepository.class);
     private final LeadingPlayerRepository leader = mock(LeadingPlayerRepository.class);

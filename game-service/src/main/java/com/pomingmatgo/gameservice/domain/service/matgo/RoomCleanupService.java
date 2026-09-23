@@ -40,15 +40,14 @@ public class RoomCleanupService {
     public Mono<Void> cleanupRoomData(long roomId) {
         // 개별 오류가 다른 정리를 취소하지 않게 하고, 동기 예외도 구독 시 오류로 합산한다.
         return Mono.whenDelayError(
+                // 데이터 삭제 전에 신규 타이머를 차단한다. 동기 리스너로 등록과 종료를 직렬화한다.
+                Mono.fromRunnable(() -> eventPublisher.publishEvent(new RoomCleanedUpEvent(roomId))),
                 Mono.defer(() -> gameStateRepository.cleanup(roomId)),
                 Mono.defer(() -> installedCardRepository.cleanup(roomId)),
                 Mono.defer(() -> acquiredCardRepository.cleanup(roomId)),
                 Mono.defer(() -> leadingPlayerRepository.cleanup(roomId)),
                 Mono.defer(() -> roomLockManager.cleanup(roomId)),
-                Mono.defer(() -> gameLockCleaner.cleanup(roomId)),
-                // 자동플레이 타이머 취소 — AutoPlayScheduler 직접 의존은 DI cycle을 만들어 이벤트로 위임한다.
-                // 리스너는 발행 스레드에서 동기 실행되므로 취소 시점은 직접 호출과 같다
-                Mono.fromRunnable(() -> eventPublisher.publishEvent(new RoomCleanedUpEvent(roomId)))
+                Mono.defer(() -> gameLockCleaner.cleanup(roomId))
         ).doOnError(error -> log.error("Room ({}) data cleanup failed", roomId, error));
     }
 }

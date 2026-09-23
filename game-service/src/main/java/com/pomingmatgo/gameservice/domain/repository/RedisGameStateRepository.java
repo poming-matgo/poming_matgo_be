@@ -1,6 +1,7 @@
 package com.pomingmatgo.gameservice.domain.repository;
 
 import com.pomingmatgo.gameservice.domain.GameState;
+import com.pomingmatgo.gameservice.scheduler.RoomTimerLifecycle;
 import com.pomingmatgo.gameservice.global.exception.BusinessException;
 import com.pomingmatgo.gameservice.global.exception.ErrorCode;
 import org.springframework.beans.factory.annotation.Qualifier;
@@ -12,10 +13,12 @@ import reactor.core.publisher.Mono;
 @Profile("redis")
 @Repository
 public class RedisGameStateRepository implements GameStateRepository {
+    private final RoomTimerLifecycle timerLifecycle;
     private final ReactiveRedisOperations<String, GameState> redisOps;
 
-    public RedisGameStateRepository(@Qualifier("gameStateRedisTemplate") ReactiveRedisOperations<String, GameState> redisOps) {
+    public RedisGameStateRepository(@Qualifier("gameStateRedisTemplate") ReactiveRedisOperations<String, GameState> redisOps, RoomTimerLifecycle timerLifecycle) {
         this.redisOps = redisOps;
+        this.timerLifecycle = timerLifecycle;
     }
 
     private static final String GAME_STATE_KEY_FORMAT = "game:%d:state";
@@ -38,6 +41,7 @@ public class RedisGameStateRepository implements GameStateRepository {
                 .setIfAbsent(redisKey, gameState)
                 .flatMap(wasSet -> {
                     if (Boolean.TRUE.equals(wasSet)) {
+                        timerLifecycle.open(gameState.getRoomId());
                         return Mono.just(gameState.getRoomId());
                     } else {
                         return Mono.error(new BusinessException(ErrorCode.ALREADY_EXISTED_ROOM));
@@ -57,6 +61,9 @@ public class RedisGameStateRepository implements GameStateRepository {
 
     @Override
     public Mono<Void> cleanup(long roomId) {
-        return redisOps.delete(generateKey(roomId)).then();
+        return Mono.defer(() -> {
+            timerLifecycle.close(roomId);
+            return redisOps.delete(generateKey(roomId)).then();
+        });
     }
 }

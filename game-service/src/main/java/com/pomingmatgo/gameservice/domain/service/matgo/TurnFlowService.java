@@ -6,6 +6,7 @@ import com.pomingmatgo.gameservice.domain.Player;
 import com.pomingmatgo.gameservice.domain.card.Card;
 import com.pomingmatgo.gameservice.domain.score.PayoutCalculator;
 import com.pomingmatgo.gameservice.scheduler.TurnScheduler;
+import com.pomingmatgo.gameservice.scheduler.RoomTimerLifecycle;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import reactor.core.publisher.Mono;
@@ -23,12 +24,17 @@ import static com.pomingmatgo.gameservice.domain.TurnTiming.nextDeadlineNanos;
 @RequiredArgsConstructor
 public class TurnFlowService {
 
+    private final RoomTimerLifecycle timerLifecycle;
     private final GamePlayService gamePlayService;
     private final GameMessageSender gameMessageSender;
     private final GameNotificationService gameNotificationService;
     private final PayoutCalculator payoutCalculator;
 
     public Mono<Void> processNormalSubmit(long roomId, Player player, int cardIdx, Runnable onActionSucceeded, TurnScheduler scheduler) {
+        return Mono.defer(() -> processNormalSubmitInRoom(roomId, player, cardIdx, onActionSucceeded, timerLifecycle.bind(roomId, scheduler)));
+    }
+
+    private Mono<Void> processNormalSubmitInRoom(long roomId, Player player, int cardIdx, Runnable onActionSucceeded, TurnScheduler scheduler) {
         return gamePlayService.executeNormalSubmit(roomId, player, cardIdx, onActionSucceeded)
                 .flatMap(ctx -> {
                     Mono<Void> sendInfos = Mono.when(
@@ -45,6 +51,10 @@ public class TurnFlowService {
     }
 
     public Mono<Void> processFloorSelection(long roomId, Player player, int cardIdx, Runnable onActionSucceeded, TurnScheduler scheduler) {
+        return Mono.defer(() -> processFloorSelectionInRoom(roomId, player, cardIdx, onActionSucceeded, timerLifecycle.bind(roomId, scheduler)));
+    }
+
+    private Mono<Void> processFloorSelectionInRoom(long roomId, Player player, int cardIdx, Runnable onActionSucceeded, TurnScheduler scheduler) {
         return gamePlayService.executeFloorSelection(roomId, player, cardIdx, onActionSucceeded)
                 .flatMap(ctx -> ctx.isChoiceRequired()
                         // 뒤집은 카드가 또 선택을 요구한 경우 — 선택지 재전송 + 타이머 재등록
@@ -53,6 +63,10 @@ public class TurnFlowService {
     }
 
     public Mono<Void> processGoStopChoice(long roomId, Player player, boolean go, Runnable onActionSucceeded, TurnScheduler scheduler) {
+        return Mono.defer(() -> processGoStopChoiceInRoom(roomId, player, go, onActionSucceeded, timerLifecycle.bind(roomId, scheduler)));
+    }
+
+    private Mono<Void> processGoStopChoiceInRoom(long roomId, Player player, boolean go, Runnable onActionSucceeded, TurnScheduler scheduler) {
         return gamePlayService.executeGoStop(roomId, player, go, onActionSucceeded)
                 .flatMap(nextState -> {
                     if (nextState.isPlaying()) {
@@ -65,6 +79,10 @@ public class TurnFlowService {
 
     /** 첫 턴 시작(PreGameFlowService)이 이후 턴 전환과 같은 경로를 타게 하는 공개 진입점 */
     public Mono<Void> startTurn(GameState state, TurnScheduler scheduler) {
+        return Mono.defer(() -> startTurnInRoom(state, timerLifecycle.bind(state.getRoomId(), scheduler)));
+    }
+
+    private Mono<Void> startTurnInRoom(GameState state, TurnScheduler scheduler) {
         return gameMessageSender.sendTurnInfo(state, TURN_TIMEOUT_MILLIS)
                 .then(Mono.fromRunnable(() -> scheduleNextStep(state.getRoomId(), state, scheduler)));
     }

@@ -40,7 +40,7 @@ import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 
-// 현재 결함을 기록하는 특성화 테스트다. 송신/실행 계약을 개선할 때 기대값도 함께 변경한다.
+// 송신 취소의 미해결 재현과 방 정리 후 타이머 재등록 차단의 회귀 검증을 함께 유지한다.
 @SpringBootTest(properties = "spring.autoconfigure.exclude="
         + "org.redisson.spring.starter.RedissonAutoConfigurationV2,"
         + "org.springframework.boot.autoconfigure.data.redis.RedisAutoConfiguration,"
@@ -157,8 +157,8 @@ class TurnFlowSendLifecycleTest {
 
     @ParameterizedTest(name = "송신 실패={0}")
     @ValueSource(booleans = {false, true})
-    @DisplayName("방 정리 후 송신 정상 완료 또는 오류 복구가 실제 타이머를 다시 만들고 발사 후에도 엔트리를 남긴다")
-    void lateSendTerminationRecreatesTimerAfterCleanup(boolean failSend) {
+    @DisplayName("방 정리 후 송신 정상 완료 또는 오류 복구가 타이머를 다시 만들지 않는다")
+    void lateSendTerminationDoesNotRecreateTimerAfterCleanup(boolean failSend) {
         StepVerifier.withVirtualTime(() -> submit(ROOM_ID, autoPlayScheduler)
                         .then(Mono.delay(Duration.ofSeconds(13))))
                 .then(() -> {
@@ -178,7 +178,7 @@ class TurnFlowSendLifecycleTest {
                     assertEquals(Sinks.EmitResult.OK, result);
                     assertEquals(failSend ? 0 : 1, slow.turnCompleted.get());
                     assertEquals(failSend ? 1 : 0, slow.turnFailed.get());
-                    assertFalse(scheduledTask().isDisposed(), "삭제된 방에 대기 타이머가 다시 생성된다");
+                    assertFalse(scheduledTimers().containsKey(ROOM_ID), "삭제된 방의 타이머 등록을 거부한다");
                     assertRoomRemoved();
                 })
                 // nanoTime deadline은 그대로 두고 Reactor delay만 가상 시간으로 발사한다.
@@ -186,13 +186,13 @@ class TurnFlowSendLifecycleTest {
                 .expectNext(0L)
                 .then(() -> {
                     assertRoomRemoved();
-                    assertTrue(scheduledTask().isDisposed(), "타이머는 발사됐지만 맵 엔트리는 남는다");
+                    assertFalse(scheduledTimers().containsKey(ROOM_ID));
                 })
                 .expectComplete()
                 .verify(TIMEOUT);
 
         cleanupRoom();
-        assertFalse(scheduledTimers().containsKey(ROOM_ID), "재정리 이벤트는 잔존 엔트리를 제거한다");
+        assertFalse(scheduledTimers().containsKey(ROOM_ID), "반복 정리 후에도 엔트리가 없어야 한다");
     }
 
     @Test
@@ -213,6 +213,41 @@ class TurnFlowSendLifecycleTest {
                 })
                 .expectComplete()
                 .verify(TIMEOUT);
+    }
+
+    @ParameterizedTest(name = "송신 실패={0}")
+    @ValueSource(booleans = {false, true})
+    @DisplayName("같은 ID의 방이 다시 생성돼도 이전 송신 후처리는 새 타이머를 덮어쓰지 않는다")
+    void lateSendCannotReplaceRecreatedRoomsTimer(boolean failSend) {
+        StepVerifier.create(submit(ROOM_ID, autoPlayScheduler))
+                .then(() -> {
+                    assertEquals(1, slow.turnStarted.get());
+                    cleanupRoom();
+                    seedRoom(ROOM_ID);
+                    autoPlayScheduler.scheduleAutoPlay(ROOM_ID, 1, 1, Player.PLAYER_1,
+                            System.nanoTime() + Duration.ofMinutes(1).toNanos(), GamePhase.IN_PROGRESS);
+                    Disposable current = scheduledTask();
+                    assertEquals(Sinks.EmitResult.OK, failSend
+                            ? slow.completion.tryEmitError(new IllegalStateException("controlled send failure"))
+                            : slow.completion.tryEmitEmpty());
+                    assertSame(current, scheduledTask());
+                    assertFalse(current.isDisposed());
+                })
+                .expectComplete().verify(TIMEOUT);
+    }
+
+    @Test
+    @DisplayName("첫 턴 안내도 방 정리 후 완료되면 타이머를 등록하지 않는다")
+    void firstTurnSendCannotRegisterAfterCleanup() {
+        GameState state = gameStateRepository.findById(ROOM_ID).block(TIMEOUT);
+        StepVerifier.create(turnFlowService.startTurn(state, autoPlayScheduler))
+                .then(() -> {
+                    assertEquals(1, slow.turnStarted.get());
+                    cleanupRoom();
+                    assertEquals(Sinks.EmitResult.OK, slow.completion.tryEmitEmpty());
+                    assertFalse(scheduledTimers().containsKey(ROOM_ID));
+                })
+                .expectComplete().verify(TIMEOUT);
     }
 
     private void cleanupRoom() {

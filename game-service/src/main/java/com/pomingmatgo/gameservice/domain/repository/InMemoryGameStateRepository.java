@@ -1,6 +1,8 @@
 package com.pomingmatgo.gameservice.domain.repository;
 
 import com.pomingmatgo.gameservice.domain.GameState;
+import com.pomingmatgo.gameservice.scheduler.RoomTimerLifecycle;
+import lombok.RequiredArgsConstructor;
 import com.pomingmatgo.gameservice.global.exception.BusinessException;
 import com.pomingmatgo.gameservice.global.exception.ErrorCode;
 import org.springframework.context.annotation.Profile;
@@ -11,7 +13,10 @@ import java.util.concurrent.ConcurrentHashMap;
 
 @Profile("in-memory")
 @Repository
+@RequiredArgsConstructor
 public class InMemoryGameStateRepository implements GameStateRepository {
+
+    private final RoomTimerLifecycle timerLifecycle;
 
     private final ConcurrentHashMap<Long, GameState> store = new ConcurrentHashMap<>();
 
@@ -23,9 +28,12 @@ public class InMemoryGameStateRepository implements GameStateRepository {
     @Override
     public Mono<Long> create(GameState gameState) {
         return Mono.fromCallable(() -> {
-            GameState existing = store.putIfAbsent(gameState.getRoomId(), gameState);
-            if (existing != null) {
-                throw new BusinessException(ErrorCode.ALREADY_EXISTED_ROOM);
+            synchronized (timerLifecycle) {
+                GameState existing = store.putIfAbsent(gameState.getRoomId(), gameState);
+                if (existing != null) {
+                    throw new BusinessException(ErrorCode.ALREADY_EXISTED_ROOM);
+                }
+                timerLifecycle.open(gameState.getRoomId());
             }
             return gameState.getRoomId();
         });
@@ -46,6 +54,11 @@ public class InMemoryGameStateRepository implements GameStateRepository {
 
     @Override
     public Mono<Void> cleanup(long roomId) {
-        return Mono.fromRunnable(() -> store.remove(roomId));
+        return Mono.fromRunnable(() -> {
+            synchronized (timerLifecycle) {
+                timerLifecycle.close(roomId);
+                store.remove(roomId);
+            }
+        });
     }
 }

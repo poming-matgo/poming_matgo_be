@@ -39,7 +39,8 @@ class AutoPlaySubscriptionLifecycleTest {
     private final InFlightManager inFlight = mock(InFlightManager.class);
     private final GameService gameService = mock(GameService.class);
     private final TurnFlowService turnFlow = mock(TurnFlowService.class);
-    private final AutoPlayScheduler scheduler = new AutoPlayScheduler(inFlight, gameService, turnFlow);
+    private final RoomTimerLifecycle lifecycle = new RoomTimerLifecycle();
+    private final AutoPlayScheduler scheduler = new AutoPlayScheduler(lifecycle, inFlight, gameService, turnFlow);
     private VirtualTimeScheduler clock;
 
     @BeforeEach
@@ -83,8 +84,31 @@ class AutoPlaySubscriptionLifecycleTest {
         stubAction(Mono.empty());
         schedule(ROOM_ID);
         fire();
-        verify(turnFlow).processNormalSubmit(eq(ROOM_ID), eq(Player.PLAYER_1), eq(0), isNull(), same(scheduler));
+        verify(turnFlow).processNormalSubmit(eq(ROOM_ID), eq(Player.PLAYER_1), eq(0), isNull(), any(TurnScheduler.class));
         assertEquals(0, running().size());
+    }
+
+    @Test
+    void runningExecutionKeepsOriginalLifetimeAfterRoomRecreation() {
+        Sinks.Empty<Void> completion = Sinks.empty();
+        when(turnFlow.processNormalSubmit(anyLong(), any(Player.class), anyInt(), isNull(), any(TurnScheduler.class)))
+                .thenAnswer(call -> {
+                    TurnScheduler bound = call.getArgument(4);
+                    return completion.asMono().then(Mono.fromRunnable(() ->
+                            bound.scheduleAutoPlay(ROOM_ID, 2, 1, Player.PLAYER_1,
+                                    System.nanoTime(), GamePhase.IN_PROGRESS)));
+                });
+        schedule(ROOM_ID);
+        fire();
+        assertEquals(1, running().size());
+        scheduler.onRoomCleanedUp(new RoomCleanedUpEvent(ROOM_ID));
+        lifecycle.open(ROOM_ID);
+        schedule(ROOM_ID);
+        Disposable current = timerTask(ROOM_ID);
+        assertEquals(Sinks.EmitResult.OK, completion.tryEmitEmpty());
+        assertEquals(0, running().size());
+        assertSame(current, timerTask(ROOM_ID));
+        assertFalse(current.isDisposed());
     }
 
     @ParameterizedTest
@@ -150,7 +174,9 @@ class AutoPlaySubscriptionLifecycleTest {
     void concurrentRegistrationAndShutdownLeaveNoTimers() throws Exception {
         try (var executor = Executors.newFixedThreadPool(2)) {
             for (int attempt = 0; attempt < 32; attempt++) {
-                AutoPlayScheduler target = new AutoPlayScheduler(inFlight, gameService, turnFlow);
+                RoomTimerLifecycle targetLifecycle = new RoomTimerLifecycle();
+                targetLifecycle.open(ROOM_ID);
+                AutoPlayScheduler target = new AutoPlayScheduler(targetLifecycle, inFlight, gameService, turnFlow);
                 CountDownLatch start = new CountDownLatch(1);
                 var registration = executor.submit(() -> {
                     assertTrue(start.await(3, TimeUnit.SECONDS));
@@ -206,11 +232,12 @@ class AutoPlaySubscriptionLifecycleTest {
     }
 
     private void stubAction(Mono<Void> action) {
-        when(turnFlow.processNormalSubmit(anyLong(), any(Player.class), anyInt(), isNull(), same(scheduler)))
+        when(turnFlow.processNormalSubmit(anyLong(), any(Player.class), anyInt(), isNull(), any(TurnScheduler.class)))
                 .thenReturn(action);
     }
 
     private void schedule(long roomId) {
+        if (!lifecycle.isOpen(roomId)) lifecycle.open(roomId);
         scheduler.scheduleAutoPlay(roomId, 1, 1, Player.PLAYER_1, System.nanoTime(), GamePhase.IN_PROGRESS);
     }
 

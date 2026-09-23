@@ -37,6 +37,7 @@ public class AutoPlayScheduler implements TurnScheduler {
     private static final boolean AUTO_GO_STOP_IS_GO = false;
     private static final long MIN_DELAY_MILLIS = 100;
 
+    private final RoomTimerLifecycle timerLifecycle;
     private final InFlightManager inFlightManager;
     private final GameService gameService;
     private final TurnFlowService turnFlowService;
@@ -65,7 +66,6 @@ public class AutoPlayScheduler implements TurnScheduler {
 
     private final Map<Long, Scheduled> scheduled = new ConcurrentHashMap<>();
     private final Disposable.Composite runningAutoPlays = Disposables.composite();
-    private final Object lifecycleMonitor = new Object();
     private boolean stopped;
 
     /** 재접속 화면에 표시할 남은 시간의 근사값으로, 타이머 마감 시각에 포함된 유예 시간을 제외한다. */
@@ -80,9 +80,9 @@ public class AutoPlayScheduler implements TurnScheduler {
 
     @Override
     public void scheduleAutoPlay(long roomId, int round, int currentTurn, Player currentPlayer, long deadlineNanos, GamePhase expectedPhase) {
-        // 서버 종료와 타이머 등록을 직렬화해 종료 처리 후 새 타이머가 등록되지 않게 한다.
-        synchronized (lifecycleMonitor) {
-            if (stopped) return;
+        // 방·서버 종료와 타이머 등록을 직렬화한다. 흐름의 수명 검증도 같은 monitor를 사용한다.
+        synchronized (timerLifecycle) {
+            if (stopped || !timerLifecycle.isOpen(roomId)) return;
             registerAutoPlay(roomId, round, currentTurn, currentPlayer, deadlineNanos, expectedPhase);
         }
     }
@@ -95,8 +95,9 @@ public class AutoPlayScheduler implements TurnScheduler {
 
         // 대기 타이머 취소가 실행 중인 게임 처리와 GAME_OVER/GO_STOP_CHOICE 전송을 중단하지 않도록 구독을 분리한다.
         // 실행 중 요청 경합은 TurnStep 재검증, InFlight, @GameLock으로 제어한다.
+        TurnScheduler boundScheduler = timerLifecycle.bind(roomId, this);
         Disposable newTask = Mono.delay(Duration.ofMillis(delayMillis))
-                .subscribe(v -> startAutoPlay(roomId, newStep, currentPlayer));
+                .subscribe(v -> startAutoPlay(roomId, newStep, currentPlayer, boundScheduler));
 
         // 기존 타이머가 더 나중 단계일 때만 유지한다. 연속 바닥 카드 선택을 위해 같은 단계의 타이머는 교체한다.
         Disposable[] toDispose = new Disposable[1];
@@ -114,7 +115,7 @@ public class AutoPlayScheduler implements TurnScheduler {
         }
     }
 
-    private void startAutoPlay(long roomId, TurnStep step, Player currentPlayer) {
+    private void startAutoPlay(long roomId, TurnStep step, Player currentPlayer, TurnScheduler boundScheduler) {
         BaseSubscriber<Void> execution = new BaseSubscriber<>() {
             @Override
             protected void hookOnError(Throwable error) {
@@ -128,15 +129,16 @@ public class AutoPlayScheduler implements TurnScheduler {
         };
         // 구독 전에 등록해 즉시 완료된 구독이 남거나 서버 종료 시 회수에서 빠지는 일을 막는다.
         if (runningAutoPlays.add(execution)) {
-            Mono.defer(() -> attemptAutoPlay(roomId, step, currentPlayer)).subscribe(execution);
+            Mono.defer(() -> attemptAutoPlay(roomId, step, currentPlayer, boundScheduler)).subscribe(execution);
         }
     }
 
     @PreDestroy
     public void shutdown() {
         Scheduled[] pending;
-        synchronized (lifecycleMonitor) {
+        synchronized (timerLifecycle) {
             stopped = true;
+            timerLifecycle.clear();
             pending = scheduled.values().toArray(Scheduled[]::new);
             scheduled.clear();
         }
@@ -150,18 +152,23 @@ public class AutoPlayScheduler implements TurnScheduler {
     // RoomCleanupService의 직접 의존에 따른 순환 참조를 피하기 위해 방 정리 이벤트를 수신한다.
     @EventListener
     public void onRoomCleanedUp(RoomCleanedUpEvent event) {
-        cancelAutoPlay(event.roomId());
+        synchronized (timerLifecycle) {
+            timerLifecycle.close(event.roomId());
+            cancelAutoPlay(event.roomId());
+        }
     }
 
     @Override
     public void cancelAutoPlay(long roomId) {
-        Scheduled removed = scheduled.remove(roomId);
-        if (removed != null && removed.task != null && !removed.task.isDisposed()) {
-            removed.task.dispose();
+        synchronized (timerLifecycle) {
+            Scheduled removed = scheduled.remove(roomId);
+            if (removed != null && removed.task != null && !removed.task.isDisposed()) {
+                removed.task.dispose();
+            }
         }
     }
 
-    private Mono<Void> attemptAutoPlay(long roomId, TurnStep step, Player currentPlayer) {
+    private Mono<Void> attemptAutoPlay(long roomId, TurnStep step, Player currentPlayer, TurnScheduler boundScheduler) {
         return gameService.findGameState(roomId)
                 .flatMap(gameState -> {
                     if (!step.matches(gameState)) {
@@ -175,15 +182,15 @@ public class AutoPlayScheduler implements TurnScheduler {
                             .flatMap(isDelayed -> {
                                 if (isDelayed) {
                                     return Mono.delay(Duration.ofSeconds(1))
-                                            .then(Mono.defer(() -> attemptAutoPlay(roomId, step, currentPlayer)));
+                                            .then(Mono.defer(() -> attemptAutoPlay(roomId, step, currentPlayer, boundScheduler)));
                                 } else {
-                                    return executeAutoPlayLogic(roomId, step, currentPlayer);
+                                    return executeAutoPlayLogic(roomId, step, currentPlayer, boundScheduler);
                                 }
                             });
                 });
     }
 
-    private Mono<Void> executeAutoPlayLogic(long roomId, TurnStep step, Player currentPlayer) {
+    private Mono<Void> executeAutoPlayLogic(long roomId, TurnStep step, Player currentPlayer, TurnScheduler boundScheduler) {
         // AUTOPLAY 키는 사용자 요청의 키와 분리하며, 자동플레이 간 동시 시작만 막는다.
         String autoplayFlagKey = InFlightManager.autoplayKey(roomId, currentPlayer.getNumber());
         String normalFlagKey = InFlightManager.normalKey(roomId, currentPlayer.getNumber());
@@ -205,11 +212,11 @@ public class AutoPlayScheduler implements TurnScheduler {
 
                                             return switch (step.phase()) {
                                                 case AWAITING_FLOOR_CARD_CHOICE ->
-                                                        turnFlowService.processFloorSelection(roomId, currentPlayer, AUTO_PLAY_CARD_INDEX, null, this);
+                                                        turnFlowService.processFloorSelection(roomId, currentPlayer, AUTO_PLAY_CARD_INDEX, null, boundScheduler);
                                                 case AWAITING_GO_STOP_CHOICE ->
-                                                        turnFlowService.processGoStopChoice(roomId, currentPlayer, AUTO_GO_STOP_IS_GO, null, this);
+                                                        turnFlowService.processGoStopChoice(roomId, currentPlayer, AUTO_GO_STOP_IS_GO, null, boundScheduler);
                                                 default ->
-                                                        turnFlowService.processNormalSubmit(roomId, currentPlayer, AUTO_PLAY_CARD_INDEX, null, this);
+                                                        turnFlowService.processNormalSubmit(roomId, currentPlayer, AUTO_PLAY_CARD_INDEX, null, boundScheduler);
                                             };
                                         });
                             }));

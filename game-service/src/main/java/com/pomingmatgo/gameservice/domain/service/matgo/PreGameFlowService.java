@@ -5,6 +5,7 @@ import com.pomingmatgo.gameservice.domain.InstalledCard;
 import com.pomingmatgo.gameservice.domain.Player;
 import com.pomingmatgo.gameservice.domain.messaging.GameMessageSender;
 import com.pomingmatgo.gameservice.scheduler.TurnScheduler;
+import com.pomingmatgo.gameservice.scheduler.RoomTimerLifecycle;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import reactor.core.publisher.Mono;
@@ -18,27 +19,33 @@ import static com.pomingmatgo.gameservice.domain.Player.PLAYER_NOTHING;
 @RequiredArgsConstructor
 public class PreGameFlowService {
 
+    private final RoomTimerLifecycle timerLifecycle;
     private final PreGameService preGameService;
     private final GameMessageSender gameMessageSender;
     private final TurnFlowService turnFlowService;
     private final TurnScheduler turnScheduler;
 
     public Mono<Void> processLeaderSelection(GameState gameState, Player player, int cardIndex) {
+        return Mono.defer(() -> processLeaderSelectionInRoom(gameState, player, cardIndex,
+                timerLifecycle.bind(gameState.getRoomId(), turnScheduler)));
+    }
+
+    private Mono<Void> processLeaderSelectionInRoom(GameState gameState, Player player, int cardIndex, TurnScheduler scheduler) {
         long roomId = gameState.getRoomId();
 
         return preGameService.selectLeaderCard(roomId, player, cardIndex)
                 .then(preGameService.checkAllSelected(roomId))
                 .flatMap(allSelected -> gameMessageSender.sendLeaderSelectionMessage(roomId, player, cardIndex)
                         .then(allSelected
-                                ? proceedToGameStart(gameState)
+                                ? proceedToGameStart(gameState, scheduler)
                                 : Mono.empty()));
     }
 
-    private Mono<Void> proceedToGameStart(GameState gameState) {
+    private Mono<Void> proceedToGameStart(GameState gameState, TurnScheduler scheduler) {
         return finalizeLeaderSelection(gameState)
                 .flatMap(this::distributeCardsAndNotify)
                 .flatMap(this::checkChongtongAndProceed)
-                .flatMap(this::startFirstTurn);
+                .flatMap(state -> startFirstTurn(state, scheduler));
     }
 
     private Mono<GameState> finalizeLeaderSelection(GameState gameState) {
@@ -95,8 +102,8 @@ public class PreGameFlowService {
                 });
     }
 
-    private Mono<Void> startFirstTurn(GameState gameState) {
+    private Mono<Void> startFirstTurn(GameState gameState, TurnScheduler scheduler) {
         return preGameService.setFirstTurn(gameState)
-                .flatMap(state -> turnFlowService.startTurn(state, turnScheduler));
+                .flatMap(state -> turnFlowService.startTurn(state, scheduler));
     }
 }
