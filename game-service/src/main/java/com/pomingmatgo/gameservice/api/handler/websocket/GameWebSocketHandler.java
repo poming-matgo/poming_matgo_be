@@ -14,6 +14,7 @@ import com.pomingmatgo.gameservice.global.exception.dto.WebSocketErrorResDto;
 import com.pomingmatgo.gameservice.global.lock.InFlightManager;
 import com.pomingmatgo.gameservice.global.session.SessionManager;
 import com.pomingmatgo.gameservice.global.session.GameConnectionService;
+import jakarta.annotation.PreDestroy;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
@@ -21,6 +22,10 @@ import org.springframework.web.reactive.socket.WebSocketHandler;
 import org.springframework.web.reactive.socket.WebSocketMessage;
 import org.springframework.web.reactive.socket.WebSocketSession;
 import reactor.core.publisher.Mono;
+import reactor.core.Disposable;
+import reactor.core.Disposables;
+import reactor.core.publisher.BaseSubscriber;
+import reactor.core.publisher.SignalType;
 import reactor.core.scheduler.Schedulers;
 
 import java.time.Duration;
@@ -42,6 +47,7 @@ public class GameWebSocketHandler implements WebSocketHandler {
     private final MessageSender messageSender;
     private final InFlightManager inFlightManager;
     private final GameConnectionService connectionService;
+    private final Disposable.Composite pendingDisconnects = Disposables.composite();
 
     @Override
     public Mono<Void> handle(WebSocketSession session) {
@@ -50,9 +56,33 @@ public class GameWebSocketHandler implements WebSocketHandler {
                 .concatMap(message -> handleMessage(message, session))
                 .then()
                 // 정상 종료(onComplete) / 에러(onError) / 구독 취소(cancel) 모든 경로에서 disconnect 처리
-                .doFinally(signal -> connectionService.disconnect(session)
-                        .subscribeOn(Schedulers.boundedElastic())
-                        .subscribe());
+                .doFinally(signal -> startDisconnect(session));
+    }
+
+    private void startDisconnect(WebSocketSession session) {
+        BaseSubscriber<Void> disconnect = new BaseSubscriber<>() {
+            @Override
+            protected void hookOnError(Throwable error) {
+                log.warn("Disconnect subscription failed for session [{}]", session.getId(), error);
+            }
+
+            @Override
+            protected void hookFinally(SignalType type) {
+                pendingDisconnects.remove(this);
+            }
+        };
+        // 수신 취소와 독립적으로 정리하되, 즉시 완료와 서버 종료 경합도 추적에서 빠뜨리지 않는다.
+        if (pendingDisconnects.add(disconnect)) {
+            Mono.defer(() -> connectionService.disconnect(session))
+                    .subscribeOn(Schedulers.boundedElastic())
+                    .subscribe(disconnect);
+        }
+    }
+
+    @PreDestroy
+    public void shutdown() {
+        // 서버 종료 시 구독만 회수한다. 진행 중 정리의 완료를 기다리는 graceful shutdown은 별도 계약이다.
+        pendingDisconnects.dispose();
     }
 
     private Mono<Void> handleMessage(WebSocketMessage message, WebSocketSession session) {
