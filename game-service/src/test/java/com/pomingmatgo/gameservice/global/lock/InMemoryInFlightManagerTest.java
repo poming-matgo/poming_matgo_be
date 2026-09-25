@@ -10,6 +10,7 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.IntConsumer;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -21,10 +22,11 @@ class InMemoryInFlightManagerTest {
     private static final Duration TTL = Duration.ofSeconds(5);
 
     private InMemoryInFlightManager manager;
+    private final AtomicLong now = new AtomicLong();
 
     @BeforeEach
     void setUp() {
-        manager = new InMemoryInFlightManager();
+        manager = new InMemoryInFlightManager(now::get);
     }
 
     @Test
@@ -48,7 +50,7 @@ class InMemoryInFlightManagerTest {
         assertTrue(manager.trySetFlag(KEY, "first", Duration.ofMillis(80)).block());
         assertFalse(manager.trySetFlag(KEY, "second", TTL).block(), "TTL 내 재획득은 거부돼야 한다");
 
-        Thread.sleep(150);
+        now.addAndGet(Duration.ofMillis(150).toNanos());
 
         assertTrue(manager.trySetFlag(KEY, "second", TTL).block(), "만료된 플래그는 새 요청이 획득할 수 있어야 한다");
     }
@@ -57,7 +59,7 @@ class InMemoryInFlightManagerTest {
     @DisplayName("만료된 잔존 엔트리를 두고 경쟁해도 정확히 하나만 교체에 성공한다")
     void expiredEntryReplacedByExactlyOneWinner() throws Exception {
         assertTrue(manager.trySetFlag(KEY, "stale", Duration.ofMillis(1)).block());
-        Thread.sleep(50);
+        now.addAndGet(Duration.ofMillis(50).toNanos());
 
         AtomicInteger successes = new AtomicInteger();
         runConcurrently(32, i -> {
@@ -85,7 +87,7 @@ class InMemoryInFlightManagerTest {
     @DisplayName("TTL 만료 후 재획득된 플래그를 낡은 소유자의 정리가 지우지 못한다")
     void staleOwnerCleanupCannotDeleteNewOwnersFlag() throws Exception {
         manager.trySetFlag(KEY, "stale-owner", Duration.ofMillis(1)).block();
-        Thread.sleep(50);
+        now.addAndGet(Duration.ofMillis(50).toNanos());
         assertTrue(manager.trySetFlag(KEY, "new-owner", TTL).block());
 
         // 뒤늦게 끝난 원 소유자의 정리 호출
@@ -98,7 +100,7 @@ class InMemoryInFlightManagerTest {
     @DisplayName("만료된 플래그는 isSet에서 false다")
     void expiredFlagIsNotSet() throws Exception {
         manager.trySetFlag(KEY, "owner", Duration.ofMillis(1)).block();
-        Thread.sleep(50);
+        now.addAndGet(Duration.ofMillis(50).toNanos());
 
         assertFalse(manager.isSet(KEY).block());
     }
