@@ -31,12 +31,14 @@ public class MessageSender {
     }
 
     public Mono<Void> sendPayload(WebSocketSession session, Object payload) {
-        // 상대 미접속 또는 방 정리와 동시 실행된 경우
-        if (session == null || !session.isOpen()) {
-            return Mono.empty();
-        }
+        // 미구독 호출은 집계하지 않으며, 연결 상태도 실제 송신 구독 시점에 확인한다.
+        return Mono.defer(() -> {
+            if (session == null || !session.isOpen()) {
+                if (throughputRecorder != null) throughputRecorder.recordSkipped();
+                return Mono.empty();
+            }
 
-        return Mono.fromCallable(() -> objectMapper.writeValueAsString(payload))
+            return Mono.fromCallable(() -> objectMapper.writeValueAsString(payload))
                 .map(session::textMessage)
                 .flatMap(msg -> session.send(Mono.just(msg)))
                 // 전송 성공만 계측 — skip(null/closed 세션)·실패는 throughput에 포함하지 않는다
@@ -45,11 +47,16 @@ public class MessageSender {
                         throughputRecorder.recordSent();
                     }
                 })
+                .doOnCancel(() -> {
+                    if (throughputRecorder != null) throughputRecorder.recordCancelled();
+                })
                 // 전송 실패는 게임 진행을 막지 않는다 — 세션 사망은 disconnect 처리가 별도로 감지·수습
                 .onErrorResume(e -> {
+                    if (throughputRecorder != null) throughputRecorder.recordFailed();
                     log.debug("WS 메시지 전송 실패 — 세션 [{}] 스킵", session.getId(), e);
                     return Mono.empty();
                 });
+        });
     }
 
     public <T> Mono<Void> sendMessageToAllUser(long roomId, WebSocketResDto<T> response) {

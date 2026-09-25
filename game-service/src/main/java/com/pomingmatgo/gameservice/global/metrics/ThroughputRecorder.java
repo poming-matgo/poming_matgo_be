@@ -21,12 +21,27 @@ public class ThroughputRecorder {
     private static final int MAX_SAMPLES = 2 * 60 * 60; // 초 단위 샘플 최대 2시간 보관
 
     private final LongAdder counter = new LongAdder();
+    private final LongAdder failed = new LongAdder();
+    private final LongAdder skipped = new LongAdder();
+    private final LongAdder cancelled = new LongAdder();
     private final ArrayDeque<Long> samples = new ArrayDeque<>();
     private long totalSent;
     private ScheduledExecutorService sampler;
 
     public void recordSent() {
         counter.increment();
+    }
+
+    public void recordFailed() {
+        failed.increment();
+    }
+
+    public void recordSkipped() {
+        skipped.increment();
+    }
+
+    public void recordCancelled() {
+        cancelled.increment();
     }
 
     @PostConstruct
@@ -56,14 +71,20 @@ public class ThroughputRecorder {
     public synchronized Snapshot snapshot() {
         List<Long> copy = new ArrayList<>(samples);
         long max = copy.stream().mapToLong(Long::longValue).max().orElse(0);
-        return new Snapshot(totalSent + counter.sum(), copy.size(), max, copy);
+        return new Snapshot(totalSent + counter.sum(), copy.size(), max, copy,
+                failed.sum(), skipped.sum(), cancelled.sum());
     }
 
     public synchronized void reset() {
         counter.reset();
+        failed.reset();
+        skipped.reset();
+        cancelled.reset();
         totalSent = 0;
         samples.clear();
     }
 
-    public record Snapshot(long totalSent, int seconds, long maxPerSec, List<Long> perSecond) {}
+    // 송신 완료는 서버 측 Publisher 완료이며 클라이언트 수신 확인이 아니다. 실행 중 조회는 근사 집계다.
+    public record Snapshot(long totalSent, int seconds, long maxPerSec, List<Long> perSecond,
+                           long totalFailed, long totalSkipped, long totalCancelled) {}
 }
