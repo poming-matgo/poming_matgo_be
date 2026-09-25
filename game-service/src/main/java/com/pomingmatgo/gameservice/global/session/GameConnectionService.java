@@ -14,7 +14,6 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.web.reactive.socket.WebSocketSession;
-import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 
 import static com.pomingmatgo.gameservice.global.exception.WebSocketErrorCode.*;
@@ -102,9 +101,8 @@ public class GameConnectionService {
                                                         "상대방이 연결을 끊어 게임이 종료됩니다.")))
                                         : Mono.empty();
 
-                                // 종료 안내가 실패해도 정리를 마친 뒤 두 단계의 오류를 외곽에서 기록한다.
-                                return Flux.concatDelayError(notify,
-                                        Mono.defer(() -> roomCleanupService.cleanupRoom(roomId))).then();
+                                // 종료 안내부터 방 정리가 소유하므로 연결 취소가 정리 진입을 막지 않는다.
+                                return roomCleanupService.cleanupRoom(roomId, notify);
                             });
                 })
                 .onErrorResume(e -> {

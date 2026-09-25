@@ -13,6 +13,8 @@ import com.pomingmatgo.gameservice.global.lock.RoomLockManager;
 import com.pomingmatgo.gameservice.global.session.SessionManager;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.slf4j.LoggerFactory;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.test.util.ReflectionTestUtils;
@@ -224,18 +226,21 @@ class RoomCleanupFailureTest {
         return ((Map<?, ?>) ReflectionTestUtils.getField(cleanup, "executions")).size();
     }
 
-    @Test
-    void failureAfterAllObserversCancelIsLoggedAndReleased() {
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void failureAfterAllObserversCancelIsLoggedAndReleased(boolean notificationFailure) {
         Logger logger = (Logger) LoggerFactory.getLogger(RoomCleanupService.class);
         ListAppender<ILoggingEvent> appender = new ListAppender<>();
         appender.start();
         logger.addAppender(appender);
         try {
             Sinks.Empty<Void> gate = Sinks.empty();
-            when(installed.cleanup(ROOM_ID)).thenReturn(gate.asMono());
-            cleanup.cleanupRoom(ROOM_ID).subscribe().dispose();
+            if (!notificationFailure) when(installed.cleanup(ROOM_ID)).thenReturn(gate.asMono());
+            cleanup.cleanupRoom(ROOM_ID, notificationFailure ? gate.asMono() : Mono.empty())
+                    .subscribe().dispose();
             gate.tryEmitError(new IllegalStateException("detached failure"));
             assertEquals(0, executionCount());
+            assertTrue(completed.contains("gameLock"));
             assertTrue(appender.list.stream().anyMatch(event ->
                     event.getFormattedMessage().equals("Room (17) cleanup failed")
                             && event.getThrowableProxy() != null

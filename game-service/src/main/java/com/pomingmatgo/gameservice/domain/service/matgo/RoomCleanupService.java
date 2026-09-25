@@ -18,6 +18,7 @@ import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 import reactor.core.publisher.Sinks;
 
+import java.time.Duration;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -27,6 +28,7 @@ import java.util.concurrent.CancellationException;
 @RequiredArgsConstructor
 @Log4j2
 public class RoomCleanupService {
+    private static final Duration TERMINATION_NOTIFICATION_TIMEOUT = Duration.ofSeconds(5);
 
     private final GameStateRepository gameStateRepository;
     private final InstalledCardRepository installedCardRepository;
@@ -41,6 +43,11 @@ public class RoomCleanupService {
 
     /** 최초 구독 시 정리를 시작하며, 결과 관찰자의 취소는 이미 시작한 정리를 중단하지 않는다. */
     public Mono<Void> cleanupRoom(long roomId) {
+        return cleanupRoom(roomId, Mono.empty());
+    }
+
+    /** 최초 요청의 종료 안내를 최대 5초 기다린 뒤 정리하며, 중복 요청은 기존 실행을 관찰한다. */
+    public Mono<Void> cleanupRoom(long roomId, Mono<Void> notification) {
         return Mono.defer(() -> {
             CleanupExecution execution;
             synchronized (executions) {
@@ -51,14 +58,15 @@ public class RoomCleanupService {
                 executions.put(roomId, execution);
             }
             // 호출자는 결과만 관찰한다. 실제 정리 구독은 방별로 하나만 소유한다.
-            cleanup(roomId).subscribe(execution);
+            cleanup(roomId, notification).subscribe(execution);
             return execution.result.asMono();
         });
     }
 
-    private Mono<Void> cleanup(long roomId) {
-        // 데이터 정리가 오류로 끝나도 세션 정리를 시도하고, 두 단계의 오류를 모두 보존한다.
+    private Mono<Void> cleanup(long roomId, Mono<Void> notification) {
+        // 안내·데이터 정리 오류 뒤에도 다음 단계를 시도하고, 각 단계의 오류를 보존한다.
         return Flux.concatDelayError(
+                Mono.defer(() -> notification).timeout(TERMINATION_NOTIFICATION_TIMEOUT),
                 Mono.defer(() -> cleanupRoomData(roomId)),
                 Mono.defer(() -> sessionManager.removeRoom(roomId))
         ).then().doOnError(error -> log.error("Room ({}) cleanup failed", roomId, error));

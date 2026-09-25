@@ -13,6 +13,8 @@ import com.pomingmatgo.gameservice.global.lock.RoomLockManager;
 import com.pomingmatgo.gameservice.global.session.GameConnectionService;
 import com.pomingmatgo.gameservice.global.session.SessionManager;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.context.ApplicationEventPublisher;
@@ -30,7 +32,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
 
-// 정리 시작 후 취소는 완료를 보장한다. 선행 종료 안내 중 취소는 아직 결함 재현이다.
+// 종료 안내와 데이터 정리는 호출자 취소와 분리해 완료한다.
 class RoomTerminationCancellationTest {
     private static final long ROOM_ID = 18L;
     private static final Duration TIMEOUT = Duration.ofSeconds(3);
@@ -108,7 +110,7 @@ class RoomTerminationCancellationTest {
 
     @ParameterizedTest(name = "cancel={0}")
     @ValueSource(booleans = {false, true})
-    void notificationTerminationControlsWhetherCleanupStarts(boolean cancel) {
+    void notificationCompletionCleansRoomEvenAfterCallerCancellation(boolean cancel) {
         when(sender.sendMessageToAllUser(eq(ROOM_ID), any())).thenReturn(waitAtGate());
         var verifier = StepVerifier.create(terminate(true)).then(() -> {
             assertEquals(1, gate.currentSubscriberCount());
@@ -116,11 +118,11 @@ class RoomTerminationCancellationTest {
         });
         if (cancel) {
             verifier.thenCancel().verify(TIMEOUT);
-            assertEquals(1, cancelled.get());
-            assertEquals(0, gate.currentSubscriberCount());
+            assertEquals(0, cancelled.get());
+            assertEquals(1, gate.currentSubscriberCount());
             assertBeforeDataCleanup();
             assertEquals(Sinks.EmitResult.OK, gate.tryEmitEmpty());
-            assertBeforeDataCleanup();
+            assertFullyCleaned();
             assertEquals(0, completed.get());
         } else {
             verifier.then(() -> assertEquals(Sinks.EmitResult.OK, gate.tryEmitEmpty()))
@@ -129,6 +131,68 @@ class RoomTerminationCancellationTest {
             assertEquals(1, completed.get());
             assertFullyCleaned();
         }
+    }
+
+    @AfterEach
+    void tearDown() {
+        cleanup.shutdown();
+        sessions.shutdown();
+    }
+
+    @ParameterizedTest(name = "cancel={0}")
+    @ValueSource(booleans = {false, true})
+    void notificationTimeoutCleansRoomEvenAfterCallerCancellation(boolean cancel) {
+        when(sender.sendMessageToAllUser(eq(ROOM_ID), any())).thenReturn(waitAtGate());
+        StepVerifier.withVirtualTime(() -> {
+                    Mono<Void> result = terminate(true);
+                    if (!cancel) return result;
+                    result.subscribe().dispose();
+                    return cleanup.cleanupRoom(ROOM_ID).onErrorComplete(java.util.concurrent.TimeoutException.class);
+                })
+                .then(this::assertBeforeDataCleanup)
+                .thenAwait(Duration.ofSeconds(4))
+                .then(this::assertBeforeDataCleanup)
+                .thenAwait(Duration.ofSeconds(1))
+                .expectComplete().verify(TIMEOUT);
+        assertEquals(1, cancelled.get());
+        assertEquals(0, gate.currentSubscriberCount());
+        assertEquals(cancel ? 0 : 1, completed.get());
+        assertFullyCleaned();
+    }
+
+    @Test
+    void overlappingTerminationUsesFirstNotificationAndOneCleanup() {
+        when(sender.sendMessageToAllUser(eq(ROOM_ID), any())).thenReturn(waitAtGate());
+        var firstObserver = terminate(true).subscribe();
+        AtomicInteger duplicateNotification = new AtomicInteger();
+        StepVerifier.create(cleanup.cleanupRoom(ROOM_ID,
+                        Mono.fromRunnable(duplicateNotification::incrementAndGet)))
+                .then(() -> {
+                    firstObserver.dispose();
+                    assertBeforeDataCleanup();
+                    assertEquals(1, gate.currentSubscriberCount());
+                    assertEquals(Sinks.EmitResult.OK, gate.tryEmitEmpty());
+                })
+                .expectComplete().verify(TIMEOUT);
+        assertEquals(0, duplicateNotification.get());
+        assertFullyCleaned();
+    }
+
+    @Test
+    void shutdownDuringNotificationCancelsOwnedSendAndPreventsLateCleanup() {
+        when(sender.sendMessageToAllUser(eq(ROOM_ID), any())).thenReturn(waitAtGate());
+        StepVerifier.withVirtualTime(() -> terminate(true))
+                .then(() -> {
+                    assertBeforeDataCleanup();
+                    cleanup.shutdown();
+                })
+                .expectComplete().verify(TIMEOUT);
+        assertEquals(1, cancelled.get());
+        assertEquals(0, gate.currentSubscriberCount());
+        assertTrue(((Map<?, ?>) ReflectionTestUtils.getField(cleanup, "executions")).isEmpty());
+        assertBeforeDataCleanup();
+        assertEquals(Sinks.EmitResult.OK, gate.tryEmitEmpty());
+        assertBeforeDataCleanup();
     }
 
     private void pauseCardCleanup() {
