@@ -8,12 +8,20 @@ import com.pomingmatgo.gameservice.domain.repository.LeadingPlayerRepository;
 import com.pomingmatgo.gameservice.global.lock.GameLockCleaner;
 import com.pomingmatgo.gameservice.global.lock.RoomLockManager;
 import com.pomingmatgo.gameservice.global.session.SessionManager;
+import jakarta.annotation.PreDestroy;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.log4j.Log4j2;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
+import reactor.core.publisher.BaseSubscriber;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
+import reactor.core.publisher.Sinks;
+
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.concurrent.CancellationException;
 
 @Service
 @RequiredArgsConstructor
@@ -28,13 +36,75 @@ public class RoomCleanupService {
     private final GameLockCleaner gameLockCleaner;
     private final ApplicationEventPublisher eventPublisher;
     private final SessionManager sessionManager;
+    private final Map<Long, CleanupExecution> executions = new HashMap<>();
+    private boolean stopped;
 
+    /** 최초 구독 시 정리를 시작하며, 결과 관찰자의 취소는 이미 시작한 정리를 중단하지 않는다. */
     public Mono<Void> cleanupRoom(long roomId) {
+        return Mono.defer(() -> {
+            CleanupExecution execution;
+            synchronized (executions) {
+                if (stopped) return Mono.error(new IllegalStateException("Room cleanup service stopped"));
+                execution = executions.get(roomId);
+                if (execution != null) return execution.result.asMono();
+                execution = new CleanupExecution(roomId);
+                executions.put(roomId, execution);
+            }
+            // 호출자는 결과만 관찰한다. 실제 정리 구독은 방별로 하나만 소유한다.
+            cleanup(roomId).subscribe(execution);
+            return execution.result.asMono();
+        });
+    }
+
+    private Mono<Void> cleanup(long roomId) {
         // 데이터 정리가 오류로 끝나도 세션 정리를 시도하고, 두 단계의 오류를 모두 보존한다.
         return Flux.concatDelayError(
                 Mono.defer(() -> cleanupRoomData(roomId)),
                 Mono.defer(() -> sessionManager.removeRoom(roomId))
         ).then().doOnError(error -> log.error("Room ({}) cleanup failed", roomId, error));
+    }
+
+    @PreDestroy
+    public void shutdown() {
+        List<CleanupExecution> pending;
+        synchronized (executions) {
+            stopped = true;
+            pending = List.copyOf(executions.values());
+        }
+        pending.forEach(CleanupExecution::dispose);
+    }
+
+    private final class CleanupExecution extends BaseSubscriber<Void> {
+        private final long roomId;
+        private final Sinks.Empty<Void> result = Sinks.empty();
+
+        private CleanupExecution(long roomId) {
+            this.roomId = roomId;
+        }
+
+        private void remove() {
+            synchronized (executions) {
+                executions.remove(roomId, this);
+            }
+        }
+
+        @Override
+        protected void hookOnComplete() {
+            remove();
+            result.tryEmitEmpty();
+        }
+
+        @Override
+        protected void hookOnError(Throwable error) {
+            remove();
+            result.tryEmitError(error);
+        }
+
+        @Override
+        protected void hookOnCancel() {
+            remove();
+            result.tryEmitError(new CancellationException("Room cleanup stopped: " + roomId));
+        }
     }
 
     public Mono<Void> cleanupRoomData(long roomId) {

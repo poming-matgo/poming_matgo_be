@@ -1,5 +1,8 @@
 package com.pomingmatgo.gameservice.domain.service.matgo;
 
+import ch.qos.logback.classic.Logger;
+import ch.qos.logback.classic.spi.ILoggingEvent;
+import ch.qos.logback.core.read.ListAppender;
 import com.pomingmatgo.gameservice.domain.event.RoomCleanedUpEvent;
 import com.pomingmatgo.gameservice.domain.repository.AcquiredCardRepository;
 import com.pomingmatgo.gameservice.domain.repository.GameStateRepository;
@@ -10,7 +13,9 @@ import com.pomingmatgo.gameservice.global.lock.RoomLockManager;
 import com.pomingmatgo.gameservice.global.session.SessionManager;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.slf4j.LoggerFactory;
 import org.springframework.context.ApplicationEventPublisher;
+import org.springframework.test.util.ReflectionTestUtils;
 import reactor.core.Exceptions;
 import reactor.core.publisher.Mono;
 import reactor.core.publisher.Sinks;
@@ -19,6 +24,11 @@ import reactor.test.StepVerifier;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
+import java.util.concurrent.CancellationException;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
@@ -124,6 +134,144 @@ class RoomCleanupFailureTest {
                     assertSame(failure, error);
                     assertTrue(completed.contains("state"));
                 }).verify(TIMEOUT);
+    }
+
+    @Test
+    void fullCleanupIsLazyAndSynchronousCompletionReleasesTracking() {
+        clearInvocations(state);
+        Mono<Void> result = cleanup.cleanupRoom(ROOM_ID);
+        verifyNoInteractions(state);
+        assertEquals(0, executionCount());
+        StepVerifier.create(result).expectComplete().verify(TIMEOUT);
+        assertEquals(0, executionCount());
+        StepVerifier.create(result).expectComplete().verify(TIMEOUT);
+        verify(state, times(2)).cleanup(ROOM_ID);
+    }
+
+    @Test
+    void overlappingCleanupSharesExecutionEvenAfterFirstObserverCancels() {
+        Sinks.Empty<Void> gate = Sinks.empty();
+        when(installed.cleanup(ROOM_ID)).thenReturn(gate.asMono());
+        var first = cleanup.cleanupRoom(ROOM_ID).subscribe();
+        assertEquals(1, executionCount());
+        StepVerifier.create(cleanup.cleanupRoom(ROOM_ID))
+                .then(() -> {
+                    first.dispose();
+                    assertEquals(1, gate.currentSubscriberCount());
+                    verify(state).cleanup(ROOM_ID);
+                    assertEquals(Sinks.EmitResult.OK, gate.tryEmitEmpty());
+                })
+                .expectComplete().verify(TIMEOUT);
+        assertEquals(0, executionCount());
+    }
+
+    @Test
+    void detachedCleanupFailureStillReleasesTrackingAndReachesOtherObserver() {
+        Sinks.Empty<Void> gate = Sinks.empty();
+        var failure = new IllegalStateException("late cleanup failure");
+        when(installed.cleanup(ROOM_ID)).thenReturn(gate.asMono());
+        var first = cleanup.cleanupRoom(ROOM_ID).subscribe();
+        first.dispose();
+        StepVerifier.create(cleanup.cleanupRoom(ROOM_ID))
+                .then(() -> assertEquals(Sinks.EmitResult.OK, gate.tryEmitError(failure)))
+                .expectErrorSatisfies(error -> assertSame(failure, error)).verify(TIMEOUT);
+        assertEquals(0, executionCount());
+        assertTrue(completed.contains("gameLock"));
+    }
+
+    @Test
+    void shutdownCancelsExecutionNotifiesObserverAndRejectsNewCleanup() {
+        Sinks.Empty<Void> gate = Sinks.empty();
+        when(installed.cleanup(ROOM_ID)).thenReturn(gate.asMono());
+        StepVerifier.create(cleanup.cleanupRoom(ROOM_ID))
+                .then(() -> {
+                    assertEquals(1, gate.currentSubscriberCount());
+                    cleanup.shutdown();
+                })
+                .expectError(CancellationException.class).verify(TIMEOUT);
+        assertEquals(0, gate.currentSubscriberCount());
+        assertEquals(0, executionCount());
+        cleanup.shutdown();
+        StepVerifier.create(cleanup.cleanupRoom(ROOM_ID))
+                .expectError(IllegalStateException.class).verify(TIMEOUT);
+        verify(state).cleanup(ROOM_ID);
+    }
+
+    @Test
+    void shutdownDuringPublisherCreationDoesNotLeaveAnExecution() {
+        Sinks.Empty<Void> gate = Sinks.empty();
+        when(installed.cleanup(ROOM_ID)).thenAnswer(invocation -> {
+            cleanup.shutdown();
+            return gate.asMono();
+        });
+        StepVerifier.create(cleanup.cleanupRoom(ROOM_ID))
+                .expectError(CancellationException.class).verify(TIMEOUT);
+        assertEquals(0, gate.currentSubscriberCount());
+        assertEquals(0, executionCount());
+    }
+
+    @Test
+    void synchronousFullCleanupFailureReleasesTracking() {
+        var failure = new IllegalStateException("construction failed");
+        when(state.cleanup(ROOM_ID)).thenThrow(failure);
+        StepVerifier.create(cleanup.cleanupRoom(ROOM_ID))
+                .expectErrorSatisfies(error -> assertSame(failure, error)).verify(TIMEOUT);
+        assertEquals(0, executionCount());
+        assertTrue(completed.contains("gameLock"));
+    }
+
+    private int executionCount() {
+        return ((Map<?, ?>) ReflectionTestUtils.getField(cleanup, "executions")).size();
+    }
+
+    @Test
+    void failureAfterAllObserversCancelIsLoggedAndReleased() {
+        Logger logger = (Logger) LoggerFactory.getLogger(RoomCleanupService.class);
+        ListAppender<ILoggingEvent> appender = new ListAppender<>();
+        appender.start();
+        logger.addAppender(appender);
+        try {
+            Sinks.Empty<Void> gate = Sinks.empty();
+            when(installed.cleanup(ROOM_ID)).thenReturn(gate.asMono());
+            cleanup.cleanupRoom(ROOM_ID).subscribe().dispose();
+            gate.tryEmitError(new IllegalStateException("detached failure"));
+            assertEquals(0, executionCount());
+            assertTrue(appender.list.stream().anyMatch(event ->
+                    event.getFormattedMessage().equals("Room (17) cleanup failed")
+                            && event.getThrowableProxy() != null
+                            && event.getThrowableProxy().getMessage().equals("detached failure")));
+        } finally {
+            logger.detachAppender(appender);
+            appender.stop();
+        }
+    }
+
+    @Test
+    void simultaneousRequestsStartOnlyOneCleanup() throws Exception {
+        Sinks.Empty<Void> gate = Sinks.empty();
+        when(installed.cleanup(ROOM_ID)).thenReturn(gate.asMono());
+        CountDownLatch ready = new CountDownLatch(2);
+        CountDownLatch start = new CountDownLatch(1);
+        try (var executor = Executors.newVirtualThreadPerTaskExecutor()) {
+            var request = (java.util.concurrent.Callable<reactor.core.Disposable>) () -> {
+                ready.countDown();
+                assertTrue(start.await(3, TimeUnit.SECONDS));
+                return cleanup.cleanupRoom(ROOM_ID).subscribe();
+            };
+            var first = executor.submit(request);
+            var second = executor.submit(request);
+            assertTrue(ready.await(3, TimeUnit.SECONDS));
+            start.countDown();
+            first.get(3, TimeUnit.SECONDS).dispose();
+            second.get(3, TimeUnit.SECONDS).dispose();
+            assertEquals(1, executionCount());
+            assertEquals(1, gate.currentSubscriberCount());
+            verify(state).cleanup(ROOM_ID);
+            assertEquals(Sinks.EmitResult.OK, gate.tryEmitEmpty());
+            assertEquals(0, executionCount());
+        } finally {
+            cleanup.shutdown();
+        }
     }
 
     private Mono<Void> done(String resource) {

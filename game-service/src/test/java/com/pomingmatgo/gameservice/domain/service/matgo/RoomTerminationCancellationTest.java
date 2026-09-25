@@ -30,7 +30,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
 
-// 현재 취소 결함 재현이다. 방 소유 정리 도입 시 취소 사례의 기대값을 정리 완료로 전환한다.
+// 정리 시작 후 취소는 완료를 보장한다. 선행 종료 안내 중 취소는 아직 결함 재현이다.
 class RoomTerminationCancellationTest {
     private static final long ROOM_ID = 18L;
     private static final Duration TIMEOUT = Duration.ofSeconds(3);
@@ -72,7 +72,7 @@ class RoomTerminationCancellationTest {
 
     @ParameterizedTest(name = "disconnect={0}")
     @ValueSource(booleans = {false, true})
-    void cancellationDuringDataCleanupLeavesCardsAndSessionMappings(boolean disconnect) {
+    void cancellationDuringDataCleanupStillRemovesCardsAndSessionMappings(boolean disconnect) {
         pauseCardCleanup();
         StepVerifier.create(terminate(disconnect))
                 .then(() -> {
@@ -81,13 +81,13 @@ class RoomTerminationCancellationTest {
                 })
                 .thenCancel().verify(TIMEOUT);
 
-        assertEquals(1, cancelled.get());
-        assertEquals(0, gate.currentSubscriberCount());
+        assertEquals(0, cancelled.get());
+        assertEquals(1, gate.currentSubscriberCount());
         assertEquals(0, completed.get());
         assertPartialCleanup(disconnect);
         assertEquals(Sinks.EmitResult.OK, gate.tryEmitEmpty());
-        assertPartialCleanup(disconnect);
-        assertEquals(0, completed.get(), "늦은 완료로 취소된 정리가 재개되지 않는다");
+        assertFullyCleaned();
+        assertEquals(0, completed.get(), "취소한 호출자에게 완료 신호를 전달하지 않는다");
     }
 
     @ParameterizedTest(name = "disconnect={0}")
