@@ -22,22 +22,22 @@ import static org.junit.jupiter.api.Assertions.*;
 class InMemoryGameLockLifecycleTest {
 
     private LockedAction action;
-    private InMemoryGameLockAspect aspect;
+    private InMemoryGameActionExecutor executor;
     private InMemoryRoomExecutionGate gate;
 
     @BeforeEach
     void setUp() {
         AspectJProxyFactory factory = new AspectJProxyFactory(new LockedAction());
         gate = new InMemoryRoomExecutionGate();
-        aspect = new InMemoryGameLockAspect(gate);
-        factory.addAspect(aspect);
+        executor = new InMemoryGameActionExecutor(gate);
+        factory.addAspect(new InMemoryGameLockAspect(executor));
         action = factory.getProxy();
     }
 
     @AfterEach
     void shutdown() {
-        aspect.shutdown();
-        assertEquals(0, ((Set<?>) ReflectionTestUtils.getField(aspect, "executions")).size());
+        executor.shutdown();
+        assertEquals(0, ((Set<?>) ReflectionTestUtils.getField(executor, "executions")).size());
     }
 
     @Test
@@ -46,7 +46,7 @@ class InMemoryGameLockLifecycleTest {
         StepVerifier.create(action.run(1L, () -> Mono.just("entered " + entered.incrementAndGet())))
                 .thenCancel().verify(Duration.ofSeconds(3));
         assertEquals(0, entered.get());
-        assertEquals(0, ((Set<?>) ReflectionTestUtils.getField(aspect, "executions")).size());
+        assertEquals(0, ((Set<?>) ReflectionTestUtils.getField(executor, "executions")).size());
         assertExclusiveAfterRelease();
     }
 
@@ -58,8 +58,8 @@ class InMemoryGameLockLifecycleTest {
                 .then(() -> assertEquals(1, finish.currentSubscriberCount()))
                 .thenCancel().verify(Duration.ofSeconds(3));
         assertEquals(1, finish.currentSubscriberCount());
-        assertEquals(1, ((Set<?>) ReflectionTestUtils.getField(aspect, "executions")).size());
-        StepVerifier.create(aspect.withCleanup(1, () -> Mono.fromRunnable(cleaned::incrementAndGet)))
+        assertEquals(1, ((Set<?>) ReflectionTestUtils.getField(executor, "executions")).size());
+        StepVerifier.create(executor.withCleanup(1, () -> Mono.fromRunnable(cleaned::incrementAndGet)))
                 .then(() -> {
                     assertEquals(0, cleaned.get());
                     busy(action.run(1L, () -> Mono.just("contender")));
@@ -67,7 +67,7 @@ class InMemoryGameLockLifecycleTest {
                     finish.tryEmitValue("done");
                 }).verifyComplete();
         assertEquals(1, cleaned.get());
-        assertEquals(0, ((Set<?>) ReflectionTestUtils.getField(aspect, "executions")).size());
+        assertEquals(0, ((Set<?>) ReflectionTestUtils.getField(executor, "executions")).size());
         assertExclusiveAfterRelease();
     }
 
@@ -79,7 +79,7 @@ class InMemoryGameLockLifecycleTest {
         StepVerifier.create(action.run(1L, () -> validation.asMono().then(
                         GameActionAcceptance.beforeMutation(() -> Mono.fromSupplier(() -> "changed " + mutations.incrementAndGet())))))
                 .then(() -> {
-                    aspect.withCleanup(1, Mono::empty).subscribe(ignored -> {}, cleaned::tryEmitError, cleaned::tryEmitEmpty);
+                    executor.withCleanup(1, Mono::empty).subscribe(ignored -> {}, cleaned::tryEmitError, cleaned::tryEmitEmpty);
                     validation.tryEmitEmpty();
                 })
                 .expectErrorSatisfies(error -> assertEquals(TRY_AGAIN,
@@ -94,7 +94,7 @@ class InMemoryGameLockLifecycleTest {
     void shutdownCancelsAcceptedExecutionReleasesLockAndRejectsNewSubscriptions() {
         Sinks.One<String> finish = Sinks.one();
         StepVerifier.create(action.run(1L, () -> GameActionAcceptance.beforeMutation(finish::asMono)))
-                .then(aspect::shutdown)
+                .then(executor::shutdown)
                 .expectError(java.util.concurrent.CancellationException.class).verify(Duration.ofSeconds(3));
         assertEquals(0, finish.currentSubscriberCount());
         gate.release(gate.acquire(1));

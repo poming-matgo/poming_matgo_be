@@ -17,6 +17,7 @@ import static com.pomingmatgo.gameservice.global.exception.WebSocketErrorCode.TR
 @Component
 @Profile("in-memory")
 public class InMemoryRoomExecutionGate {
+    // 방별 액션·정리·생성의 진입만 직렬화하며, 실행 구독과 호출자 취소는 소유하지 않는다.
     private final Map<Long, Entry> rooms = new HashMap<>();
 
     public synchronized Entry acquire(long roomId) {
