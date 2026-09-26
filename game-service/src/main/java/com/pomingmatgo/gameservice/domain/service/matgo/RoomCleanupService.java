@@ -58,7 +58,8 @@ public class RoomCleanupService {
                 executions.put(roomId, execution);
             }
             // 호출자는 결과만 관찰한다. 실제 정리 구독은 방별로 하나만 소유한다.
-            cleanup(roomId, notification).subscribe(execution);
+            Mono.defer(() -> gameLockCleaner.withCleanup(roomId, () -> cleanup(roomId, notification)))
+                    .subscribe(execution);
             return execution.result.asMono();
         });
     }
@@ -116,6 +117,10 @@ public class RoomCleanupService {
     }
 
     public Mono<Void> cleanupRoomData(long roomId) {
+        return Mono.defer(() -> gameLockCleaner.withCleanup(roomId, () -> deleteRoomData(roomId)));
+    }
+
+    private Mono<Void> deleteRoomData(long roomId) {
         // 개별 오류가 다른 정리를 취소하지 않게 하고, 동기 예외도 구독 시 오류로 합산한다.
         return Mono.whenDelayError(
                 // 데이터 삭제 전에 신규 타이머를 차단한다. 동기 리스너로 등록과 종료를 직렬화한다.

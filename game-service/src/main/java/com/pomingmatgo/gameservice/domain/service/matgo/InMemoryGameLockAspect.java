@@ -1,7 +1,8 @@
 package com.pomingmatgo.gameservice.domain.service.matgo;
 
-import com.pomingmatgo.gameservice.global.exception.WebSocketBusinessException;
 import com.pomingmatgo.gameservice.global.lock.GameLockCleaner;
+import com.pomingmatgo.gameservice.global.lock.InMemoryRoomExecutionGate;
+import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.aspectj.lang.ProceedingJoinPoint;
 import org.aspectj.lang.annotation.Around;
@@ -11,18 +12,16 @@ import org.springframework.context.annotation.Profile;
 import org.springframework.stereotype.Component;
 import reactor.core.publisher.Mono;
 
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.Semaphore;
-
-import static com.pomingmatgo.gameservice.global.exception.WebSocketErrorCode.TRY_AGAIN;
+import java.util.function.Supplier;
 
 @Profile("in-memory")
 @Slf4j
 @Aspect
 @Component
+@RequiredArgsConstructor
 public class InMemoryGameLockAspect implements GameLockCleaner {
 
-    private final ConcurrentHashMap<Long, Semaphore> locksByRoom = new ConcurrentHashMap<>();
+    private final InMemoryRoomExecutionGate executionGate;
 
     @Around("@annotation(gameLock)")
     public Mono<Object> lock(ProceedingJoinPoint joinPoint, GameLock gameLock) {
@@ -34,14 +33,7 @@ public class InMemoryGameLockAspect implements GameLockCleaner {
         long roomId = GameLockKey.roomId(joinPoint);
 
         return Mono.usingWhen(
-                Mono.fromSupplier(() -> {
-                    Semaphore semaphore = locksByRoom.computeIfAbsent(roomId, k -> new Semaphore(1));
-                    // 매 구독마다 획득하며, 경합 시 대기 없이 실패한다.
-                    if (!semaphore.tryAcquire()) {
-                        throw new WebSocketBusinessException(TRY_AGAIN);
-                    }
-                    return semaphore;
-                }),
+                Mono.fromSupplier(() -> executionGate.acquire(roomId)),
                 s -> {
                     try {
                         return (Mono<Object>) joinPoint.proceed();
@@ -49,14 +41,19 @@ public class InMemoryGameLockAspect implements GameLockCleaner {
                         return Mono.error(e);
                     }
                 },
-                s -> Mono.fromRunnable(s::release),
-                (s, err) -> Mono.fromRunnable(s::release),
-                s -> Mono.fromRunnable(s::release)
+                s -> Mono.fromRunnable(() -> executionGate.release(s)),
+                (s, err) -> Mono.fromRunnable(() -> executionGate.release(s)),
+                s -> Mono.fromRunnable(() -> executionGate.release(s))
         );
     }
 
     @Override
     public Mono<Void> cleanup(long roomId) {
-        return Mono.fromRunnable(() -> locksByRoom.remove(roomId));
+        return Mono.fromRunnable(() -> executionGate.discardIdle(roomId));
+    }
+
+    @Override
+    public Mono<Void> withCleanup(long roomId, Supplier<Mono<Void>> operation) {
+        return executionGate.withCleanup(roomId, operation);
     }
 }

@@ -2,6 +2,7 @@ package com.pomingmatgo.gameservice.domain.repository;
 
 import com.pomingmatgo.gameservice.domain.GameState;
 import com.pomingmatgo.gameservice.scheduler.RoomTimerLifecycle;
+import com.pomingmatgo.gameservice.global.lock.InMemoryRoomExecutionGate;
 import lombok.RequiredArgsConstructor;
 import com.pomingmatgo.gameservice.global.exception.BusinessException;
 import com.pomingmatgo.gameservice.global.exception.ErrorCode;
@@ -17,6 +18,7 @@ import java.util.concurrent.ConcurrentHashMap;
 public class InMemoryGameStateRepository implements GameStateRepository {
 
     private final RoomTimerLifecycle timerLifecycle;
+    private final InMemoryRoomExecutionGate executionGate;
 
     private final ConcurrentHashMap<Long, GameState> store = new ConcurrentHashMap<>();
 
@@ -27,7 +29,7 @@ public class InMemoryGameStateRepository implements GameStateRepository {
 
     @Override
     public Mono<Long> create(GameState gameState) {
-        return Mono.fromCallable(() -> {
+        return Mono.fromCallable(() -> executionGate.create(gameState.getRoomId(), () -> {
             synchronized (timerLifecycle) {
                 GameState existing = store.putIfAbsent(gameState.getRoomId(), gameState);
                 if (existing != null) {
@@ -36,7 +38,7 @@ public class InMemoryGameStateRepository implements GameStateRepository {
                 timerLifecycle.open(gameState.getRoomId());
             }
             return gameState.getRoomId();
-        });
+        }));
     }
 
     @Override

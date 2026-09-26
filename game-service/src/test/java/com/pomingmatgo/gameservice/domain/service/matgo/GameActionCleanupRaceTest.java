@@ -20,6 +20,8 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.mock.mockito.SpyBean;
 import org.springframework.test.context.ActiveProfiles;
+import reactor.core.Disposable;
+import reactor.core.Disposables;
 import reactor.core.publisher.Mono;
 import reactor.core.publisher.Sinks;
 import reactor.test.StepVerifier;
@@ -32,13 +34,12 @@ import static com.pomingmatgo.gameservice.global.exception.WebSocketErrorCode.TR
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.doAnswer;
 
-// 현재 동작의 결함 재현이다. 실행 소유권 도입 시 정리 대기·낡은 실행 거부 기대값으로 전환한다.
 @SpringBootTest(properties = "spring.autoconfigure.exclude="
         + "org.redisson.spring.starter.RedissonAutoConfigurationV2,"
         + "org.springframework.boot.autoconfigure.data.redis.RedisAutoConfiguration,"
         + "org.springframework.boot.autoconfigure.data.redis.RedisReactiveAutoConfiguration")
 @ActiveProfiles("in-memory")
-@DisplayName("게임 액션과 방 정리·재생성 경합 기준선")
+@DisplayName("게임 액션과 방 정리·재생성 직렬화")
 class GameActionCleanupRaceTest {
     private static final long ROOM_ID = 940_002L;
     private static final Duration TIMEOUT = Duration.ofSeconds(3);
@@ -52,6 +53,7 @@ class GameActionCleanupRaceTest {
     private final Sinks.Empty<Void> gate = Sinks.empty();
     private final AtomicInteger waiting = new AtomicInteger();
     private final AtomicInteger succeeded = new AtomicInteger();
+    private final Disposable.Composite subscriptions = Disposables.composite();
 
     @BeforeEach
     void setUp() {
@@ -65,57 +67,67 @@ class GameActionCleanupRaceTest {
 
     @AfterEach
     void tearDown() {
+        gate.tryEmitEmpty();
+        subscriptions.dispose();
         roomCleanupService.cleanupRoom(ROOM_ID).block(TIMEOUT);
     }
 
     @ParameterizedTest(name = "전체 정리={0}")
     @ValueSource(booleans = {false, true})
-    @DisplayName("정리는 진행 중 액션을 기다리지 않고, 늦은 액션은 삭제된 방의 바닥 카드를 다시 만든다")
-    void lateActionRecreatesCardsAfterCleanup(boolean fullCleanup) {
+    @DisplayName("정리는 진행 중 액션 완료를 기다린 뒤 상태와 카드를 삭제한다")
+    void cleanupWaitsForActionAndLeavesNoCards(boolean fullCleanup) {
+        Sinks.Empty<Void> cleaned = Sinks.empty();
         StepVerifier.create(submit())
                 .then(() -> {
                     assertPausedAndLocked();
-                    cleanup(fullCleanup).block(TIMEOUT);
-                    assertRoomAbsent();
-                    assertEquals(0, succeeded.get());
-                    assertEquals(Sinks.EmitResult.OK, gate.tryEmitEmpty());
-                })
-                .expectErrorSatisfies(error -> assertEquals(ErrorCode.SYSTEM_ERROR,
-                        assertInstanceOf(BusinessException.class, error).getErrorCode()))
-                .verify(TIMEOUT);
-
-        assertNull(gameStateRepository.findById(ROOM_ID).block(TIMEOUT), "상태 save는 삭제된 방을 복원하지 않는다");
-        assertEquals(List.of(Card.JAN_3, Card.MAR_1), floor(), "상태 저장 실패 전에 카드 쓰기는 이미 발생한다");
-        assertEquals(0, succeeded.get());
-    }
-
-    @ParameterizedTest(name = "전체 정리={0}")
-    @ValueSource(booleans = {false, true})
-    @DisplayName("같은 ID 재생성은 새 락으로 진입하고, 이전 액션이 새 방의 종료 상태를 덮는다")
-    void oldActionOverwritesRecreatedRoom(boolean fullCleanup) {
-        StepVerifier.create(submit())
-                .then(() -> {
+                    subscriptions.add(cleanup(fullCleanup).subscribe(ignored -> {}, cleaned::tryEmitError, cleaned::tryEmitEmpty));
+                    assertNotNull(gameStateRepository.findById(ROOM_ID).block(TIMEOUT));
+                    assertEquals(List.of(Card.FEB_3), installedCardRepository
+                            .getPlayerCards(ROOM_ID, Player.PLAYER_2).block(TIMEOUT));
                     assertPausedAndLocked();
-                    cleanup(fullCleanup).block(TIMEOUT);
-                    assertRoomAbsent();
-                    gameStateRepository.create(state(7, GamePhase.AWAITING_GO_STOP_CHOICE)).block(TIMEOUT);
-                    GameState ended = gamePlayService.executeGoStop(ROOM_ID, Player.PLAYER_1, false, null)
-                            .block(TIMEOUT);
-                    assertNotNull(ended);
-                    assertEquals(GamePhase.END, ended.getPhase(), "이전 액션이 락 안에 있어도 새 액션이 완료된다");
-                    assertEquals(7, ended.getRound());
                     assertEquals(0, succeeded.get());
                     assertEquals(Sinks.EmitResult.OK, gate.tryEmitEmpty());
                 })
                 .assertNext(result -> assertEquals(2, result.updatedGameState().getCurrentTurn()))
                 .expectComplete().verify(TIMEOUT);
 
-        GameState overwritten = gameStateRepository.findById(ROOM_ID).block(TIMEOUT);
-        assertNotNull(overwritten);
-        assertEquals(1, overwritten.getRound());
-        assertEquals(GamePhase.IN_PROGRESS, overwritten.getPhase());
-        assertEquals(Player.PLAYER_2, overwritten.getCurrentPlayer());
-        assertEquals(List.of(Card.JAN_3, Card.MAR_1), floor());
+        cleaned.asMono().block(TIMEOUT);
+        assertRoomAbsent();
+        assertEquals(1, succeeded.get());
+    }
+
+    @ParameterizedTest(name = "전체 정리={0}")
+    @ValueSource(booleans = {false, true})
+    @DisplayName("같은 ID 재생성은 정리 완료 후 가능하며 이전 액션의 쓰기가 남지 않는다")
+    void recreationWaitsForCleanupAndKeepsNewState(boolean fullCleanup) {
+        Sinks.Empty<Void> cleaned = Sinks.empty();
+        StepVerifier.create(submit())
+                .then(() -> {
+                    assertPausedAndLocked();
+                    subscriptions.add(cleanup(fullCleanup).subscribe(ignored -> {}, cleaned::tryEmitError, cleaned::tryEmitEmpty));
+                    StepVerifier.create(gameStateRepository.create(state(7, GamePhase.AWAITING_GO_STOP_CHOICE)))
+                            .expectErrorSatisfies(error -> assertEquals(ErrorCode.ALREADY_EXISTED_ROOM,
+                                    assertInstanceOf(BusinessException.class, error).getErrorCode()))
+                            .verify(TIMEOUT);
+                    StepVerifier.create(gamePlayService.executeGoStop(ROOM_ID, Player.PLAYER_1, false, null))
+                            .expectErrorSatisfies(error -> assertEquals(TRY_AGAIN,
+                                    assertInstanceOf(WebSocketBusinessException.class, error).getWebsocketErrorCode()))
+                            .verify(TIMEOUT);
+                    assertEquals(0, succeeded.get());
+                    assertEquals(Sinks.EmitResult.OK, gate.tryEmitEmpty());
+                })
+                .assertNext(result -> assertEquals(2, result.updatedGameState().getCurrentTurn()))
+                .expectComplete().verify(TIMEOUT);
+
+        cleaned.asMono().block(TIMEOUT);
+        assertRoomAbsent();
+        gameStateRepository.create(state(7, GamePhase.AWAITING_GO_STOP_CHOICE)).block(TIMEOUT);
+        GameState ended = gamePlayService.executeGoStop(ROOM_ID, Player.PLAYER_1, false, null).block(TIMEOUT);
+        assertNotNull(ended);
+        assertEquals(GamePhase.END, ended.getPhase());
+        assertEquals(7, ended.getRound());
+        assertEquals(ended, gameStateRepository.findById(ROOM_ID).block(TIMEOUT));
+        assertEquals(List.of(), floor());
         assertEquals(1, succeeded.get());
     }
 
@@ -134,6 +146,39 @@ class GameActionCleanupRaceTest {
         assertEquals(List.of(Card.JAN_3, Card.MAR_1), floor());
         cleanup(fullCleanup).block(TIMEOUT);
         assertRoomAbsent();
+    }
+
+    @ParameterizedTest(name = "전체 정리={0}")
+    @ValueSource(booleans = {false, true})
+    @DisplayName("상태 삭제 뒤 카드 정리가 대기 중이어도 신규 액션과 방 재생성은 거부한다")
+    void deletedStateDoesNotAllowRecreationBeforeRemainingCleanup(boolean fullCleanup) {
+        Sinks.Empty<Void> deleting = Sinks.empty();
+        doAnswer(invocation -> {
+            Mono<Void> deletion = (Mono<Void>) invocation.callRealMethod();
+            return deleting.asMono().then(deletion);
+        }).when(installedCardRepository).cleanup(ROOM_ID);
+
+        try {
+            StepVerifier.create(cleanup(fullCleanup))
+                    .then(() -> {
+                        assertEquals(1, deleting.currentSubscriberCount());
+                        assertNull(gameStateRepository.findById(ROOM_ID).block(TIMEOUT));
+                        StepVerifier.create(gameStateRepository.create(state(7, GamePhase.AWAITING_GO_STOP_CHOICE)))
+                                .expectErrorSatisfies(error -> assertEquals(ErrorCode.ALREADY_EXISTED_ROOM,
+                                        assertInstanceOf(BusinessException.class, error).getErrorCode()))
+                                .verify(TIMEOUT);
+                        StepVerifier.create(submit())
+                                .expectErrorSatisfies(error -> assertEquals(TRY_AGAIN,
+                                        assertInstanceOf(WebSocketBusinessException.class, error).getWebsocketErrorCode()))
+                                .verify(TIMEOUT);
+                        assertEquals(Sinks.EmitResult.OK, deleting.tryEmitEmpty());
+                    })
+                    .expectComplete().verify(TIMEOUT);
+            gameStateRepository.create(state(7, GamePhase.AWAITING_GO_STOP_CHOICE)).block(TIMEOUT);
+            assertEquals(7, gameStateRepository.findById(ROOM_ID).block(TIMEOUT).getRound());
+        } finally {
+            deleting.tryEmitEmpty();
+        }
     }
 
     @SuppressWarnings("unchecked")

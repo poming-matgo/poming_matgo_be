@@ -36,7 +36,7 @@ class RoomTerminationFailureTest {
     private final AcquiredCardRepository acquired = mock(AcquiredCardRepository.class);
     private final LeadingPlayerRepository leader = mock(LeadingPlayerRepository.class);
     private final RoomLockManager roomLock = mock(RoomLockManager.class);
-    private final GameLockCleaner gameLock = mock(GameLockCleaner.class);
+    private final GameLockCleaner gameLock = mock(GameLockCleaner.class, CALLS_REAL_METHODS);
     private final SessionManager sessions = spy(new SessionManager());
     private final RoomCleanupService cleanup = new RoomCleanupService(
             state, installed, acquired, leader, roomLock, gameLock,

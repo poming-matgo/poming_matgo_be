@@ -1,5 +1,6 @@
 package com.pomingmatgo.gameservice.domain.service.matgo;
 
+import com.pomingmatgo.gameservice.global.lock.InMemoryRoomExecutionGate;
 import com.pomingmatgo.gameservice.global.exception.WebSocketBusinessException;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -21,7 +22,7 @@ class InMemoryGameLockLifecycleTest {
     @BeforeEach
     void setUp() {
         AspectJProxyFactory factory = new AspectJProxyFactory(new LockedAction());
-        factory.addAspect(new InMemoryGameLockAspect());
+        factory.addAspect(new InMemoryGameLockAspect(new InMemoryRoomExecutionGate()));
         action = factory.getProxy();
     }
 

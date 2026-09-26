@@ -43,7 +43,7 @@ class RoomCleanupFailureTest {
     private final AcquiredCardRepository acquired = mock(AcquiredCardRepository.class);
     private final LeadingPlayerRepository leader = mock(LeadingPlayerRepository.class);
     private final RoomLockManager roomLock = mock(RoomLockManager.class);
-    private final GameLockCleaner gameLock = mock(GameLockCleaner.class);
+    private final GameLockCleaner gameLock = mock(GameLockCleaner.class, CALLS_REAL_METHODS);
     private final ApplicationEventPublisher events = mock(ApplicationEventPublisher.class);
     private final List<String> completed = new ArrayList<>();
     private final RoomCleanupService cleanup = new RoomCleanupService(
