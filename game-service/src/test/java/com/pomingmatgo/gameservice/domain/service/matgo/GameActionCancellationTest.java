@@ -10,6 +10,7 @@ import com.pomingmatgo.gameservice.domain.repository.GameStateRepository;
 import com.pomingmatgo.gameservice.domain.repository.InMemoryInstalledCardRepository;
 import com.pomingmatgo.gameservice.global.exception.WebSocketBusinessException;
 import com.pomingmatgo.gameservice.global.exception.WebSocketErrorCode;
+import com.pomingmatgo.gameservice.scheduler.TurnScheduler;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -37,7 +38,10 @@ import static com.pomingmatgo.gameservice.global.exception.WebSocketErrorCode.IN
 import static com.pomingmatgo.gameservice.global.exception.WebSocketErrorCode.TRY_AGAIN;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.doAnswer;
-import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.never;
+import static org.mockito.ArgumentMatchers.*;
 
 @SpringBootTest(properties = "spring.autoconfigure.exclude="
         + "org.redisson.spring.starter.RedissonAutoConfigurationV2,"
@@ -51,6 +55,7 @@ class GameActionCancellationTest {
     private static final List<Card> INITIAL_CARDS = List.of(Card.JAN_3, Card.FEB_3, Card.MAR_1, Card.APR_1);
 
     @Autowired GamePlayService gamePlayService;
+    @Autowired TurnFlowService turnFlowService;
     @SpyBean GameStateRepository gameStateRepository;
     @Autowired AcquiredCardRepository acquiredCardRepository;
     @Autowired RoomCleanupService roomCleanupService;
@@ -60,6 +65,7 @@ class GameActionCancellationTest {
     private final AtomicInteger waiting = new AtomicInteger();
     private final AtomicInteger cancelled = new AtomicInteger();
     private final AtomicInteger succeeded = new AtomicInteger();
+    private final TurnScheduler scheduler = mock(TurnScheduler.class);
 
     @BeforeEach
     void setUp() {
@@ -85,7 +91,8 @@ class GameActionCancellationTest {
     void cancellationFinishesAcceptedActionBeforeReleasingLock(boolean afterDraw) {
         pauseDraw(afterDraw);
 
-        StepVerifier.create(submit())
+        StepVerifier.create(turnFlowService.processNormalSubmit(ROOM_ID, Player.PLAYER_1, 0,
+                        succeeded::incrementAndGet, scheduler))
                 .then(() -> assertPaused(afterDraw))
                 .thenCancel()
                 .verify(TIMEOUT);
@@ -101,6 +108,7 @@ class GameActionCancellationTest {
         assertEquals(INITIAL_CARDS, storedCards());
         assertEquals(2, gameStateRepository.findById(ROOM_ID).block(TIMEOUT).getCurrentTurn());
         assertEquals(1, succeeded.get());
+        verifyNextTimer(GamePhase.IN_PROGRESS, 2);
 
         StepVerifier.create(submit())
                 .expectErrorSatisfies(error -> assertCode(error, WebSocketErrorCode.NOT_YOUR_TURN))
@@ -129,7 +137,8 @@ class GameActionCancellationTest {
             return gate.asMono().doOnCancel(cancelled::incrementAndGet).then(save);
         }).when(gameStateRepository).save(any(GameState.class));
 
-        StepVerifier.create(gamePlayService.executeGoStop(ROOM_ID, Player.PLAYER_1, go, succeeded::incrementAndGet))
+        StepVerifier.create(turnFlowService.processGoStopChoice(ROOM_ID, Player.PLAYER_1, go,
+                        succeeded::incrementAndGet, scheduler))
                 .then(() -> assertEquals(1, gate.currentSubscriberCount()))
                 .thenCancel().verify(TIMEOUT);
         assertEquals(0, cancelled.get());
@@ -140,6 +149,8 @@ class GameActionCancellationTest {
         assertEquals(go ? 2 : 1, saved.getCurrentTurn());
         assertEquals(go ? 1 : 0, saved.getPlayerState(Player.PLAYER_1).getGo());
         assertEquals(1, succeeded.get());
+        if (go) verifyNextTimer(GamePhase.IN_PROGRESS, 2);
+        else verify(scheduler, never()).scheduleAutoPlay(anyLong(), anyInt(), anyInt(), any(), anyLong(), any());
     }
 
     @Test
@@ -156,7 +167,8 @@ class GameActionCancellationTest {
             return deletion.delayUntil(ignored -> gate.asMono().doOnCancel(cancelled::incrementAndGet));
         }).when(installedCardRepository).deleteRevealedCard(ROOM_ID, Card.JAN_1);
 
-        StepVerifier.create(gamePlayService.executeFloorSelection(ROOM_ID, Player.PLAYER_1, 0, succeeded::incrementAndGet))
+        StepVerifier.create(turnFlowService.processFloorSelection(ROOM_ID, Player.PLAYER_1, 0,
+                        succeeded::incrementAndGet, scheduler))
                 .then(() -> assertEquals(1, gate.currentSubscriberCount()))
                 .thenCancel().verify(TIMEOUT);
         assertEquals(0, cancelled.get());
@@ -168,6 +180,7 @@ class GameActionCancellationTest {
         assertEquals(List.of(Card.JAN_1, Card.JAN_3), acquiredCardRepository.getAllCards(ROOM_ID, 1).block(TIMEOUT));
         assertEquals(List.of(Card.JAN_2), installedCardRepository.getAllRevealedCards(ROOM_ID).block(TIMEOUT));
         assertEquals(1, succeeded.get());
+        verifyNextTimer(GamePhase.IN_PROGRESS, 2);
     }
 
     @Test
@@ -246,6 +259,11 @@ class GameActionCancellationTest {
 
     private Mono<TurnExecutionResult> submit() {
         return gamePlayService.executeNormalSubmit(ROOM_ID, Player.PLAYER_1, 0, succeeded::incrementAndGet);
+    }
+
+    private void verifyNextTimer(GamePhase phase, int turn) {
+        verify(scheduler).scheduleAutoPlay(eq(ROOM_ID), eq(1), eq(turn),
+                eq(Player.PLAYER_2), anyLong(), eq(phase));
     }
 
     private void assertPaused(boolean afterDraw) {

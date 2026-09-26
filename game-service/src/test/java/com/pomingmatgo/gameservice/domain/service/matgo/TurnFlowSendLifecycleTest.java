@@ -5,6 +5,7 @@ import com.pomingmatgo.gameservice.domain.GameState;
 import com.pomingmatgo.gameservice.domain.Player;
 import com.pomingmatgo.gameservice.domain.card.Card;
 import com.pomingmatgo.gameservice.domain.repository.GameStateRepository;
+import com.pomingmatgo.gameservice.domain.repository.AcquiredCardRepository;
 import com.pomingmatgo.gameservice.domain.repository.InstalledCardRepository;
 import com.pomingmatgo.gameservice.global.session.SessionManager;
 import com.pomingmatgo.gameservice.scheduler.AutoPlayScheduler;
@@ -40,7 +41,7 @@ import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 
-// 송신 취소의 미해결 재현과 방 정리 후 타이머 재등록 차단의 회귀 검증을 함께 유지한다.
+// 송신과 무관한 타이머 등록 및 방 정리 후 재등록 차단을 검증한다.
 @SpringBootTest(properties = "spring.autoconfigure.exclude="
         + "org.redisson.spring.starter.RedissonAutoConfigurationV2,"
         + "org.springframework.boot.autoconfigure.data.redis.RedisAutoConfiguration,"
@@ -56,6 +57,7 @@ class TurnFlowSendLifecycleTest {
     @Autowired GamePlayService gamePlayService;
     @Autowired GameStateRepository gameStateRepository;
     @Autowired InstalledCardRepository installedCardRepository;
+    @Autowired AcquiredCardRepository acquiredCardRepository;
     @Autowired SessionManager sessionManager;
     @Autowired RoomCleanupService roomCleanupService;
     @Autowired AutoPlayScheduler autoPlayScheduler;
@@ -84,8 +86,8 @@ class TurnFlowSendLifecycleTest {
     }
 
     @Test
-    @DisplayName("한 세션의 턴 안내가 지연되면 상태는 저장되지만 타이머 등록은 송신 완료까지 대기한다")
-    void delayedSendDefersTimerButNotOpponentOrOtherRoom() {
+    @DisplayName("턴 안내가 지연돼도 다음 타이머와 상대방·다른 방 송신은 진행한다")
+    void delayedSendDoesNotDeferTimerOrOpponentOrOtherRoom() {
         SessionProbe other = new SessionProbe("other-room", false);
         seedRoom(OTHER_ROOM_ID);
         sessionManager.addPlayer(OTHER_ROOM_ID, Player.PLAYER_1, 3L, other.session).block(TIMEOUT);
@@ -108,8 +110,8 @@ class TurnFlowSendLifecycleTest {
     }
 
     @Test
-    @DisplayName("턴 안내 도중 요청 취소 시 저장된 상태는 남지만 다음 타이머 등록은 누락된다")
-    void cancellationLeavesSavedStateWithoutNextTimer() {
+    @DisplayName("턴 안내 도중 요청을 취소해도 저장된 상태와 다음 타이머는 유지된다")
+    void cancellationPreservesSavedStateAndNextTimer() {
         StepVerifier.create(submit(ROOM_ID))
                 .then(this::assertWaitingForSend)
                 .thenCancel()
@@ -120,16 +122,38 @@ class TurnFlowSendLifecycleTest {
         assertNextTurnSaved();
         // 취소 후 완료 신호가 와도 후처리가 다시 구독되지 않는다.
         assertEquals(Sinks.EmitResult.OK, slow.completion.tryEmitEmpty());
-        verify(scheduler, never()).scheduleAutoPlay(eq(ROOM_ID), anyInt(), anyInt(),
-                any(Player.class), anyLong(), any(GamePhase.class));
+        verifyScheduled(ROOM_ID);
 
-        // 같은 방의 다음 유효 액션으로 락 누수와 타이머 누락을 구분한다.
+        // 다음 유효 액션도 정상 진행한다.
         turnFlowService.processNormalSubmit(ROOM_ID, Player.PLAYER_2, 0,
                 () -> scheduler.cancelAutoPlay(ROOM_ID), scheduler).block(TIMEOUT);
         GameState after = gameStateRepository.findById(ROOM_ID).block(TIMEOUT);
         assertNotNull(after);
         assertEquals(2, after.getRound());
         assertEquals(Player.PLAYER_1, after.getCurrentPlayer());
+    }
+
+    @Test
+    @DisplayName("송신 중 취소된 요청의 실제 다음 타이머가 발사되어 게임을 진행한다")
+    void cancelledSendLeavesAnExecutableTimer() {
+        StepVerifier.withVirtualTime(() -> Mono.defer(() -> {
+                    Disposable request = submit(ROOM_ID, autoPlayScheduler).subscribe();
+                    assertEquals(1, slow.turnStarted.get());
+                    request.dispose();
+                    assertEquals(1, slow.turnCancelled.get());
+                    assertTrue(scheduledTimers().containsKey(ROOM_ID));
+                    return Mono.delay(Duration.ofSeconds(13));
+                }))
+                .thenAwait(Duration.ofSeconds(13))
+                .expectNext(0L)
+                .then(() -> {
+                    GameState state = gameStateRepository.findById(ROOM_ID).block(TIMEOUT);
+                    assertEquals(2, state.getRound());
+                    assertEquals(Player.PLAYER_1, state.getCurrentPlayer());
+                    assertEquals(2, slow.turnStarted.get());
+                    assertEquals(Sinks.EmitResult.OK, slow.completion.tryEmitEmpty());
+                })
+                .expectComplete().verify(TIMEOUT);
     }
 
     @Test
@@ -151,8 +175,7 @@ class TurnFlowSendLifecycleTest {
                 .verify(TIMEOUT);
 
         assertEquals(1, slow.turnCancelled.get());
-        verify(scheduler, never()).scheduleAutoPlay(eq(ROOM_ID), anyInt(), anyInt(),
-                any(Player.class), anyLong(), any(GamePhase.class));
+        verifyScheduled(ROOM_ID);
     }
 
     @ParameterizedTest(name = "송신 실패={0}")
@@ -165,7 +188,7 @@ class TurnFlowSendLifecycleTest {
                     assertEquals(1, slow.turnStarted.get());
                     assertEquals(1, opponent.turnCompleted.get());
                     assertNextTurnSaved();
-                    assertFalse(scheduledTimers().containsKey(ROOM_ID));
+                    assertTrue(scheduledTimers().containsKey(ROOM_ID));
 
                     cleanupRoom();
                     assertRoomRemoved();
@@ -237,6 +260,44 @@ class TurnFlowSendLifecycleTest {
     }
 
     @Test
+    @DisplayName("첫 턴 안내가 취소돼도 첫 타이머는 한 번 등록된다")
+    void firstTurnCancellationPreservesTimer() {
+        GameState state = gameStateRepository.findById(ROOM_ID).block(TIMEOUT);
+        StepVerifier.create(turnFlowService.startTurn(state, scheduler))
+                .then(() -> assertEquals(1, slow.turnStarted.get()))
+                .thenCancel().verify(TIMEOUT);
+        assertEquals(1, slow.turnCancelled.get());
+        verify(scheduler).scheduleAutoPlay(eq(ROOM_ID), eq(1), eq(1),
+                eq(Player.PLAYER_1), anyLong(), eq(GamePhase.IN_PROGRESS));
+    }
+
+    @ParameterizedTest(name = "고스톱 대기={0}")
+    @ValueSource(booleans = {false, true})
+    @DisplayName("제출 안내부터 송신이 막혀도 바닥 선택·고스톱 대기 타이머는 등록된다")
+    void choiceTimerPrecedesEvenInitialSubmitNotification(boolean goStop) {
+        slow.observedStatus = "SUBMIT_CARD";
+        if (goStop) {
+            acquiredCardRepository.addCards(ROOM_ID, 1,
+                    List.of(Card.JAN_1, Card.MAR_1, Card.AUG_1, Card.NOV_1, Card.DEC_1)).block(TIMEOUT);
+            installedCardRepository.saveHiddenCard(List.of(Card.MAR_3, Card.APR_1), ROOM_ID).block(TIMEOUT);
+        } else {
+            installedCardRepository.saveRevealedCard(List.of(Card.JAN_1, Card.JAN_2), ROOM_ID).block(TIMEOUT);
+        }
+        GamePhase expected = goStop ? GamePhase.AWAITING_GO_STOP_CHOICE : GamePhase.AWAITING_FLOOR_CARD_CHOICE;
+        StepVerifier.create(submit(ROOM_ID))
+                .then(() -> {
+                    assertEquals(1, slow.turnStarted.get());
+                    assertEquals(expected, gameStateRepository.findById(ROOM_ID).block(TIMEOUT).getPhase());
+                    verify(scheduler).scheduleAutoPlay(eq(ROOM_ID), eq(1), eq(1),
+                            eq(Player.PLAYER_1), anyLong(), eq(expected));
+                })
+                .thenCancel().verify(TIMEOUT);
+        assertEquals(1, slow.turnCancelled.get());
+        verify(scheduler).cancelAutoPlay(ROOM_ID);
+        verifyNoMoreInteractions(scheduler);
+    }
+
+    @Test
     @DisplayName("첫 턴 안내도 방 정리 후 완료되면 타이머를 등록하지 않는다")
     void firstTurnSendCannotRegisterAfterCleanup() {
         GameState state = gameStateRepository.findById(ROOM_ID).block(TIMEOUT);
@@ -290,8 +351,7 @@ class TurnFlowSendLifecycleTest {
         assertEquals(0, slow.turnCancelled.get());
         assertNextTurnSaved();
         verify(scheduler).cancelAutoPlay(ROOM_ID);
-        verify(scheduler, never()).scheduleAutoPlay(eq(ROOM_ID), anyInt(), anyInt(),
-                any(Player.class), anyLong(), any(GamePhase.class));
+        verifyScheduled(ROOM_ID);
     }
 
     private void assertNextTurnSaved() {
@@ -326,6 +386,7 @@ class TurnFlowSendLifecycleTest {
         final AtomicInteger turnCompleted = new AtomicInteger();
         final AtomicInteger turnCancelled = new AtomicInteger();
         final AtomicInteger turnFailed = new AtomicInteger();
+        String observedStatus = "ANNOUNCE_TURN_INFORMATION";
 
         SessionProbe(String id, boolean delayTurn) {
             when(session.getId()).thenReturn(id);
@@ -337,7 +398,7 @@ class TurnFlowSendLifecycleTest {
             when(session.send(any())).thenAnswer(invocation -> {
                 Publisher<WebSocketMessage> messages = invocation.getArgument(0);
                 return Flux.from(messages).concatMap(message -> {
-                    boolean turn = message.getPayloadAsText().contains("\"status\":\"ANNOUNCE_TURN_INFORMATION\"");
+                    boolean turn = message.getPayloadAsText().contains("\"status\":\"" + observedStatus + "\"");
                     message.release();
                     if (!turn) return Mono.<Void>empty();
                     return Mono.defer(() -> {

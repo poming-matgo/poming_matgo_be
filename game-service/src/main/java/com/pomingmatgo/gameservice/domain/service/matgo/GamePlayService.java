@@ -34,7 +34,7 @@ public class GamePlayService {
                                                     .map(nextState -> new TurnExecutionResult(
                                                             submittedCard, topCard, processed.cardResult(), nextState)));
                                 }))
-                .doOnNext(result -> actionSucceeded(onActionSucceeded));
+                .flatMap(result -> GameActionCompletion.complete(result, result.updatedGameState(), onActionSucceeded));
     }
 
     @GameLock
@@ -43,13 +43,7 @@ public class GamePlayService {
                 .flatMap(freshState -> gameService.selectFloorCard(freshState, player, cardIdx)
                         .flatMap(processed -> settleTurn(roomId, processed.updatedGameState(), processed.cardResult())
                                 .map(nextState -> new FloorSelectionResult(processed.cardResult(), nextState))))
-                .doOnNext(result -> actionSucceeded(onActionSucceeded));
-    }
-
-    private void actionSucceeded(Runnable callback) {
-        // 실패 요청은 기존 마감과 타이머를 보존한다. 성공 시에도 락 해제 전에 취소해야
-        // 다음 액션이 등록한 새 타이머를 이전 액션이 취소하지 않는다.
-        if (callback != null) callback.run();
+                .flatMap(result -> GameActionCompletion.complete(result, result.updatedGameState(), onActionSucceeded));
     }
 
     // 락 통과 후에도 자동플레이 race로 상태가 이미 진행됐을 수 있어 fresh 상태로 재검증한다
@@ -121,7 +115,7 @@ public class GamePlayService {
                         ? gameService.applyGo(freshState, player).flatMap(this::proceedToNextTurn)
                         // STOP도 락 안에서 END를 저장 — 저장 없이 반환하면 락 해제~cleanup 사이 낡은 GO가 재검증을 통과한다
                         : markEnded(freshState)))
-                .doOnNext(result -> actionSucceeded(onActionSucceeded));
+                .flatMap(result -> GameActionCompletion.complete(result, result, onActionSucceeded));
     }
 
     public Mono<GameState> gameOver(GameState gameState) {

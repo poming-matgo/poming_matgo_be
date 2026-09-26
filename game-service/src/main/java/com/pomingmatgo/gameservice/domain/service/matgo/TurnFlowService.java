@@ -13,12 +13,11 @@ import reactor.core.publisher.Mono;
 
 import java.util.List;
 
-import static com.pomingmatgo.gameservice.domain.GamePhase.AWAITING_FLOOR_CARD_CHOICE;
 import static com.pomingmatgo.gameservice.domain.TurnTiming.TURN_TIMEOUT_MILLIS;
 import static com.pomingmatgo.gameservice.domain.TurnTiming.nextDeadlineNanos;
 
 // 사용자 요청(WsGameHandler)과 자동플레이(AutoPlayScheduler)가 후처리를 공유해야 두 경로의 동작이 갈라지지 않는다.
-// 상태 전이 저장은 GamePlayService가 @GameLock 안에서 끝내고 여기선 메시지/타이머만 다룬다.
+// 상태 저장과 타이머 콜백은 @GameLock 안에서 완료하고, 송신은 호출자의 구독에 남긴다.
 // 타이머 조작은 필드가 아닌 TurnScheduler 파라미터로 주입 — DI cycle 회피
 @Service
 @RequiredArgsConstructor
@@ -36,6 +35,8 @@ public class TurnFlowService {
 
     private Mono<Void> processNormalSubmitInRoom(long roomId, Player player, int cardIdx, Runnable onActionSucceeded, TurnScheduler scheduler) {
         return gamePlayService.executeNormalSubmit(roomId, player, cardIdx, onActionSucceeded)
+                .contextWrite(context -> context.put(GameActionCompletion.class,
+                        new GameActionCompletion(state -> scheduleNextStep(roomId, state, scheduler))))
                 .flatMap(ctx -> {
                     Mono<Void> sendInfos = Mono.when(
                             gameMessageSender.sendSubmitCardInfo(roomId, player, ctx.submittedCard()),
@@ -43,8 +44,8 @@ public class TurnFlowService {
                     );
 
                     Mono<Void> handleResult = ctx.isChoiceRequired()
-                            ? requestFloorChoice(roomId, ctx.updatedGameState(), player, ctx.cardResult().getSelectableCards(), scheduler)
-                            : finishTurn(roomId, player, ctx.updatedGameState(), ctx.cardResult(), scheduler);
+                            ? requestFloorChoice(roomId, player, ctx.cardResult().getSelectableCards())
+                            : finishTurn(roomId, player, ctx.updatedGameState(), ctx.cardResult());
 
                     return sendInfos.then(handleResult);
                 }).then();
@@ -56,10 +57,12 @@ public class TurnFlowService {
 
     private Mono<Void> processFloorSelectionInRoom(long roomId, Player player, int cardIdx, Runnable onActionSucceeded, TurnScheduler scheduler) {
         return gamePlayService.executeFloorSelection(roomId, player, cardIdx, onActionSucceeded)
+                .contextWrite(context -> context.put(GameActionCompletion.class,
+                        new GameActionCompletion(state -> scheduleNextStep(roomId, state, scheduler))))
                 .flatMap(ctx -> ctx.isChoiceRequired()
                         // 뒤집은 카드가 또 선택을 요구한 경우 — 선택지 재전송 + 타이머 재등록
-                        ? requestFloorChoice(roomId, ctx.updatedGameState(), player, ctx.cardResult().getSelectableCards(), scheduler)
-                        : finishTurn(roomId, player, ctx.updatedGameState(), ctx.cardResult(), scheduler));
+                        ? requestFloorChoice(roomId, player, ctx.cardResult().getSelectableCards())
+                        : finishTurn(roomId, player, ctx.updatedGameState(), ctx.cardResult()));
     }
 
     public Mono<Void> processGoStopChoice(long roomId, Player player, boolean go, Runnable onActionSucceeded, TurnScheduler scheduler) {
@@ -68,10 +71,12 @@ public class TurnFlowService {
 
     private Mono<Void> processGoStopChoiceInRoom(long roomId, Player player, boolean go, Runnable onActionSucceeded, TurnScheduler scheduler) {
         return gamePlayService.executeGoStop(roomId, player, go, onActionSucceeded)
+                .contextWrite(context -> context.put(GameActionCompletion.class,
+                        new GameActionCompletion(state -> scheduleNextStep(roomId, state, scheduler))))
                 .flatMap(nextState -> {
                     if (nextState.isPlaying()) {
                         return gameMessageSender.sendGoResultMessage(nextState, player)
-                                .then(startTurn(nextState, scheduler));
+                                .then(gameMessageSender.sendTurnInfo(nextState, TURN_TIMEOUT_MILLIS));
                     }
                     return processGameOver(nextState, player).then();
                 });
@@ -83,15 +88,14 @@ public class TurnFlowService {
     }
 
     private Mono<Void> startTurnInRoom(GameState state, TurnScheduler scheduler) {
-        return gameMessageSender.sendTurnInfo(state, TURN_TIMEOUT_MILLIS)
-                .then(Mono.fromRunnable(() -> scheduleNextStep(state.getRoomId(), state, scheduler)));
+        scheduleNextStep(state.getRoomId(), state, scheduler);
+        return gameMessageSender.sendTurnInfo(state, TURN_TIMEOUT_MILLIS);
     }
 
     /** 정상 제출/바닥 선택 완료가 공유하는 턴 완료 처리 — 다음 단계는 이미 락 안에서 결정·저장돼 있다 */
-    private Mono<Void> finishTurn(long roomId, Player player, GameState nextState, ProcessCardResult result, TurnScheduler scheduler) {
+    private Mono<Void> finishTurn(long roomId, Player player, GameState nextState, ProcessCardResult result) {
         return gameNotificationService.broadcastTurnResult(roomId, player, nextState, result)
                 .then(notifyNextStep(nextState, player))
-                .doOnNext(finalState -> scheduleNextStep(roomId, finalState, scheduler))
                 .then();
     }
 
@@ -129,11 +133,9 @@ public class TurnFlowService {
                         finalState, winner, payoutCalculator.finalPayout(finalState, winner)));
     }
 
-    // 타이머를 함께 걸어야 선택 대기 phase에서 게임이 멈추지 않는다
-    private Mono<Void> requestFloorChoice(long roomId, GameState freshState, Player player, List<Card> selectableCards, TurnScheduler scheduler) {
-        return gameMessageSender.sendChooseFloorCardMessage(roomId, player, selectableCards)
-                .then(Mono.<Void>fromRunnable(() -> scheduler.scheduleAutoPlay(
-                        roomId, freshState.getRound(), freshState.getCurrentTurn(), player, nextDeadlineNanos(), AWAITING_FLOOR_CARD_CHOICE)));
+    // 선택 대기 타이머는 이미 락 내부에서 등록했다.
+    private Mono<Void> requestFloorChoice(long roomId, Player player, List<Card> selectableCards) {
+        return gameMessageSender.sendChooseFloorCardMessage(roomId, player, selectableCards);
     }
 
     // 대기 주체는 항상 currentPlayer — 고/스톱 대기면 방금 행동한 본인, 턴이 넘어갔으면 상대
