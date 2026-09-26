@@ -1,6 +1,7 @@
 package com.pomingmatgo.gameservice.domain.service.matgo;
 
 import com.pomingmatgo.gameservice.domain.GamePhase;
+import com.pomingmatgo.gameservice.domain.ChoiceInfo;
 import com.pomingmatgo.gameservice.domain.GameState;
 import com.pomingmatgo.gameservice.domain.Player;
 import com.pomingmatgo.gameservice.domain.card.Card;
@@ -12,6 +13,7 @@ import com.pomingmatgo.gameservice.global.exception.WebSocketErrorCode;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.aop.support.AopUtils;
@@ -35,21 +37,21 @@ import static com.pomingmatgo.gameservice.global.exception.WebSocketErrorCode.IN
 import static com.pomingmatgo.gameservice.global.exception.WebSocketErrorCode.TRY_AGAIN;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.doAnswer;
+import static org.mockito.ArgumentMatchers.any;
 
-// 부분 변경을 포함한 현재 동작 재현이다. 방 소유 실행 도입 시 취소 후 기대값을 완료 보장으로 전환한다.
 @SpringBootTest(properties = "spring.autoconfigure.exclude="
         + "org.redisson.spring.starter.RedissonAutoConfigurationV2,"
         + "org.springframework.boot.autoconfigure.data.redis.RedisAutoConfiguration,"
         + "org.springframework.boot.autoconfigure.data.redis.RedisReactiveAutoConfiguration")
 @ActiveProfiles("in-memory")
-@DisplayName("카드 변경 도중 취소에 따른 상태와 게임 락 기준선")
+@DisplayName("수락한 카드 변경의 호출자 취소 분리")
 class GameActionCancellationTest {
     private static final long ROOM_ID = 940_001L;
     private static final Duration TIMEOUT = Duration.ofSeconds(3);
     private static final List<Card> INITIAL_CARDS = List.of(Card.JAN_3, Card.FEB_3, Card.MAR_1, Card.APR_1);
 
     @Autowired GamePlayService gamePlayService;
-    @Autowired GameStateRepository gameStateRepository;
+    @SpyBean GameStateRepository gameStateRepository;
     @Autowired AcquiredCardRepository acquiredCardRepository;
     @Autowired RoomCleanupService roomCleanupService;
     @SpyBean InMemoryInstalledCardRepository installedCardRepository;
@@ -73,13 +75,14 @@ class GameActionCancellationTest {
 
     @AfterEach
     void cleanup() {
+        gate.tryEmitEmpty();
         roomCleanupService.cleanupRoomData(ROOM_ID).block(TIMEOUT);
     }
 
     @ParameterizedTest(name = "덱 제거 후 대기={0}")
     @ValueSource(booleans = {false, true})
-    @DisplayName("손패 또는 손패·덱 제거 후 취소하면 카드가 저장소에서 누락되고 기존 턴이 남는다")
-    void cancellationLeavesPartialCardsButReleasesLock(boolean afterDraw) {
+    @DisplayName("손패 또는 손패·덱 제거 후 호출자가 취소해도 카드와 다음 턴 저장을 완료한다")
+    void cancellationFinishesAcceptedActionBeforeReleasingLock(boolean afterDraw) {
         pauseDraw(afterDraw);
 
         StepVerifier.create(submit())
@@ -87,21 +90,118 @@ class GameActionCancellationTest {
                 .thenCancel()
                 .verify(TIMEOUT);
 
+        assertEquals(0, cancelled.get());
+        assertEquals(0, succeeded.get());
+        assertOriginalTurn();
+        assertEquals(remainingCards(afterDraw), storedCards());
+        StepVerifier.create(submit())
+                .expectErrorSatisfies(error -> assertCode(error, TRY_AGAIN))
+                .verify(TIMEOUT);
+        assertEquals(Sinks.EmitResult.OK, gate.tryEmitEmpty());
+        assertEquals(INITIAL_CARDS, storedCards());
+        assertEquals(2, gameStateRepository.findById(ROOM_ID).block(TIMEOUT).getCurrentTurn());
+        assertEquals(1, succeeded.get());
+
+        StepVerifier.create(submit())
+                .expectErrorSatisfies(error -> assertCode(error, WebSocketErrorCode.NOT_YOUR_TURN))
+                .verify(TIMEOUT);
+        assertEquals(INITIAL_CARDS, storedCards());
+    }
+
+    @Test
+    void invalidHandIndexDoesNotConsumeDeckOrBlockRoom() {
+        StepVerifier.create(gamePlayService.executeNormalSubmit(ROOM_ID, Player.PLAYER_1, 9, null))
+                .expectErrorSatisfies(error -> assertCode(error, INVALID_CARD)).verify(TIMEOUT);
+        assertOriginalTurn();
+        assertEquals(INITIAL_CARDS, storedCards());
+        assertNotNull(submit().block(TIMEOUT));
+    }
+
+    @ParameterizedTest(name = "GO={0}")
+    @ValueSource(booleans = {false, true})
+    @SuppressWarnings("unchecked")
+    void goStopSaveContinuesAfterCallerCancellation(boolean go) {
+        GameState choice = gameStateRepository.findById(ROOM_ID).block(TIMEOUT).toBuilder()
+                .phase(GamePhase.AWAITING_GO_STOP_CHOICE).build();
+        gameStateRepository.save(choice).block(TIMEOUT);
+        doAnswer(invocation -> {
+            Mono<Long> save = (Mono<Long>) invocation.callRealMethod();
+            return gate.asMono().doOnCancel(cancelled::incrementAndGet).then(save);
+        }).when(gameStateRepository).save(any(GameState.class));
+
+        StepVerifier.create(gamePlayService.executeGoStop(ROOM_ID, Player.PLAYER_1, go, succeeded::incrementAndGet))
+                .then(() -> assertEquals(1, gate.currentSubscriberCount()))
+                .thenCancel().verify(TIMEOUT);
+        assertEquals(0, cancelled.get());
+        assertEquals(choice, gameStateRepository.findById(ROOM_ID).block(TIMEOUT));
+        gate.tryEmitEmpty();
+        GameState saved = gameStateRepository.findById(ROOM_ID).block(TIMEOUT);
+        assertEquals(go ? GamePhase.IN_PROGRESS : GamePhase.END, saved.getPhase());
+        assertEquals(go ? 2 : 1, saved.getCurrentTurn());
+        assertEquals(go ? 1 : 0, saved.getPlayerState(Player.PLAYER_1).getGo());
+        assertEquals(1, succeeded.get());
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void floorSelectionFinishesAcquisitionAndTurnAfterCallerCancellation() {
+        ChoiceInfo choice = ChoiceInfo.builder().playerNumToChoose(Player.PLAYER_1)
+                .submittedCard(Card.JAN_3).selectableCards(List.of(Card.JAN_1, Card.JAN_2)).build();
+        gameStateRepository.save(gameStateRepository.findById(ROOM_ID).block(TIMEOUT).toBuilder()
+                .phase(GamePhase.AWAITING_FLOOR_CARD_CHOICE).choiceInfo(choice).build()).block(TIMEOUT);
+        installedCardRepository.updatePlayerCards(ROOM_ID, Player.PLAYER_1, List.of()).block(TIMEOUT);
+        installedCardRepository.saveRevealedCard(List.of(Card.JAN_1, Card.JAN_2), ROOM_ID).block(TIMEOUT);
+        doAnswer(invocation -> {
+            Mono<Boolean> deletion = (Mono<Boolean>) invocation.callRealMethod();
+            return deletion.delayUntil(ignored -> gate.asMono().doOnCancel(cancelled::incrementAndGet));
+        }).when(installedCardRepository).deleteRevealedCard(ROOM_ID, Card.JAN_1);
+
+        StepVerifier.create(gamePlayService.executeFloorSelection(ROOM_ID, Player.PLAYER_1, 0, succeeded::incrementAndGet))
+                .then(() -> assertEquals(1, gate.currentSubscriberCount()))
+                .thenCancel().verify(TIMEOUT);
+        assertEquals(0, cancelled.get());
+        gate.tryEmitEmpty();
+        GameState saved = gameStateRepository.findById(ROOM_ID).block(TIMEOUT);
+        assertEquals(GamePhase.IN_PROGRESS, saved.getPhase());
+        assertEquals(2, saved.getCurrentTurn());
+        assertNull(saved.getChoiceInfo());
+        assertEquals(List.of(Card.JAN_1, Card.JAN_3), acquiredCardRepository.getAllCards(ROOM_ID, 1).block(TIMEOUT));
+        assertEquals(List.of(Card.JAN_2), installedCardRepository.getAllRevealedCards(ROOM_ID).block(TIMEOUT));
+        assertEquals(1, succeeded.get());
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void cancellationBeforeHandValidationDoesNotMutateCards() {
+        doAnswer(invocation -> {
+            Mono<List<Card>> cards = (Mono<List<Card>>) invocation.callRealMethod();
+            return cards.delayUntil(ignored -> gate.asMono().doOnCancel(cancelled::incrementAndGet));
+        }).when(installedCardRepository).getPlayerCards(ROOM_ID, Player.PLAYER_1);
+
+        StepVerifier.create(submit())
+                .then(() -> assertEquals(1, gate.currentSubscriberCount()))
+                .thenCancel().verify(TIMEOUT);
         assertEquals(1, cancelled.get());
         assertEquals(0, succeeded.get());
+        gate.tryEmitEmpty();
         assertOriginalTurn();
-        assertEquals(remainingCards(afterDraw), storedCards());
-        assertEquals(Sinks.EmitResult.OK, gate.tryEmitEmpty());
-        assertEquals(remainingCards(afterDraw), storedCards(), "늦은 완료는 취소된 액션을 재개하지 않는다");
-        assertOriginalTurn();
-        assertEquals(0, succeeded.get());
+        assertEquals(INITIAL_CARDS, storedCards());
+        assertNotNull(submit().block(TIMEOUT));
+    }
 
-        // TRY_AGAIN 대신 손패 검증 오류에 도달하므로 락 해제와 게임 복구 실패를 구분한다.
-        StepVerifier.create(submit())
-                .expectErrorSatisfies(error -> assertCode(error, INVALID_CARD))
-                .verify(TIMEOUT);
-        assertOriginalTurn();
-        assertEquals(remainingCards(afterDraw), storedCards());
+    @Test
+    void acceptedFailureAfterCallerCancellationBlocksFurtherActionsUntilCleanup() {
+        pauseDraw(true);
+        StepVerifier.create(submit()).then(() -> assertPaused(true)).thenCancel().verify(TIMEOUT);
+        assertEquals(Sinks.EmitResult.OK, gate.tryEmitError(new IllegalStateException("draw failed")));
+        StepVerifier.create(submit()).expectErrorSatisfies(error -> assertCode(error, TRY_AGAIN)).verify(TIMEOUT);
+        assertEquals(0, succeeded.get());
+        roomCleanupService.cleanupRoomData(ROOM_ID).block(TIMEOUT);
+        assertNull(gameStateRepository.findById(ROOM_ID).block(TIMEOUT));
+        gameStateRepository.create(GameState.builder().roomId(ROOM_ID).leadingPlayer(1).currentTurn(1)
+                .round(2).phase(GamePhase.AWAITING_GO_STOP_CHOICE).build()).block(TIMEOUT);
+        assertEquals(GamePhase.END, gamePlayService.executeGoStop(ROOM_ID, Player.PLAYER_1, false, null)
+                .block(TIMEOUT).getPhase());
     }
 
     @ParameterizedTest(name = "덱 제거 후 대기={0}")

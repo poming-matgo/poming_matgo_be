@@ -22,7 +22,10 @@ public class GamePlayService {
     public Mono<TurnExecutionResult> executeNormalSubmit(long roomId, Player player, int cardIdx, Runnable onActionSucceeded) {
         return validatedFreshState(roomId, GamePhase.IN_PROGRESS, player)
                 .flatMap(freshState ->
-                        Mono.zip(gameService.takeCardFromHand(roomId, player, cardIdx), gameService.drawTopCard(roomId))
+                        gameService.takeCardFromHand(roomId, player, cardIdx)
+                                // 손패 검증·수락 전에 덱을 소비하지 않는다.
+                                .flatMap(submitted -> gameService.drawTopCard(roomId)
+                                        .map(top -> reactor.util.function.Tuples.of(submitted, top)))
                                 .flatMap(tuple -> {
                                     Card submittedCard = tuple.getT1();
                                     Card topCard = tuple.getT2();
@@ -114,10 +117,10 @@ public class GamePlayService {
     @GameLock
     public Mono<GameState> executeGoStop(long roomId, Player player, boolean go, Runnable onActionSucceeded) {
         return validatedFreshState(roomId, GamePhase.AWAITING_GO_STOP_CHOICE, player)
-                .flatMap(freshState -> go
+                .flatMap(freshState -> GameActionAcceptance.beforeMutation(() -> go
                         ? gameService.applyGo(freshState, player).flatMap(this::proceedToNextTurn)
                         // STOP도 락 안에서 END를 저장 — 저장 없이 반환하면 락 해제~cleanup 사이 낡은 GO가 재검증을 통과한다
-                        : markEnded(freshState))
+                        : markEnded(freshState)))
                 .doOnNext(result -> actionSucceeded(onActionSucceeded));
     }
 

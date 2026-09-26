@@ -83,8 +83,9 @@ public class GameService {
                     }
                     List<Card> mutablePlayerCards = new ArrayList<>(playerCards);
                     Card submittedCard = mutablePlayerCards.remove(cardIndex);
-                    return installedCardRepository.updatePlayerCards(roomId, player, mutablePlayerCards)
-                            .thenReturn(submittedCard);
+                    return GameActionAcceptance.beforeMutation(() ->
+                            installedCardRepository.updatePlayerCards(roomId, player, mutablePlayerCards)
+                                    .thenReturn(submittedCard));
                 });
     }
 
@@ -124,10 +125,10 @@ public class GameService {
     }
 
     private Mono<CardProcessingResult> applyOutcome(GameState gameState, MatchOutcome outcome) {
-        return applyFloorEffects(gameState.getRoomId(), outcome.effects())
+        return GameActionAcceptance.beforeMutation(() -> applyFloorEffects(gameState.getRoomId(), outcome.effects())
                 .then(saveResultingPhase(gameState, outcome))
                 .flatMap(updatedState -> applySweepIfFloorCleared(updatedState, outcome.result())
-                        .map(result -> new CardProcessingResult(result, updatedState)));
+                        .map(result -> new CardProcessingResult(result, updatedState))));
     }
 
     // 판쓸이 판정 대상은 FloorEffect가 모두 반영된 뒤의 바닥이다.

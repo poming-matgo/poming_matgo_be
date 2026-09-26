@@ -21,10 +21,18 @@ public class InMemoryRoomExecutionGate {
 
     public synchronized Entry acquire(long roomId) {
         Entry entry = rooms.computeIfAbsent(roomId, ignored -> new Entry());
-        if (entry.active || entry.cleanups > 0) throw new WebSocketBusinessException(TRY_AGAIN);
+        if (entry.active || entry.cleanups > 0 || entry.failed) throw new WebSocketBusinessException(TRY_AGAIN);
         entry.active = true;
         entry.drained = Sinks.empty();
         return entry;
+    }
+
+    public synchronized void accept(Entry entry) {
+        if (!entry.active || entry.cleanups > 0 || entry.failed) throw new WebSocketBusinessException(TRY_AGAIN);
+    }
+
+    public synchronized void fail(Entry entry) {
+        entry.failed = true;
     }
 
     public void release(Entry entry) {
@@ -39,7 +47,7 @@ public class InMemoryRoomExecutionGate {
 
     public synchronized <T> T create(long roomId, Supplier<T> creation) {
         Entry entry = rooms.get(roomId);
-        if (entry != null && (entry.active || entry.cleanups > 0)) {
+        if (entry != null && (entry.active || entry.cleanups > 0 || entry.failed)) {
             throw new BusinessException(ErrorCode.ALREADY_EXISTED_ROOM);
         }
         return creation.get();
@@ -48,9 +56,9 @@ public class InMemoryRoomExecutionGate {
     public Mono<Void> withCleanup(long roomId, Supplier<Mono<Void>> cleanup) {
         return Mono.usingWhen(Mono.fromSupplier(() -> beginCleanup(roomId)),
                 lease -> lease.drained().then(Mono.defer(cleanup)),
-                lease -> finishCleanup(roomId, lease.entry()),
-                (lease, error) -> finishCleanup(roomId, lease.entry()),
-                lease -> finishCleanup(roomId, lease.entry()));
+                lease -> finishCleanup(roomId, lease.entry(), true),
+                (lease, error) -> finishCleanup(roomId, lease.entry(), false),
+                lease -> finishCleanup(roomId, lease.entry(), false));
     }
 
     private synchronized CleanupLease beginCleanup(long roomId) {
@@ -59,21 +67,23 @@ public class InMemoryRoomExecutionGate {
         return new CleanupLease(entry, entry.active ? entry.drained.asMono() : Mono.empty());
     }
 
-    private Mono<Void> finishCleanup(long roomId, Entry entry) {
+    private Mono<Void> finishCleanup(long roomId, Entry entry, boolean completed) {
         return Mono.fromRunnable(() -> {
             synchronized (this) {
-                if (--entry.cleanups == 0 && !entry.active) rooms.remove(roomId, entry);
+                if (completed) entry.failed = false;
+                if (--entry.cleanups == 0 && !entry.active && !entry.failed) rooms.remove(roomId, entry);
             }
         });
     }
 
     public synchronized void discardIdle(long roomId) {
         Entry entry = rooms.get(roomId);
-        if (entry != null && !entry.active && entry.cleanups == 0) rooms.remove(roomId, entry);
+        if (entry != null && !entry.active && entry.cleanups == 0 && !entry.failed) rooms.remove(roomId, entry);
     }
 
     public static final class Entry {
         private boolean active;
+        private boolean failed;
         private int cleanups;
         private Sinks.Empty<Void> drained = Sinks.empty();
     }

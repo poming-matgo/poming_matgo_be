@@ -20,6 +20,24 @@ class InMemoryRoomExecutionGateTest {
     private final InMemoryRoomExecutionGate gate = new InMemoryRoomExecutionGate();
 
     @Test
+    void failedActionRemainsBlockedWhenCleanupFailsOrIsCancelled() {
+        var active = gate.acquire(1);
+        gate.fail(active);
+        gate.release(active);
+        gate.discardIdle(1);
+        assertBlocked();
+        StepVerifier.create(gate.withCleanup(1, () -> Mono.error(new IllegalStateException("cleanup failed"))))
+                .expectErrorMessage("cleanup failed").verify(TIMEOUT);
+        assertBlocked();
+        StepVerifier.create(gate.withCleanup(1, Mono::never))
+                .then(this::assertBlocked).thenCancel().verify(TIMEOUT);
+        assertBlocked();
+        StepVerifier.create(gate.withCleanup(1, Mono::empty)).verifyComplete();
+        assertEmpty();
+        assertEquals("created", gate.create(1, () -> "created"));
+    }
+
+    @Test
     void cleanupIsLazyWaitsForActionAndDoesNotBlockAnotherRoom() {
         var active = gate.acquire(1);
         AtomicInteger deletions = new AtomicInteger();
