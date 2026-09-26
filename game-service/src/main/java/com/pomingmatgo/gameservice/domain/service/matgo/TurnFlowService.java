@@ -12,6 +12,8 @@ import org.springframework.stereotype.Service;
 import reactor.core.publisher.Mono;
 
 import java.util.List;
+import java.util.Objects;
+import java.util.function.Function;
 
 import static com.pomingmatgo.gameservice.domain.TurnTiming.TURN_TIMEOUT_MILLIS;
 import static com.pomingmatgo.gameservice.domain.TurnTiming.nextDeadlineNanos;
@@ -29,14 +31,9 @@ public class TurnFlowService {
     private final GameNotificationService gameNotificationService;
     private final PayoutCalculator payoutCalculator;
 
-    public Mono<Void> processNormalSubmit(long roomId, Player player, int cardIdx, Runnable onActionSucceeded, TurnScheduler scheduler) {
-        return Mono.defer(() -> processNormalSubmitInRoom(roomId, player, cardIdx, onActionSucceeded, timerLifecycle.bind(roomId, scheduler)));
-    }
-
-    private Mono<Void> processNormalSubmitInRoom(long roomId, Player player, int cardIdx, Runnable onActionSucceeded, TurnScheduler scheduler) {
-        return gamePlayService.executeNormalSubmit(roomId, player, cardIdx, onActionSucceeded)
-                .contextWrite(context -> context.put(GameActionCompletion.class,
-                        new GameActionCompletion(state -> scheduleNextStep(roomId, state, scheduler))))
+    public Mono<Void> processNormalSubmit(long roomId, Player player, int cardIdx, GameActionSource source, TurnScheduler scheduler) {
+        return withCompletion(roomId, source, scheduler,
+                completion -> gamePlayService.executeNormalSubmit(roomId, player, cardIdx, completion))
                 .flatMap(ctx -> {
                     Mono<Void> sendInfos = Mono.when(
                             gameMessageSender.sendSubmitCardInfo(roomId, player, ctx.submittedCard()),
@@ -51,28 +48,18 @@ public class TurnFlowService {
                 }).then();
     }
 
-    public Mono<Void> processFloorSelection(long roomId, Player player, int cardIdx, Runnable onActionSucceeded, TurnScheduler scheduler) {
-        return Mono.defer(() -> processFloorSelectionInRoom(roomId, player, cardIdx, onActionSucceeded, timerLifecycle.bind(roomId, scheduler)));
-    }
-
-    private Mono<Void> processFloorSelectionInRoom(long roomId, Player player, int cardIdx, Runnable onActionSucceeded, TurnScheduler scheduler) {
-        return gamePlayService.executeFloorSelection(roomId, player, cardIdx, onActionSucceeded)
-                .contextWrite(context -> context.put(GameActionCompletion.class,
-                        new GameActionCompletion(state -> scheduleNextStep(roomId, state, scheduler))))
+    public Mono<Void> processFloorSelection(long roomId, Player player, int cardIdx, GameActionSource source, TurnScheduler scheduler) {
+        return withCompletion(roomId, source, scheduler,
+                completion -> gamePlayService.executeFloorSelection(roomId, player, cardIdx, completion))
                 .flatMap(ctx -> ctx.isChoiceRequired()
                         // 뒤집은 카드가 또 선택을 요구한 경우 — 선택지 재전송 + 타이머 재등록
                         ? requestFloorChoice(roomId, player, ctx.cardResult().getSelectableCards())
                         : finishTurn(roomId, player, ctx.updatedGameState(), ctx.cardResult()));
     }
 
-    public Mono<Void> processGoStopChoice(long roomId, Player player, boolean go, Runnable onActionSucceeded, TurnScheduler scheduler) {
-        return Mono.defer(() -> processGoStopChoiceInRoom(roomId, player, go, onActionSucceeded, timerLifecycle.bind(roomId, scheduler)));
-    }
-
-    private Mono<Void> processGoStopChoiceInRoom(long roomId, Player player, boolean go, Runnable onActionSucceeded, TurnScheduler scheduler) {
-        return gamePlayService.executeGoStop(roomId, player, go, onActionSucceeded)
-                .contextWrite(context -> context.put(GameActionCompletion.class,
-                        new GameActionCompletion(state -> scheduleNextStep(roomId, state, scheduler))))
+    public Mono<Void> processGoStopChoice(long roomId, Player player, boolean go, GameActionSource source, TurnScheduler scheduler) {
+        return withCompletion(roomId, source, scheduler,
+                completion -> gamePlayService.executeGoStop(roomId, player, go, completion))
                 .flatMap(nextState -> {
                     if (nextState.isPlaying()) {
                         return gameMessageSender.sendGoResultMessage(nextState, player)
@@ -80,6 +67,21 @@ public class TurnFlowService {
                     }
                     return processGameOver(nextState, player).then();
                 });
+    }
+
+    // 구독마다 방 수명을 캡처하며 모든 액션이 같은 완료 정책을 반드시 전달한다.
+    private <T> Mono<T> withCompletion(long roomId, GameActionSource source, TurnScheduler scheduler,
+                                       Function<GameActionCompletion, Mono<T>> action) {
+        return Mono.defer(() -> {
+            Objects.requireNonNull(source, "source");
+            TurnScheduler bound = timerLifecycle.bind(roomId, Objects.requireNonNull(scheduler, "scheduler"));
+            GameActionCompletion completion = state -> {
+                // 자동플레이는 이미 발사한 타이머를 별도로 취소하지 않는다.
+                if (source == GameActionSource.USER) bound.cancelAutoPlay(roomId);
+                scheduleNextStep(roomId, state, bound);
+            };
+            return action.apply(completion);
+        });
     }
 
     /** 첫 턴 시작(PreGameFlowService)이 이후 턴 전환과 같은 경로를 타게 하는 공개 진입점 */

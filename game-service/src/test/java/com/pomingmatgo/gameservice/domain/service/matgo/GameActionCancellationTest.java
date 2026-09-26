@@ -16,6 +16,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.EnumSource;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.aop.support.AopUtils;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -69,6 +70,10 @@ class GameActionCancellationTest {
 
     @BeforeEach
     void setUp() {
+        doAnswer(call -> {
+            succeeded.incrementAndGet();
+            return null;
+        }).when(scheduler).cancelAutoPlay(ROOM_ID);
         assertTrue(AopUtils.isAopProxy(gamePlayService));
         gameStateRepository.create(GameState.builder()
                 .roomId(ROOM_ID).leadingPlayer(1).currentTurn(1).round(1)
@@ -92,7 +97,7 @@ class GameActionCancellationTest {
         pauseDraw(afterDraw);
 
         StepVerifier.create(turnFlowService.processNormalSubmit(ROOM_ID, Player.PLAYER_1, 0,
-                        succeeded::incrementAndGet, scheduler))
+                        GameActionSource.USER, scheduler))
                 .then(() -> assertPaused(afterDraw))
                 .thenCancel()
                 .verify(TIMEOUT);
@@ -118,10 +123,60 @@ class GameActionCancellationTest {
 
     @Test
     void invalidHandIndexDoesNotConsumeDeckOrBlockRoom() {
-        StepVerifier.create(gamePlayService.executeNormalSubmit(ROOM_ID, Player.PLAYER_1, 9, null))
+        StepVerifier.create(gamePlayService.executeNormalSubmit(ROOM_ID, Player.PLAYER_1, 9, GameActionCompletion.NONE))
                 .expectErrorSatisfies(error -> assertCode(error, INVALID_CARD)).verify(TIMEOUT);
         assertOriginalTurn();
         assertEquals(INITIAL_CARDS, storedCards());
+        assertNotNull(submit().block(TIMEOUT));
+    }
+
+    @ParameterizedTest
+    @EnumSource(GameActionSource.class)
+    void timerPolicyRunsAfterSaveBeforeLockRelease(GameActionSource source) {
+        List<String> steps = new ArrayList<>();
+        doAnswer(call -> {
+            assertEquals(2, gameStateRepository.findById(ROOM_ID).block(TIMEOUT).getCurrentTurn());
+            steps.add("cancel");
+            return null;
+        }).when(scheduler).cancelAutoPlay(ROOM_ID);
+        doAnswer(call -> {
+            assertEquals(2, gameStateRepository.findById(ROOM_ID).block(TIMEOUT).getCurrentTurn());
+            StepVerifier.create(submit())
+                    .expectErrorSatisfies(error -> assertCode(error, TRY_AGAIN)).verify(TIMEOUT);
+            steps.add("schedule");
+            return null;
+        }).when(scheduler).scheduleAutoPlay(eq(ROOM_ID), eq(1), eq(2),
+                eq(Player.PLAYER_2), anyLong(), eq(GamePhase.IN_PROGRESS));
+
+        turnFlowService.processNormalSubmit(ROOM_ID, Player.PLAYER_1, 0, source, scheduler).block(TIMEOUT);
+
+        assertEquals(source == GameActionSource.USER ? List.of("cancel", "schedule") : List.of("schedule"), steps);
+        StepVerifier.create(submit())
+                .expectErrorSatisfies(error -> assertCode(error, WebSocketErrorCode.NOT_YOUR_TURN)).verify(TIMEOUT);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"submit", "floor", "goStop"})
+    void missingCompletionIsRejectedBeforeMutation(String action) {
+        StepVerifier.create(Mono.defer(() -> switch (action) {
+                    case "submit" -> gamePlayService.executeNormalSubmit(ROOM_ID, Player.PLAYER_1, 0, null).then();
+                    case "floor" -> gamePlayService.executeFloorSelection(ROOM_ID, Player.PLAYER_1, 0, null).then();
+                    default -> gamePlayService.executeGoStop(ROOM_ID, Player.PLAYER_1, true, null).then();
+                }))
+                .expectError(NullPointerException.class).verify(TIMEOUT);
+
+        assertOriginalTurn();
+        assertEquals(INITIAL_CARDS, storedCards());
+        assertNotNull(submit().block(TIMEOUT));
+    }
+
+    @Test
+    void missingSourceIsRejectedBeforeMutation() {
+        StepVerifier.create(turnFlowService.processNormalSubmit(ROOM_ID, Player.PLAYER_1, 0, null, scheduler))
+                .expectError(NullPointerException.class).verify(TIMEOUT);
+        assertOriginalTurn();
+        assertEquals(INITIAL_CARDS, storedCards());
+        org.mockito.Mockito.verifyNoInteractions(scheduler);
         assertNotNull(submit().block(TIMEOUT));
     }
 
@@ -138,7 +193,7 @@ class GameActionCancellationTest {
         }).when(gameStateRepository).save(any(GameState.class));
 
         StepVerifier.create(turnFlowService.processGoStopChoice(ROOM_ID, Player.PLAYER_1, go,
-                        succeeded::incrementAndGet, scheduler))
+                        GameActionSource.USER, scheduler))
                 .then(() -> assertEquals(1, gate.currentSubscriberCount()))
                 .thenCancel().verify(TIMEOUT);
         assertEquals(0, cancelled.get());
@@ -168,7 +223,7 @@ class GameActionCancellationTest {
         }).when(installedCardRepository).deleteRevealedCard(ROOM_ID, Card.JAN_1);
 
         StepVerifier.create(turnFlowService.processFloorSelection(ROOM_ID, Player.PLAYER_1, 0,
-                        succeeded::incrementAndGet, scheduler))
+                        GameActionSource.USER, scheduler))
                 .then(() -> assertEquals(1, gate.currentSubscriberCount()))
                 .thenCancel().verify(TIMEOUT);
         assertEquals(0, cancelled.get());
@@ -213,7 +268,7 @@ class GameActionCancellationTest {
         assertNull(gameStateRepository.findById(ROOM_ID).block(TIMEOUT));
         gameStateRepository.create(GameState.builder().roomId(ROOM_ID).leadingPlayer(1).currentTurn(1)
                 .round(2).phase(GamePhase.AWAITING_GO_STOP_CHOICE).build()).block(TIMEOUT);
-        assertEquals(GamePhase.END, gamePlayService.executeGoStop(ROOM_ID, Player.PLAYER_1, false, null)
+        assertEquals(GamePhase.END, gamePlayService.executeGoStop(ROOM_ID, Player.PLAYER_1, false, GameActionCompletion.NONE)
                 .block(TIMEOUT).getPhase());
     }
 
@@ -258,7 +313,7 @@ class GameActionCancellationTest {
     }
 
     private Mono<TurnExecutionResult> submit() {
-        return gamePlayService.executeNormalSubmit(ROOM_ID, Player.PLAYER_1, 0, succeeded::incrementAndGet);
+        return gamePlayService.executeNormalSubmit(ROOM_ID, Player.PLAYER_1, 0, state -> succeeded.incrementAndGet());
     }
 
     private void verifyNextTimer(GamePhase phase, int turn) {

@@ -7,6 +7,7 @@ import com.pomingmatgo.gameservice.domain.TurnTiming;
 import com.pomingmatgo.gameservice.domain.event.RoomCleanedUpEvent;
 import com.pomingmatgo.gameservice.domain.service.matgo.GameService;
 import com.pomingmatgo.gameservice.domain.service.matgo.TurnFlowService;
+import com.pomingmatgo.gameservice.domain.service.matgo.GameActionSource;
 import com.pomingmatgo.gameservice.global.lock.InFlightManager;
 import jakarta.annotation.PreDestroy;
 import lombok.RequiredArgsConstructor;
@@ -212,11 +213,11 @@ public class AutoPlayScheduler implements TurnScheduler {
 
                                             return switch (step.phase()) {
                                                 case AWAITING_FLOOR_CARD_CHOICE ->
-                                                        turnFlowService.processFloorSelection(roomId, currentPlayer, AUTO_PLAY_CARD_INDEX, null, boundScheduler);
+                                                        turnFlowService.processFloorSelection(roomId, currentPlayer, AUTO_PLAY_CARD_INDEX, GameActionSource.AUTOPLAY, boundScheduler);
                                                 case AWAITING_GO_STOP_CHOICE ->
-                                                        turnFlowService.processGoStopChoice(roomId, currentPlayer, AUTO_GO_STOP_IS_GO, null, boundScheduler);
+                                                        turnFlowService.processGoStopChoice(roomId, currentPlayer, AUTO_GO_STOP_IS_GO, GameActionSource.AUTOPLAY, boundScheduler);
                                                 default ->
-                                                        turnFlowService.processNormalSubmit(roomId, currentPlayer, AUTO_PLAY_CARD_INDEX, null, boundScheduler);
+                                                        turnFlowService.processNormalSubmit(roomId, currentPlayer, AUTO_PLAY_CARD_INDEX, GameActionSource.AUTOPLAY, boundScheduler);
                                             };
                                         });
                             }));

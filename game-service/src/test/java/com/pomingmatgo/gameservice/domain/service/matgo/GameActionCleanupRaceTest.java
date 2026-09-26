@@ -109,7 +109,7 @@ class GameActionCleanupRaceTest {
                             .expectErrorSatisfies(error -> assertEquals(ErrorCode.ALREADY_EXISTED_ROOM,
                                     assertInstanceOf(BusinessException.class, error).getErrorCode()))
                             .verify(TIMEOUT);
-                    StepVerifier.create(gamePlayService.executeGoStop(ROOM_ID, Player.PLAYER_1, false, null))
+                    StepVerifier.create(gamePlayService.executeGoStop(ROOM_ID, Player.PLAYER_1, false, GameActionCompletion.NONE))
                             .expectErrorSatisfies(error -> assertEquals(TRY_AGAIN,
                                     assertInstanceOf(WebSocketBusinessException.class, error).getWebsocketErrorCode()))
                             .verify(TIMEOUT);
@@ -122,7 +122,7 @@ class GameActionCleanupRaceTest {
         cleaned.asMono().block(TIMEOUT);
         assertRoomAbsent();
         gameStateRepository.create(state(7, GamePhase.AWAITING_GO_STOP_CHOICE)).block(TIMEOUT);
-        GameState ended = gamePlayService.executeGoStop(ROOM_ID, Player.PLAYER_1, false, null).block(TIMEOUT);
+        GameState ended = gamePlayService.executeGoStop(ROOM_ID, Player.PLAYER_1, false, GameActionCompletion.NONE).block(TIMEOUT);
         assertNotNull(ended);
         assertEquals(GamePhase.END, ended.getPhase());
         assertEquals(7, ended.getRound());
@@ -198,7 +198,7 @@ class GameActionCleanupRaceTest {
     }
 
     private Mono<TurnExecutionResult> submit() {
-        return gamePlayService.executeNormalSubmit(ROOM_ID, Player.PLAYER_1, 0, succeeded::incrementAndGet);
+        return gamePlayService.executeNormalSubmit(ROOM_ID, Player.PLAYER_1, 0, state -> succeeded.incrementAndGet());
     }
 
     private Mono<Void> cleanup(boolean fullCleanup) {

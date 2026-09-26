@@ -46,7 +46,7 @@ public class WsGameHandler {
         long roomId = gameState.getRoomId();
         return turnFlowService.processNormalSubmit(
                 roomId, player, event.getData().cardIndex(),
-                () -> autoPlayScheduler.cancelAutoPlay(roomId), autoPlayScheduler);
+                GameActionSource.USER, autoPlayScheduler);
     }
 
     private Mono<Void> handleFloorSelect(RequestEvent<NormalSubmitReq> event, GameState gameState, Player player) {
@@ -57,7 +57,7 @@ public class WsGameHandler {
         long roomId = gameState.getRoomId();
         return turnFlowService.processFloorSelection(
                 roomId, player, event.getData().cardIndex(),
-                () -> autoPlayScheduler.cancelAutoPlay(roomId), autoPlayScheduler);
+                GameActionSource.USER, autoPlayScheduler);
     }
 
     private Mono<Void> handleGoStopChoice(RequestEvent<GoStopReq> event, GameState gameState, Player player) {
@@ -68,6 +68,6 @@ public class WsGameHandler {
         long roomId = gameState.getRoomId();
         return turnFlowService.processGoStopChoice(
                 roomId, player, event.getData().go(),
-                () -> autoPlayScheduler.cancelAutoPlay(roomId), autoPlayScheduler);
+                GameActionSource.USER, autoPlayScheduler);
     }
 }

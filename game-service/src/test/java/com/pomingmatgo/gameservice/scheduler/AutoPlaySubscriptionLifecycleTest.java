@@ -1,5 +1,6 @@
 package com.pomingmatgo.gameservice.scheduler;
 
+import com.pomingmatgo.gameservice.domain.service.matgo.GameActionSource;
 import ch.qos.logback.classic.Logger;
 import ch.qos.logback.classic.spi.ILoggingEvent;
 import ch.qos.logback.core.read.ListAppender;
@@ -84,14 +85,14 @@ class AutoPlaySubscriptionLifecycleTest {
         stubAction(Mono.empty());
         schedule(ROOM_ID);
         fire();
-        verify(turnFlow).processNormalSubmit(eq(ROOM_ID), eq(Player.PLAYER_1), eq(0), isNull(), any(TurnScheduler.class));
+        verify(turnFlow).processNormalSubmit(eq(ROOM_ID), eq(Player.PLAYER_1), eq(0), eq(GameActionSource.AUTOPLAY), any(TurnScheduler.class));
         assertEquals(0, running().size());
     }
 
     @Test
     void runningExecutionKeepsOriginalLifetimeAfterRoomRecreation() {
         Sinks.Empty<Void> completion = Sinks.empty();
-        when(turnFlow.processNormalSubmit(anyLong(), any(Player.class), anyInt(), isNull(), any(TurnScheduler.class)))
+        when(turnFlow.processNormalSubmit(anyLong(), any(Player.class), anyInt(), eq(GameActionSource.AUTOPLAY), any(TurnScheduler.class)))
                 .thenAnswer(call -> {
                     TurnScheduler bound = call.getArgument(4);
                     return completion.asMono().then(Mono.fromRunnable(() ->
@@ -232,7 +233,7 @@ class AutoPlaySubscriptionLifecycleTest {
     }
 
     private void stubAction(Mono<Void> action) {
-        when(turnFlow.processNormalSubmit(anyLong(), any(Player.class), anyInt(), isNull(), any(TurnScheduler.class)))
+        when(turnFlow.processNormalSubmit(anyLong(), any(Player.class), anyInt(), eq(GameActionSource.AUTOPLAY), any(TurnScheduler.class)))
                 .thenReturn(action);
     }
 

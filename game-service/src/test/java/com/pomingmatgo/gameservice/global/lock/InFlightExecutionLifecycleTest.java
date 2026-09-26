@@ -1,5 +1,6 @@
 package com.pomingmatgo.gameservice.global.lock;
 
+import com.pomingmatgo.gameservice.domain.service.matgo.GameActionSource;
 import com.pomingmatgo.gameservice.api.handler.event.RequestEvent;
 import com.pomingmatgo.gameservice.api.handler.event.RequestEventDecoder;
 import com.pomingmatgo.gameservice.api.handler.event.category.SubCategory;
@@ -81,7 +82,7 @@ class InFlightExecutionLifecycleTest {
         Mono<Void> action = completion.asMono().doOnSubscribe(ignored -> started.incrementAndGet())
                 .doOnCancel(cancelled::incrementAndGet);
         when(actions.handleGameEvent(any(), eq(state), eq(Player.PLAYER_1))).thenReturn(action);
-        when(flow.processNormalSubmit(eq(ROOM_ID), eq(Player.PLAYER_1), eq(0), isNull(), any(TurnScheduler.class)))
+        when(flow.processNormalSubmit(eq(ROOM_ID), eq(Player.PLAYER_1), eq(0), eq(GameActionSource.AUTOPLAY), any(TurnScheduler.class)))
                 .thenReturn(action);
     }
 
@@ -152,7 +153,7 @@ class InFlightExecutionLifecycleTest {
     void synchronousActionCreationFailureAlsoReleasesFlag(boolean autoplay) {
         IllegalStateException failure = new IllegalStateException("controlled creation failure");
         if (autoplay) {
-            when(flow.processNormalSubmit(anyLong(), any(), anyInt(), isNull(), any())).thenThrow(failure);
+            when(flow.processNormalSubmit(anyLong(), any(), anyInt(), eq(GameActionSource.AUTOPLAY), any())).thenThrow(failure);
         } else {
             when(actions.handleGameEvent(any(), any(), any())).thenThrow(failure);
         }

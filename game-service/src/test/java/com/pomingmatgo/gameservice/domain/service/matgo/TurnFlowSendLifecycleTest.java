@@ -126,7 +126,7 @@ class TurnFlowSendLifecycleTest {
 
         // 다음 유효 액션도 정상 진행한다.
         turnFlowService.processNormalSubmit(ROOM_ID, Player.PLAYER_2, 0,
-                () -> scheduler.cancelAutoPlay(ROOM_ID), scheduler).block(TIMEOUT);
+                GameActionSource.USER, scheduler).block(TIMEOUT);
         GameState after = gameStateRepository.findById(ROOM_ID).block(TIMEOUT);
         assertNotNull(after);
         assertEquals(2, after.getRound());
@@ -342,7 +342,7 @@ class TurnFlowSendLifecycleTest {
 
     private Mono<Void> submit(long roomId, TurnScheduler targetScheduler) {
         return turnFlowService.processNormalSubmit(roomId, Player.PLAYER_1, 0,
-                () -> targetScheduler.cancelAutoPlay(roomId), targetScheduler);
+                GameActionSource.USER, targetScheduler);
     }
 
     private void assertWaitingForSend() {

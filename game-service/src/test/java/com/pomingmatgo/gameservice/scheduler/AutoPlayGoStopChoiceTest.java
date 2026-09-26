@@ -1,5 +1,6 @@
 package com.pomingmatgo.gameservice.scheduler;
 
+import com.pomingmatgo.gameservice.domain.service.matgo.GameActionSource;
 import com.pomingmatgo.gameservice.domain.messaging.GameMessageSender;
 import com.pomingmatgo.gameservice.domain.GamePhase;
 import com.pomingmatgo.gameservice.domain.GameState;
@@ -77,7 +78,7 @@ class AutoPlayGoStopChoiceTest {
         installedCardRepository.saveHiddenCard(List.of(Card.MAR_3), roomId).block();
 
         turnFlowService.processNormalSubmit(roomId, Player.PLAYER_1, 0,
-                () -> autoPlayScheduler.cancelAutoPlay(roomId), autoPlayScheduler).block();
+                GameActionSource.USER, autoPlayScheduler).block();
 
         GameState afterSubmit = gameStateRepository.findById(roomId).block();
         assertEquals(GamePhase.AWAITING_GO_STOP_CHOICE, afterSubmit.getPhase());
@@ -121,7 +122,7 @@ class AutoPlayGoStopChoiceTest {
         roomId = 920_003L;
         seedGoStopPendingRoom();
 
-        turnFlowService.processGoStopChoice(roomId, Player.PLAYER_1, true, null, autoPlayScheduler).block();
+        turnFlowService.processGoStopChoice(roomId, Player.PLAYER_1, true, GameActionSource.AUTOPLAY, autoPlayScheduler).block();
 
         GameState result = gameStateRepository.findById(roomId).block();
         assertEquals(GamePhase.IN_PROGRESS, result.getPhase());
@@ -141,7 +142,7 @@ class AutoPlayGoStopChoiceTest {
         gameStateRepository.create(state).block();
 
         WebSocketBusinessException e = assertThrows(WebSocketBusinessException.class,
-                () -> turnFlowService.processGoStopChoice(roomId, Player.PLAYER_1, true, null, autoPlayScheduler).block());
+                () -> turnFlowService.processGoStopChoice(roomId, Player.PLAYER_1, true, GameActionSource.AUTOPLAY, autoPlayScheduler).block());
         assertEquals(INVALID_GAME_PHASE, e.getWebsocketErrorCode());
     }
 

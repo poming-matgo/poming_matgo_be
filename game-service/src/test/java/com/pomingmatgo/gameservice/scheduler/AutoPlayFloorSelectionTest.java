@@ -1,5 +1,6 @@
 package com.pomingmatgo.gameservice.scheduler;
 
+import com.pomingmatgo.gameservice.domain.service.matgo.GameActionSource;
 import com.pomingmatgo.gameservice.api.handler.websocket.WsGameHandler;
 import com.pomingmatgo.gameservice.api.handler.event.RequestEvent;
 import com.pomingmatgo.gameservice.api.handler.event.category.SubCategory;
@@ -147,7 +148,7 @@ class AutoPlayFloorSelectionTest {
         installedCardRepository.saveHiddenCard(List.of(Card.FEB_3), roomId).block();
 
         turnFlowService.processNormalSubmit(roomId, Player.PLAYER_1, 0,
-                () -> autoPlayScheduler.cancelAutoPlay(roomId), autoPlayScheduler).block();
+                GameActionSource.USER, autoPlayScheduler).block();
 
         GameState afterSubmit = gameStateRepository.findById(roomId).block();
         assertEquals(GamePhase.AWAITING_FLOOR_CARD_CHOICE, afterSubmit.getPhase());
@@ -239,6 +240,10 @@ class AutoPlayFloorSelectionTest {
                 .sendTurnInfo(Mockito.argThat(state -> state.getRoomId() == roomId), Mockito.anyLong());
         TurnScheduler recordingScheduler = Mockito.mock(TurnScheduler.class);
         Mockito.doAnswer(invocation -> {
+            autoPlayScheduler.cancelAutoPlay(invocation.getArgument(0));
+            return null;
+        }).when(recordingScheduler).cancelAutoPlay(Mockito.anyLong());
+        Mockito.doAnswer(invocation -> {
             GamePhase phase = invocation.getArgument(5);
             long deadline = phase == GamePhase.AWAITING_FLOOR_CARD_CHOICE
                     ? System.nanoTime() + TimeUnit.SECONDS.toNanos(1)
@@ -251,7 +256,7 @@ class AutoPlayFloorSelectionTest {
 
         try {
             reactor.test.StepVerifier.create(turnFlowService.processNormalSubmit(roomId, Player.PLAYER_1, 0,
-                            () -> autoPlayScheduler.cancelAutoPlay(roomId), recordingScheduler))
+                            GameActionSource.USER, recordingScheduler))
                     .then(() -> {
                         GameState nextTurn = gameStateRepository.findById(roomId).block();
                         assertEquals(Player.PLAYER_2, nextTurn.getCurrentPlayer());
@@ -261,7 +266,7 @@ class AutoPlayFloorSelectionTest {
 
                         // 상태 전이는 순차 실행하고, P1의 송신 후처리가 남은 상태에서 P2가 유효한 제출을 한다.
                         turnFlowService.processNormalSubmit(roomId, Player.PLAYER_2, 0,
-                                () -> autoPlayScheduler.cancelAutoPlay(roomId), recordingScheduler)
+                                GameActionSource.USER, recordingScheduler)
                                 .block(Duration.ofSeconds(2));
                         assertEquals(GamePhase.AWAITING_FLOOR_CARD_CHOICE,
                                 gameStateRepository.findById(roomId).block().getPhase());

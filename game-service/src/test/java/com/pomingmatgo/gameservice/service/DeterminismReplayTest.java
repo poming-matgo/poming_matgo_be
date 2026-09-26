@@ -1,5 +1,6 @@
 package com.pomingmatgo.gameservice.service;
 
+import com.pomingmatgo.gameservice.domain.service.matgo.GameActionCompletion;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.pomingmatgo.gameservice.domain.GamePhase;
@@ -146,9 +147,9 @@ class DeterminismReplayTest {
 
     private void execute(long roomId, Command cmd) {
         switch (cmd.type()) {
-            case SUBMIT -> gamePlayService.executeNormalSubmit(roomId, cmd.player(), cmd.cardIndex(), null).block();
-            case FLOOR_SELECT -> gamePlayService.executeFloorSelection(roomId, cmd.player(), cmd.cardIndex(), null).block();
-            case GO_STOP -> gamePlayService.executeGoStop(roomId, cmd.player(), cmd.go(), null).block();
+            case SUBMIT -> gamePlayService.executeNormalSubmit(roomId, cmd.player(), cmd.cardIndex(), GameActionCompletion.NONE).block();
+            case FLOOR_SELECT -> gamePlayService.executeFloorSelection(roomId, cmd.player(), cmd.cardIndex(), GameActionCompletion.NONE).block();
+            case GO_STOP -> gamePlayService.executeGoStop(roomId, cmd.player(), cmd.go(), GameActionCompletion.NONE).block();
         }
     }
 
