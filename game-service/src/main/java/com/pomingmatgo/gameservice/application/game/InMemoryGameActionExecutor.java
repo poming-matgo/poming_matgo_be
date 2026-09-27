@@ -12,6 +12,7 @@ import reactor.core.publisher.BaseSubscriber;
 import reactor.core.publisher.MonoSink;
 import reactor.util.context.Context;
 
+import java.time.Duration;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
@@ -26,6 +27,7 @@ import java.util.function.Supplier;
 @Component
 @RequiredArgsConstructor
 public class InMemoryGameActionExecutor implements GameLockCleaner {
+    private static final Duration EXECUTION_TIMEOUT = Duration.ofSeconds(30);
 
     private final InMemoryRoomExecutionGate executionGate;
     private final Set<ActionExecution> executions = new HashSet<>();
@@ -59,6 +61,8 @@ public class InMemoryGameActionExecutor implements GameLockCleaner {
                 Mono.fromSupplier(() -> executionGate.acquire(roomId)),
                 s -> Mono.defer(() -> operation.apply(s)).contextWrite(context -> context.put(GameActionAcceptance.class,
                         (BooleanSupplier) () -> execution.accept(s)).put(ActionExecution.class, execution))
+                        // 검증부터 필수 후처리까지 제한한다. timeout도 해제 전에 수락 후 오류로 차단한다.
+                        .timeout(EXECUTION_TIMEOUT)
                         .doOnError(error -> {
                             if (execution.isAccepted()) executionGate.fail(s);
                         }),

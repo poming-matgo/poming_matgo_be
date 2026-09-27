@@ -12,9 +12,11 @@ import org.springframework.aop.aspectj.annotation.AspectJProxyFactory;
 import reactor.core.publisher.Mono;
 import reactor.core.publisher.Sinks;
 import reactor.test.StepVerifier;
+import reactor.test.scheduler.VirtualTimeScheduler;
 
 import java.time.Duration;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.TimeoutException;
 import java.util.Set;
 import org.springframework.test.util.ReflectionTestUtils;
 import java.util.function.Supplier;
@@ -41,6 +43,92 @@ class InMemoryGameLockLifecycleTest {
     void shutdown() {
         executor.shutdown();
         assertEquals(0, ((Set<?>) ReflectionTestUtils.getField(executor, "executions")).size());
+    }
+
+    @Test
+    void timeoutBeforeAcceptanceReleasesWithoutBlockingRoom() {
+        AtomicInteger cancelled = new AtomicInteger();
+        StepVerifier.withVirtualTime(() -> action.run(1L,
+                        () -> Mono.<String>never().doOnCancel(cancelled::incrementAndGet)))
+                .expectSubscription()
+                .expectNoEvent(Duration.ofSeconds(29))
+                .thenAwait(Duration.ofSeconds(1))
+                .expectError(TimeoutException.class).verify(Duration.ofSeconds(3));
+        assertEquals(1, cancelled.get());
+        assertExclusiveAfterRelease();
+    }
+
+    @Test
+    void acceptedTimeoutBlocksUntilSuccessfulCleanup() {
+        Sinks.One<String> finish = Sinks.one();
+        StepVerifier.withVirtualTime(() -> action.run(1L,
+                        () -> GameActionAcceptance.beforeMutation(finish::asMono)))
+                .expectSubscription()
+                .thenAwait(Duration.ofSeconds(30))
+                .expectError(TimeoutException.class).verify(Duration.ofSeconds(3));
+        assertEquals(0, finish.currentSubscriberCount());
+        assertEquals(0, ((Set<?>) ReflectionTestUtils.getField(executor, "executions")).size());
+        busy(action.run(1L, () -> Mono.just("blocked")));
+        assertThrows(RuntimeException.class, () -> gate.create(1, () -> "blocked"));
+        StepVerifier.create(executor.withCleanup(1, () -> Mono.error(new IllegalStateException("cleanup failed"))))
+                .expectErrorMessage("cleanup failed").verify(Duration.ofSeconds(3));
+        busy(action.run(1L, () -> Mono.just("still blocked")));
+        StepVerifier.create(executor.withCleanup(1, Mono::empty)).verifyComplete();
+        assertExclusiveAfterRelease();
+    }
+
+    @Test
+    void timeoutAfterCallerCancellationUnblocksWaitingCleanup() {
+        VirtualTimeScheduler clock = VirtualTimeScheduler.getOrSet();
+        try {
+            Sinks.One<String> finish = Sinks.one();
+            AtomicInteger cleaned = new AtomicInteger();
+            StepVerifier.create(action.run(1L, () -> GameActionAcceptance.beforeMutation(finish::asMono)))
+                    .then(() -> assertEquals(1, finish.currentSubscriberCount()))
+                    .thenCancel().verify(Duration.ofSeconds(3));
+            assertEquals(1, finish.currentSubscriberCount());
+            StepVerifier.create(executor.withCleanup(1, () -> Mono.fromRunnable(cleaned::incrementAndGet)))
+                    .then(() -> {
+                        clock.advanceTimeBy(Duration.ofSeconds(29));
+                        assertEquals(0, cleaned.get());
+                        completes(action.run(2L, () -> Mono.just("other")), "other");
+                        clock.advanceTimeBy(Duration.ofSeconds(1));
+                    }).verifyComplete();
+            assertEquals(1, cleaned.get());
+            assertEquals(0, finish.currentSubscriberCount());
+            assertEquals(0, ((Set<?>) ReflectionTestUtils.getField(executor, "executions")).size());
+            assertExclusiveAfterRelease();
+        } finally {
+            VirtualTimeScheduler.reset();
+        }
+    }
+
+    @Test
+    void nestedRestartSharesRemainingExecutionDeadline() {
+        AtomicInteger cancelled = new AtomicInteger();
+        StepVerifier.withVirtualTime(() -> action.run(1L, () -> GameActionAcceptance.beforeMutation(() ->
+                        Mono.delay(Duration.ofSeconds(20))
+                                .then(executor.withRestart(1, () -> Mono.<Void>never()
+                                        .doOnCancel(cancelled::incrementAndGet)))
+                                .thenReturn("done"))))
+                .expectSubscription()
+                .expectNoEvent(Duration.ofSeconds(29))
+                .thenAwait(Duration.ofSeconds(1))
+                .expectError(TimeoutException.class).verify(Duration.ofSeconds(3));
+        assertEquals(1, cancelled.get());
+        busy(action.run(1L, () -> Mono.just("blocked")));
+    }
+
+    @Test
+    void successfulExecutionDoesNotLaterBlockRoom() {
+        VirtualTimeScheduler clock = VirtualTimeScheduler.getOrSet();
+        try {
+            completes(action.run(1L, () -> GameActionAcceptance.beforeMutation(() -> Mono.just("done"))), "done");
+            clock.advanceTimeBy(Duration.ofSeconds(31));
+            assertExclusiveAfterRelease();
+        } finally {
+            VirtualTimeScheduler.reset();
+        }
     }
 
     @Test
