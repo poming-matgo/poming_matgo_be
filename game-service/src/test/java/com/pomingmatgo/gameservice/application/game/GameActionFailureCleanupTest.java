@@ -116,6 +116,39 @@ class GameActionFailureCleanupTest {
         assertReusable();
     }
 
+    @ParameterizedTest(name = "대기 중 세션 정리 실패={0}")
+    @ValueSource(booleans = {false, true})
+    void sessionCleanupKeepsGateUntilCompletionEvenAfterObserverCancellation(boolean sessionFailure) {
+        Sinks.Empty<Void> pendingSession = Sinks.empty();
+        var sessionError = new IllegalStateException("late session cleanup failure");
+        when(sessions.removeRoom(ROOM_ID)).thenReturn(pendingSession.asMono());
+
+        StepVerifier.create(accepted(Mono.error(failure)))
+                .expectErrorMatches(error -> error == failure).verify(TIMEOUT);
+        assertNull(state.findById(ROOM_ID).block(TIMEOUT));
+        assertEquals(1, pendingSession.currentSubscriberCount());
+        assertBlocked();
+        StepVerifier.create(cleanup.cleanupRoom(ROOM_ID)).thenCancel().verify(TIMEOUT);
+        assertEquals(1, pendingSession.currentSubscriberCount());
+        assertBlocked();
+
+        var verification = StepVerifier.create(cleanup.cleanupRoom(ROOM_ID))
+                .then(() -> {
+                    if (sessionFailure) assertEquals(Sinks.EmitResult.OK, pendingSession.tryEmitError(sessionError));
+                    else assertEquals(Sinks.EmitResult.OK, pendingSession.tryEmitEmpty());
+                });
+        if (sessionFailure) verification.expectErrorMatches(error -> error == sessionError).verify(TIMEOUT);
+        else verification.expectComplete().verify(TIMEOUT);
+        verify(state).cleanup(ROOM_ID);
+        verify(sessions).removeRoom(ROOM_ID);
+        if (sessionFailure) {
+            assertBlocked();
+            when(sessions.removeRoom(ROOM_ID)).thenReturn(Mono.empty());
+            cleanup.cleanupRoom(ROOM_ID).block(TIMEOUT);
+        }
+        assertReusable();
+    }
+
     @ParameterizedTest(name = "세션 정리 실패={0}")
     @ValueSource(booleans = {false, true})
     void cleanupFailureKeepsRoomBlockedUntilExplicitSuccessfulCleanup(boolean sessionFailure) {

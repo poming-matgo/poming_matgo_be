@@ -79,7 +79,7 @@ public class RoomCleanupService {
         // 안내·데이터 정리 오류 뒤에도 다음 단계를 시도하고, 각 단계의 오류를 보존한다.
         return Flux.concatDelayError(
                 Mono.defer(() -> notification).timeout(TERMINATION_NOTIFICATION_TIMEOUT),
-                Mono.defer(() -> cleanupRoomData(roomId)),
+                Mono.defer(() -> deleteRoomData(roomId)),
                 Mono.defer(() -> sessionManager.removeRoom(roomId))
         ).then().doOnError(error -> log.error("Room ({}) cleanup failed", roomId, error));
     }
@@ -127,6 +127,7 @@ public class RoomCleanupService {
         }
     }
 
+    /** 테스트 초기화·정리 등에 쓰는 독립 데이터 정리이며, 세션은 유지하고 호출자 취소를 따른다. */
     public Mono<Void> cleanupRoomData(long roomId) {
         return Mono.defer(() -> gameLockCleaner.withCleanup(roomId, () -> deleteRoomData(roomId)));
     }
@@ -139,6 +140,7 @@ public class RoomCleanupService {
     }
 
     private Mono<Void> deleteRoomData(long roomId) {
+        // 전체·독립 정리 또는 재시작의 보호 구간 안에서만 호출한다.
         // 개별 오류가 다른 정리를 취소하지 않게 하고, 동기 예외도 구독 시 오류로 합산한다.
         return Mono.whenDelayError(
                 // 데이터 삭제 전에 신규 타이머를 차단한다. 동기 리스너로 등록과 종료를 직렬화한다.

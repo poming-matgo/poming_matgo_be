@@ -94,7 +94,7 @@ public class InMemoryRoomExecutionGate {
     private Mono<Void> finishCleanup(long roomId, Entry entry, boolean completed) {
         return Mono.fromRunnable(() -> {
             synchronized (this) {
-                // 중첩 데이터 정리 성공만으로 세션 정리까지 포함한 외부 실행의 실패 차단을 풀지 않는다.
+                // 겹친 정리가 남아 있으면 차단을 유지한다. 서로 다른 정리 범위의 실패를 합산하지는 않는다.
                 if (completed && entry.cleanups == 1) entry.failed = false;
                 if (--entry.cleanups == 0 && !entry.active && !entry.failed) rooms.remove(roomId, entry);
             }
