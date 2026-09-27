@@ -316,6 +316,27 @@ class TurnFlowSendLifecycleTest {
         sessionManager.removeRoom(ROOM_ID).block(TIMEOUT);
     }
 
+    @ParameterizedTest(name = "자동플레이={0}")
+    @ValueSource(booleans = {false, true})
+    void endRestartCompletesBeforeBlockedSubmitNotification(boolean autoplay) {
+        slow.observedStatus = "SUBMIT_CARD";
+        GameState state = gameStateRepository.findById(ROOM_ID).block(TIMEOUT);
+        gameStateRepository.save(state.toBuilder().round(10).currentTurn(2).leadingPlayer(2).build()).block(TIMEOUT);
+        StepVerifier.create(turnFlowService.processNormalSubmit(ROOM_ID, Player.PLAYER_1, 0,
+                        autoplay ? GameActionSource.AUTOPLAY : GameActionSource.USER, scheduler))
+                .then(() -> {
+                    assertEquals(1, slow.turnStarted.get());
+                    assertEquals(GamePhase.NONE, gameStateRepository.findById(ROOM_ID).block(TIMEOUT).getPhase());
+                    assertTrue(installedCardRepository.getPlayerCards(ROOM_ID, Player.PLAYER_1).block(TIMEOUT).isEmpty());
+                    verify(scheduler, never()).scheduleAutoPlay(anyLong(), anyInt(), anyInt(), any(), anyLong(), any());
+                })
+                .thenCancel().verify(TIMEOUT);
+        assertEquals(1, slow.turnCancelled.get());
+        GameState recreated = gameStateRepository.findById(ROOM_ID).block(TIMEOUT);
+        assertEquals(Sinks.EmitResult.OK, slow.completion.tryEmitEmpty());
+        assertSame(recreated, gameStateRepository.findById(ROOM_ID).block(TIMEOUT));
+    }
+
     private void assertRoomRemoved() {
         assertNull(gameStateRepository.findById(ROOM_ID).block(TIMEOUT));
         assertTrue(sessionManager.getAllUser(ROOM_ID).isEmpty());
@@ -323,6 +344,28 @@ class TurnFlowSendLifecycleTest {
         assertNull(sessionManager.getPlayerContext(opponent.session).block(TIMEOUT));
         assertTrue(installedCardRepository.getPlayerCards(ROOM_ID, Player.PLAYER_1).block(TIMEOUT).isEmpty());
         assertTrue(installedCardRepository.getPlayerCards(ROOM_ID, Player.PLAYER_2).block(TIMEOUT).isEmpty());
+    }
+
+    @ParameterizedTest(name = "송신 실패={0}")
+    @ValueSource(booleans = {false, true})
+    void lateEndNotificationDoesNotRestartRecreatedRoom(boolean failedSend) {
+        slow.observedStatus = "SUBMIT_CARD";
+        GameState state = gameStateRepository.findById(ROOM_ID).block(TIMEOUT);
+        gameStateRepository.save(state.toBuilder().round(10).currentTurn(2).leadingPlayer(2).build()).block(TIMEOUT);
+        GameState[] recreated = new GameState[1];
+        StepVerifier.create(submit(ROOM_ID))
+                .then(() -> {
+                    assertEquals(1, slow.turnStarted.get());
+                    assertEquals(GamePhase.NONE, gameStateRepository.findById(ROOM_ID).block(TIMEOUT).getPhase());
+                    recreated[0] = GameState.createEmptyRoom(ROOM_ID).toBuilder().round(7).build();
+                    gameStateRepository.save(recreated[0]).block(TIMEOUT);
+                    installedCardRepository.savePlayerCards(List.of(Card.DEC_1), ROOM_ID, Player.PLAYER_1).block(TIMEOUT);
+                    assertEquals(Sinks.EmitResult.OK, failedSend
+                            ? slow.completion.tryEmitError(new IllegalStateException("late END send failure"))
+                            : slow.completion.tryEmitEmpty());
+                }).expectComplete().verify(TIMEOUT);
+        assertSame(recreated[0], gameStateRepository.findById(ROOM_ID).block(TIMEOUT));
+        assertEquals(List.of(Card.DEC_1), installedCardRepository.getPlayerCards(ROOM_ID, Player.PLAYER_1).block(TIMEOUT));
     }
 
     // 완료된 Disposable과 맵 엔트리의 잔존을 구분하기 위한 테스트 전용 관측이다.

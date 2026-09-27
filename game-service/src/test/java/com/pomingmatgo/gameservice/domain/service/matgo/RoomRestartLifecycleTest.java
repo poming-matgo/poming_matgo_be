@@ -151,6 +151,39 @@ class RoomRestartLifecycleTest {
                 .expectErrorMessage("Game action execution stopped").verify(TIMEOUT);
     }
 
+    @ParameterizedTest(name = "서버 종료={0}")
+    @ValueSource(booleans = {false, true})
+    void restartInsideAcceptedActionSharesFailureAndShutdownOwnership(boolean shutdown) {
+        pauseRestart(false);
+        Mono<Object> action = executor.execute(ROOM_ID, () -> GameActionAcceptance.beforeMutation(() ->
+                cleanup.restartRoom(ROOM_ID).thenReturn((Object) Boolean.TRUE)));
+        StepVerifier.create(action)
+                .then(() -> {
+                    assertPausedAndExclusive();
+                    if (shutdown) executor.shutdown();
+                    else pause.tryEmitError(new IllegalStateException("nested restart failed"));
+                })
+                .expectError(shutdown ? CancellationException.class : IllegalStateException.class)
+                .verify(TIMEOUT);
+        assertEquals(0, pause.currentSubscriberCount());
+        verify(state, never()).create(any(GameState.class));
+        assertNoOwnedExecutions();
+        if (!shutdown) assertThrows(WebSocketBusinessException.class, () -> gate.acquire(ROOM_ID));
+    }
+
+    @Test
+    void completedActionsContextCannotAuthorizeLaterRestart() {
+        var captured = new java.util.concurrent.atomic.AtomicReference<reactor.util.context.ContextView>();
+        executor.execute(ROOM_ID, () -> GameActionAcceptance.beforeMutation(() -> Mono.deferContextual(context -> {
+            captured.set(context);
+            return Mono.just((Object) Boolean.TRUE);
+        }))).block(TIMEOUT);
+        StepVerifier.create(cleanup.restartRoom(ROOM_ID).contextWrite(captured.get()))
+                .expectError(IllegalStateException.class).verify(TIMEOUT);
+        verify(cards, never()).cleanup(ROOM_ID);
+        assertEquals(List.of(Card.JAN_3), cards.getPlayerCards(ROOM_ID, Player.PLAYER_1).block(TIMEOUT));
+    }
+
     @SuppressWarnings("unchecked")
     private void pauseRestart(boolean duringCreate) {
         if (duringCreate) {

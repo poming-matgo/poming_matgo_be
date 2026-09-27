@@ -200,20 +200,25 @@ class GameActionCancellationTest {
         assertEquals(choice, gameStateRepository.findById(ROOM_ID).block(TIMEOUT));
         gate.tryEmitEmpty();
         GameState saved = gameStateRepository.findById(ROOM_ID).block(TIMEOUT);
-        assertEquals(go ? GamePhase.IN_PROGRESS : GamePhase.END, saved.getPhase());
-        assertEquals(go ? 2 : 1, saved.getCurrentTurn());
+        assertEquals(go ? GamePhase.IN_PROGRESS : GamePhase.NONE, saved.getPhase());
+        assertEquals(go ? 2 : GameState.createEmptyRoom(ROOM_ID).getCurrentTurn(), saved.getCurrentTurn());
         assertEquals(go ? 1 : 0, saved.getPlayerState(Player.PLAYER_1).getGo());
         assertEquals(1, succeeded.get());
         if (go) verifyNextTimer(GamePhase.IN_PROGRESS, 2);
-        else verify(scheduler, never()).scheduleAutoPlay(anyLong(), anyInt(), anyInt(), any(), anyLong(), any());
+        else {
+            verify(scheduler, never()).scheduleAutoPlay(anyLong(), anyInt(), anyInt(), any(), anyLong(), any());
+            assertTrue(storedCards().isEmpty(), "STOP은 호출자 취소 후 재시작까지 완료한다");
+        }
     }
 
-    @Test
+    @ParameterizedTest(name = "마지막 턴={0}")
+    @ValueSource(booleans = {false, true})
     @SuppressWarnings("unchecked")
-    void floorSelectionFinishesAcquisitionAndTurnAfterCallerCancellation() {
+    void floorSelectionFinishesAcquisitionAndTurnAfterCallerCancellation(boolean lastTurn) {
         ChoiceInfo choice = ChoiceInfo.builder().playerNumToChoose(Player.PLAYER_1)
                 .submittedCard(Card.JAN_3).selectableCards(List.of(Card.JAN_1, Card.JAN_2)).build();
         gameStateRepository.save(gameStateRepository.findById(ROOM_ID).block(TIMEOUT).toBuilder()
+                .round(lastTurn ? 10 : 1).currentTurn(lastTurn ? 2 : 1).leadingPlayer(lastTurn ? 2 : 1)
                 .phase(GamePhase.AWAITING_FLOOR_CARD_CHOICE).choiceInfo(choice).build()).block(TIMEOUT);
         installedCardRepository.updatePlayerCards(ROOM_ID, Player.PLAYER_1, List.of()).block(TIMEOUT);
         installedCardRepository.saveRevealedCard(List.of(Card.JAN_1, Card.JAN_2), ROOM_ID).block(TIMEOUT);
@@ -229,6 +234,13 @@ class GameActionCancellationTest {
         assertEquals(0, cancelled.get());
         gate.tryEmitEmpty();
         GameState saved = gameStateRepository.findById(ROOM_ID).block(TIMEOUT);
+        if (lastTurn) {
+            assertEquals(GamePhase.NONE, saved.getPhase());
+            assertTrue(storedCards().isEmpty());
+            assertEquals(1, succeeded.get());
+            verify(scheduler, never()).scheduleAutoPlay(anyLong(), anyInt(), anyInt(), any(), anyLong(), any());
+            return;
+        }
         assertEquals(GamePhase.IN_PROGRESS, saved.getPhase());
         assertEquals(2, saved.getCurrentTurn());
         assertNull(saved.getChoiceInfo());
@@ -236,6 +248,40 @@ class GameActionCancellationTest {
         assertEquals(List.of(Card.JAN_2), installedCardRepository.getAllRevealedCards(ROOM_ID).block(TIMEOUT));
         assertEquals(1, succeeded.get());
         verifyNextTimer(GamePhase.IN_PROGRESS, 2);
+    }
+
+    @ParameterizedTest
+    @EnumSource(GameActionSource.class)
+    @SuppressWarnings("unchecked")
+    void cleanupAfterEndSaveWaitsForAcceptedRestart(GameActionSource source) {
+        GameState choice = gameStateRepository.findById(ROOM_ID).block(TIMEOUT).toBuilder()
+                .phase(GamePhase.AWAITING_GO_STOP_CHOICE).build();
+        gameStateRepository.save(choice).block(TIMEOUT);
+        doAnswer(invocation -> {
+            Mono<Long> save = (Mono<Long>) invocation.callRealMethod();
+            return save.delayUntil(ignored -> gate.asMono());
+        }).when(gameStateRepository).save(any(GameState.class));
+
+        var caller = turnFlowService.processGoStopChoice(ROOM_ID, Player.PLAYER_1, false,
+                source, scheduler).subscribe();
+        assertEquals(GamePhase.END, gameStateRepository.findById(ROOM_ID).block(TIMEOUT).getPhase());
+        caller.dispose();
+        AtomicInteger cleaned = new AtomicInteger();
+        StepVerifier.create(roomCleanupService.cleanupRoom(ROOM_ID).doOnSuccess(ignored -> cleaned.incrementAndGet()))
+                .then(() -> {
+                    assertEquals(0, cleaned.get());
+                    StepVerifier.create(submit()).expectErrorSatisfies(error -> assertCode(error, TRY_AGAIN))
+                            .verify(TIMEOUT);
+                    StepVerifier.create(gameStateRepository.create(GameState.createEmptyRoom(ROOM_ID)))
+                            .expectError(com.pomingmatgo.gameservice.global.exception.BusinessException.class)
+                            .verify(TIMEOUT);
+                    gate.tryEmitEmpty();
+                }).expectComplete().verify(TIMEOUT);
+        assertEquals(1, cleaned.get());
+        assertNull(gameStateRepository.findById(ROOM_ID).block(TIMEOUT));
+        // 초기 생성·거부된 외부 생성·수락한 액션의 재생성을 각각 한 번 호출한다.
+        verify(gameStateRepository, org.mockito.Mockito.times(3)).create(any(GameState.class));
+        assertTrue(storedCards().isEmpty());
     }
 
     @Test
@@ -313,7 +359,8 @@ class GameActionCancellationTest {
     }
 
     private Mono<TurnExecutionResult> submit() {
-        return gamePlayService.executeNormalSubmit(ROOM_ID, Player.PLAYER_1, 0, state -> succeeded.incrementAndGet());
+        return gamePlayService.executeNormalSubmit(ROOM_ID, Player.PLAYER_1, 0,
+                state -> Mono.fromRunnable(succeeded::incrementAndGet));
     }
 
     private void verifyNextTimer(GamePhase phase, int turn) {
@@ -355,7 +402,7 @@ class GameActionCancellationTest {
         }
         cards.addAll(installedCardRepository.getAllRevealedCards(ROOM_ID).block(TIMEOUT));
         Map<Long, Deque<Card>> decks = (Map<Long, Deque<Card>>) ReflectionTestUtils.getField(installedCardRepository, "hiddenDeck");
-        cards.addAll(decks.get(ROOM_ID));
+        if (decks.containsKey(ROOM_ID)) cards.addAll(decks.get(ROOM_ID));
         return cards.stream().sorted().toList();
     }
 

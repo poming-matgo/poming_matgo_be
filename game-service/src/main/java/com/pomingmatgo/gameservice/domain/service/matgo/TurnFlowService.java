@@ -2,6 +2,7 @@ package com.pomingmatgo.gameservice.domain.service.matgo;
 
 import com.pomingmatgo.gameservice.domain.messaging.GameMessageSender;
 import com.pomingmatgo.gameservice.domain.GameState;
+import com.pomingmatgo.gameservice.domain.GamePhase;
 import com.pomingmatgo.gameservice.domain.Player;
 import com.pomingmatgo.gameservice.domain.card.Card;
 import com.pomingmatgo.gameservice.domain.score.PayoutCalculator;
@@ -19,7 +20,7 @@ import static com.pomingmatgo.gameservice.domain.TurnTiming.TURN_TIMEOUT_MILLIS;
 import static com.pomingmatgo.gameservice.domain.TurnTiming.nextDeadlineNanos;
 
 // 사용자 요청(WsGameHandler)과 자동플레이(AutoPlayScheduler)가 후처리를 공유해야 두 경로의 동작이 갈라지지 않는다.
-// 상태 저장과 타이머 콜백은 @GameLock 안에서 완료하고, 송신은 호출자의 구독에 남긴다.
+// 상태 저장·타이머·END 재시작은 @GameLock 안에서 완료하고, 송신은 호출자의 구독에 남긴다.
 // 타이머 조작은 필드가 아닌 TurnScheduler 파라미터로 주입 — DI cycle 회피
 @Service
 @RequiredArgsConstructor
@@ -65,7 +66,7 @@ public class TurnFlowService {
                         return gameMessageSender.sendGoResultMessage(nextState, player)
                                 .then(gameMessageSender.sendTurnInfo(nextState, TURN_TIMEOUT_MILLIS));
                     }
-                    return processGameOver(nextState, player).then();
+                    return announceGameOver(nextState, player);
                 });
     }
 
@@ -75,11 +76,13 @@ public class TurnFlowService {
         return Mono.defer(() -> {
             Objects.requireNonNull(source, "source");
             TurnScheduler bound = timerLifecycle.bind(roomId, Objects.requireNonNull(scheduler, "scheduler"));
-            GameActionCompletion completion = state -> {
+            GameActionCompletion completion = state -> Mono.defer(() -> {
                 // 자동플레이는 이미 발사한 타이머를 별도로 취소하지 않는다.
                 if (source == GameActionSource.USER) bound.cancelAutoPlay(roomId);
                 scheduleNextStep(roomId, state, bound);
-            };
+                return state.getPhase() == GamePhase.END
+                        ? gamePlayService.gameOver(state).then() : Mono.empty();
+            });
             return action.apply(completion);
         });
     }
@@ -108,7 +111,8 @@ public class TurnFlowService {
                             nextState, player, payoutCalculator.finalPayout(nextState, player))
                     .thenReturn(nextState);
             case END -> announcePpeokWin(nextState, player)
-                    .then(processGameOver(nextState, endWinner(nextState, player)));
+                    .then(announceGameOver(nextState, endWinner(nextState, player)))
+                    .thenReturn(nextState);
             default -> gameMessageSender.sendTurnInfo(nextState, TURN_TIMEOUT_MILLIS)
                     .thenReturn(nextState);
         };
@@ -128,11 +132,15 @@ public class TurnFlowService {
         return endedState.hasPpeokWin(actor) || endedState.canGoStop(actor) ? actor : Player.PLAYER_NOTHING;
     }
 
-    /** winner가 PLAYER_NOTHING이면 무승부 — 첫 턴 시작 전 종료(PreGameFlowService)도 이 경로를 공유한다 */
+    /** 첫 턴 시작 전 종료용 재시작·안내 경로. 액션 END는 완료 콜백에서 재시작을 마친다. */
     public Mono<GameState> processGameOver(GameState gameState, Player winner) {
         return gamePlayService.gameOver(gameState)
-                .delayUntil(finalState -> gameMessageSender.sendGameOverMessage(
-                        finalState, winner, payoutCalculator.finalPayout(finalState, winner)));
+                .delayUntil(finalState -> announceGameOver(finalState, winner));
+    }
+
+    private Mono<Void> announceGameOver(GameState finalState, Player winner) {
+        return gameMessageSender.sendGameOverMessage(
+                finalState, winner, payoutCalculator.finalPayout(finalState, winner));
     }
 
     // 선택 대기 타이머는 이미 락 내부에서 등록했다.

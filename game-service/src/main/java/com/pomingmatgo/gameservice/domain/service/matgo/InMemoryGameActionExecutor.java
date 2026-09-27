@@ -58,13 +58,13 @@ public class InMemoryGameActionExecutor implements GameLockCleaner {
         return Mono.usingWhen(
                 Mono.fromSupplier(() -> executionGate.acquire(roomId)),
                 s -> Mono.defer(() -> operation.apply(s)).contextWrite(context -> context.put(GameActionAcceptance.class,
-                        (BooleanSupplier) () -> execution.accept(s)))
+                        (BooleanSupplier) () -> execution.accept(s)).put(ActionExecution.class, execution))
                         .doOnError(error -> {
                             if (execution.isAccepted()) executionGate.fail(s);
                         }),
-                s -> Mono.fromRunnable(() -> executionGate.release(s)),
-                (s, err) -> Mono.fromRunnable(() -> executionGate.release(s)),
-                s -> Mono.fromRunnable(() -> executionGate.release(s))
+                s -> Mono.fromRunnable(() -> execution.release(s)),
+                (s, err) -> Mono.fromRunnable(() -> execution.release(s)),
+                s -> Mono.fromRunnable(() -> execution.release(s))
         );
     }
 
@@ -83,6 +83,7 @@ public class InMemoryGameActionExecutor implements GameLockCleaner {
         private final MonoSink<Object> result;
         private boolean accepted;
         private boolean cancelled;
+        private InMemoryRoomExecutionGate.Entry entry;
         private Object value;
         private final AtomicBoolean terminated = new AtomicBoolean();
 
@@ -95,6 +96,7 @@ public class InMemoryGameActionExecutor implements GameLockCleaner {
             if (cancelled) return false;
             if (!accepted) {
                 executionGate.accept(entry);
+                this.entry = entry;
                 accepted = true;
             }
             return true;
@@ -102,6 +104,22 @@ public class InMemoryGameActionExecutor implements GameLockCleaner {
 
         private synchronized boolean isAccepted() {
             return accepted;
+        }
+
+        private synchronized Mono<Void> restart(long targetRoomId, Supplier<Mono<Void>> operation) {
+            if (targetRoomId != roomId || entry == null || !accepted || cancelled || terminated.get()) {
+                return Mono.error(new IllegalStateException("Restart requires an active accepted action: " + targetRoomId));
+            }
+            // 현재 gate를 유지한 채 재시작한다. 별도 획득이나 withCleanup 대기는 자기 경합을 만든다.
+            return executionGate.inRestart(entry, operation);
+        }
+
+        private void release(InMemoryRoomExecutionGate.Entry acquired) {
+            synchronized (this) {
+                // gate 해제가 대기 중 정리를 깨우기 전에 현재 실행의 재시작 권한을 무효화한다.
+                entry = null;
+            }
+            executionGate.release(acquired);
         }
 
         private void cancelCaller() {
@@ -173,7 +191,11 @@ public class InMemoryGameActionExecutor implements GameLockCleaner {
 
     @Override
     public Mono<Void> withRestart(long roomId, Supplier<Mono<Void>> operation) {
-        return execute(roomId, entry -> GameActionAcceptance.beforeMutation(() ->
-                executionGate.inRestart(entry, operation)).thenReturn((Object) Boolean.TRUE)).then();
+        return Mono.deferContextual(context -> {
+            ActionExecution current = context.getOrDefault(ActionExecution.class, null);
+            if (current != null) return current.restart(roomId, operation);
+            return execute(roomId, entry -> GameActionAcceptance.beforeMutation(() ->
+                    executionGate.inRestart(entry, operation)).thenReturn((Object) Boolean.TRUE)).then();
+        });
     }
 }

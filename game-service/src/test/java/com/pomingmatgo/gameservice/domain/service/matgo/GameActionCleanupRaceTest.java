@@ -198,7 +198,8 @@ class GameActionCleanupRaceTest {
     }
 
     private Mono<TurnExecutionResult> submit() {
-        return gamePlayService.executeNormalSubmit(ROOM_ID, Player.PLAYER_1, 0, state -> succeeded.incrementAndGet());
+        return gamePlayService.executeNormalSubmit(ROOM_ID, Player.PLAYER_1, 0,
+                state -> Mono.fromRunnable(succeeded::incrementAndGet));
     }
 
     private Mono<Void> cleanup(boolean fullCleanup) {
