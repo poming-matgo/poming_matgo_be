@@ -1,0 +1,163 @@
+package com.pomingmatgo.gameservice.application.game;
+
+import com.pomingmatgo.gameservice.application.pregame.PreGameFlowService;
+import com.pomingmatgo.gameservice.domain.rule.ProcessCardResult;
+import com.pomingmatgo.gameservice.domain.rule.SpecialEvent;
+import com.pomingmatgo.gameservice.infrastructure.lock.GameLock;
+
+import com.pomingmatgo.gameservice.infrastructure.messaging.GameMessageSender;
+import com.pomingmatgo.gameservice.domain.GameState;
+import com.pomingmatgo.gameservice.domain.GamePhase;
+import com.pomingmatgo.gameservice.domain.Player;
+import com.pomingmatgo.gameservice.domain.card.Card;
+import com.pomingmatgo.gameservice.domain.score.PayoutCalculator;
+import com.pomingmatgo.gameservice.infrastructure.scheduler.TurnScheduler;
+import com.pomingmatgo.gameservice.infrastructure.scheduler.RoomTimerLifecycle;
+import lombok.RequiredArgsConstructor;
+import org.springframework.stereotype.Service;
+import reactor.core.publisher.Mono;
+
+import java.util.List;
+import java.util.Objects;
+import java.util.function.Function;
+
+import static com.pomingmatgo.gameservice.domain.TurnTiming.TURN_TIMEOUT_MILLIS;
+import static com.pomingmatgo.gameservice.domain.TurnTiming.nextDeadlineNanos;
+
+// 사용자 요청(WsGameHandler)과 자동플레이(AutoPlayScheduler)가 후처리를 공유해야 두 경로의 동작이 갈라지지 않는다.
+// 상태 저장·타이머·END 재시작은 @GameLock 안에서 완료하고, 송신은 호출자의 구독에 남긴다.
+// 타이머 조작은 필드가 아닌 TurnScheduler 파라미터로 주입 — DI cycle 회피
+@Service
+@RequiredArgsConstructor
+public class TurnFlowService {
+
+    private final RoomTimerLifecycle timerLifecycle;
+    private final GamePlayService gamePlayService;
+    private final GameMessageSender gameMessageSender;
+    private final GameNotificationService gameNotificationService;
+    private final PayoutCalculator payoutCalculator;
+
+    public Mono<Void> processNormalSubmit(long roomId, Player player, int cardIdx, GameActionSource source, TurnScheduler scheduler) {
+        return withCompletion(roomId, source, scheduler,
+                completion -> gamePlayService.executeNormalSubmit(roomId, player, cardIdx, completion))
+                .flatMap(ctx -> {
+                    Mono<Void> sendInfos = Mono.when(
+                            gameMessageSender.sendSubmitCardInfo(roomId, player, ctx.submittedCard()),
+                            gameMessageSender.sendTopCardInfo(roomId, player, ctx.topCard())
+                    );
+
+                    Mono<Void> handleResult = ctx.isChoiceRequired()
+                            ? requestFloorChoice(roomId, player, ctx.cardResult().getSelectableCards())
+                            : finishTurn(roomId, player, ctx.updatedGameState(), ctx.cardResult());
+
+                    return sendInfos.then(handleResult);
+                }).then();
+    }
+
+    public Mono<Void> processFloorSelection(long roomId, Player player, int cardIdx, GameActionSource source, TurnScheduler scheduler) {
+        return withCompletion(roomId, source, scheduler,
+                completion -> gamePlayService.executeFloorSelection(roomId, player, cardIdx, completion))
+                .flatMap(ctx -> ctx.isChoiceRequired()
+                        // 뒤집은 카드가 또 선택을 요구한 경우 — 선택지 재전송 + 타이머 재등록
+                        ? requestFloorChoice(roomId, player, ctx.cardResult().getSelectableCards())
+                        : finishTurn(roomId, player, ctx.updatedGameState(), ctx.cardResult()));
+    }
+
+    public Mono<Void> processGoStopChoice(long roomId, Player player, boolean go, GameActionSource source, TurnScheduler scheduler) {
+        return withCompletion(roomId, source, scheduler,
+                completion -> gamePlayService.executeGoStop(roomId, player, go, completion))
+                .flatMap(nextState -> {
+                    if (nextState.isPlaying()) {
+                        return gameMessageSender.sendGoResultMessage(nextState, player)
+                                .then(gameMessageSender.sendTurnInfo(nextState, TURN_TIMEOUT_MILLIS));
+                    }
+                    return announceGameOver(nextState, player);
+                });
+    }
+
+    // 구독마다 방 수명을 캡처하며 모든 액션이 같은 완료 정책을 반드시 전달한다.
+    private <T> Mono<T> withCompletion(long roomId, GameActionSource source, TurnScheduler scheduler,
+                                       Function<GameActionCompletion, Mono<T>> action) {
+        return Mono.defer(() -> {
+            Objects.requireNonNull(source, "source");
+            TurnScheduler bound = timerLifecycle.bind(roomId, Objects.requireNonNull(scheduler, "scheduler"));
+            GameActionCompletion completion = state -> Mono.defer(() -> {
+                // 자동플레이는 이미 발사한 타이머를 별도로 취소하지 않는다.
+                if (source == GameActionSource.USER) bound.cancelAutoPlay(roomId);
+                scheduleNextStep(roomId, state, bound);
+                return state.getPhase() == GamePhase.END
+                        ? gamePlayService.gameOver(state).then() : Mono.empty();
+            });
+            return action.apply(completion);
+        });
+    }
+
+    /** 첫 턴 시작(PreGameFlowService)이 이후 턴 전환과 같은 경로를 타게 하는 공개 진입점 */
+    public Mono<Void> startTurn(GameState state, TurnScheduler scheduler) {
+        return Mono.defer(() -> startTurnInRoom(state, timerLifecycle.bind(state.getRoomId(), scheduler)));
+    }
+
+    private Mono<Void> startTurnInRoom(GameState state, TurnScheduler scheduler) {
+        scheduleNextStep(state.getRoomId(), state, scheduler);
+        return gameMessageSender.sendTurnInfo(state, TURN_TIMEOUT_MILLIS);
+    }
+
+    /** 정상 제출/바닥 선택 완료가 공유하는 턴 완료 처리 — 다음 단계는 이미 락 안에서 결정·저장돼 있다 */
+    private Mono<Void> finishTurn(long roomId, Player player, GameState nextState, ProcessCardResult result) {
+        return gameNotificationService.broadcastTurnResult(roomId, player, nextState, result)
+                .then(notifyNextStep(nextState, player))
+                .then();
+    }
+
+    private Mono<GameState> notifyNextStep(GameState nextState, Player player) {
+        return switch (nextState.getPhase()) {
+            // 스톱 판단엔 박 계열까지 반영된 정산이 필요하므로 승자를 본인으로 가정한 최종 정산을 싣는다
+            case AWAITING_GO_STOP_CHOICE -> gameMessageSender.sendGoStopChoiceMessage(
+                            nextState, player, payoutCalculator.finalPayout(nextState, player))
+                    .thenReturn(nextState);
+            case END -> announcePpeokWin(nextState, player)
+                    .then(announceGameOver(nextState, endWinner(nextState, player)))
+                    .thenReturn(nextState);
+            default -> gameMessageSender.sendTurnInfo(nextState, TURN_TIMEOUT_MILLIS)
+                    .thenReturn(nextState);
+        };
+    }
+
+    // 종료 사유는 GAME_OVER 정산만으로 알 수 없어 세번뻑 승리를 먼저 알린다
+    private Mono<Void> announcePpeokWin(GameState endedState, Player actor) {
+        if (!endedState.hasPpeokWin(actor)) {
+            return Mono.empty();
+        }
+        return gameMessageSender.sendSpecialEventMessageIfNeeded(
+                endedState.getRoomId(), actor, SpecialEvent.THREE_PPEOK);
+    }
+
+    /** 세번뻑 즉시 승리 > 점수 달성자(최종 라운드 자동 스톱) > 마지막 턴 미달성 무승부 */
+    private Player endWinner(GameState endedState, Player actor) {
+        return endedState.hasPpeokWin(actor) || endedState.canGoStop(actor) ? actor : Player.PLAYER_NOTHING;
+    }
+
+    /** 첫 턴 시작 전 종료용 재시작·안내 경로. 액션 END는 완료 콜백에서 재시작을 마친다. */
+    public Mono<GameState> processGameOver(GameState gameState, Player winner) {
+        return gamePlayService.gameOver(gameState)
+                .delayUntil(finalState -> announceGameOver(finalState, winner));
+    }
+
+    private Mono<Void> announceGameOver(GameState finalState, Player winner) {
+        return gameMessageSender.sendGameOverMessage(
+                finalState, winner, payoutCalculator.finalPayout(finalState, winner));
+    }
+
+    // 선택 대기 타이머는 이미 락 내부에서 등록했다.
+    private Mono<Void> requestFloorChoice(long roomId, Player player, List<Card> selectableCards) {
+        return gameMessageSender.sendChooseFloorCardMessage(roomId, player, selectableCards);
+    }
+
+    // 대기 주체는 항상 currentPlayer — 고/스톱 대기면 방금 행동한 본인, 턴이 넘어갔으면 상대
+    private void scheduleNextStep(long roomId, GameState nextState, TurnScheduler scheduler) {
+        if (nextState.getPhase().isPlayerActionPhase()) {
+            scheduler.scheduleAutoPlay(roomId, nextState.getRound(), nextState.getCurrentTurn(),
+                    nextState.getCurrentPlayer(), nextDeadlineNanos(), nextState.getPhase());
+        }
+    }
+}

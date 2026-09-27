@@ -1,13 +1,15 @@
 package com.pomingmatgo.gameservice.api.handler.websocket;
 
+import com.pomingmatgo.gameservice.application.game.GameActionSource;
+import com.pomingmatgo.gameservice.application.game.TurnFlowService;
+
 import com.pomingmatgo.gameservice.api.handler.event.RequestEvent;
 import com.pomingmatgo.gameservice.api.request.websocket.GoStopReq;
 import com.pomingmatgo.gameservice.api.request.websocket.NormalSubmitReq;
 import com.pomingmatgo.gameservice.domain.GameState;
 import com.pomingmatgo.gameservice.domain.Player;
-import com.pomingmatgo.gameservice.domain.service.matgo.*;
 import com.pomingmatgo.gameservice.global.exception.WebSocketBusinessException;
-import com.pomingmatgo.gameservice.scheduler.AutoPlayScheduler;
+import com.pomingmatgo.gameservice.infrastructure.scheduler.AutoPlayScheduler;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;

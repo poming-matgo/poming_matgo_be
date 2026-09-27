@@ -4,7 +4,7 @@ import com.pomingmatgo.gameservice.api.handler.event.RequestEvent;
 import com.pomingmatgo.gameservice.api.request.websocket.LeadSelectionReq;
 import com.pomingmatgo.gameservice.domain.GameState;
 import com.pomingmatgo.gameservice.domain.Player;
-import com.pomingmatgo.gameservice.domain.service.matgo.PreGameFlowService;
+import com.pomingmatgo.gameservice.application.pregame.PreGameFlowService;
 import com.pomingmatgo.gameservice.global.exception.WebSocketBusinessException;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;

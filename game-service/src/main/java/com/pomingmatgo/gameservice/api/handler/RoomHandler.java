@@ -4,7 +4,7 @@ import com.pomingmatgo.gameservice.api.request.CreateRoomRequest;
 import com.pomingmatgo.gameservice.api.request.DeleteRoomRequest;
 import com.pomingmatgo.gameservice.api.request.JoinRoomRequest;
 import com.pomingmatgo.gameservice.api.request.LeaveRoomRequest;
-import com.pomingmatgo.gameservice.domain.service.matgo.RoomService;
+import com.pomingmatgo.gameservice.application.room.RoomService;
 import com.pomingmatgo.gameservice.global.ApiResponseDto;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;

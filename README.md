@@ -37,6 +37,29 @@
 
 ## 🏗 아키텍처
 
+### 패키지 구성
+
+`game-service/src/main/java/com/pomingmatgo/gameservice` 기준입니다.
+
+| 패키지 | 책임 |
+| --- | --- |
+| `api` | HTTP·WebSocket 요청 수신, 이벤트 디코딩과 핸들러 |
+| `application/room` | 방 생성·참가·정리 흐름 |
+| `application/pregame` | 선플레이어 선택·분배·첫 턴 시작 |
+| `application/game` | 게임 액션, 실행 수락·완료 수명주기, 턴 진행과 알림 조율 |
+| `application/connection` | 접속·이탈·재접속 흐름 |
+| `domain`, `domain/card` | 게임·플레이어 상태와 카드 모델 |
+| `domain/rule`, `domain/score` | 카드 매칭 규칙, 점수·정산 계산 |
+| `domain/repository` | 저장소 인터페이스 |
+| `domain/messaging`, `domain/event` | 기존 응답 모델과 방 정리 이벤트 |
+| `infrastructure/repository/inmemory`, `infrastructure/repository/redis` | 프로파일별 저장소 구현 |
+| `infrastructure/lock`, `infrastructure/session` | 락·InFlight·실행 게이트와 세션 관리 |
+| `infrastructure/messaging`, `infrastructure/scheduler` | 메시지 송신과 자동플레이 타이머 |
+| `global` | 공통 설정·예외·응답 래퍼·계측 |
+
+테스트도 대상 역할의 패키지에 배치합니다. 여러 기능을 묶어 검증하는 게임 흐름 테스트는 `application/game`에 둡니다.
+현재 구분은 코드 탐색을 위한 책임별 배치이며, 계층 간 의존성을 강제하지는 않습니다. 응답 DTO의 위치와 게임 규칙의 응답 이벤트 참조는 기존 설계를 유지합니다.
+
 `GameWebSocketHandler`가 이벤트를 방·게임 준비·게임 액션 핸들러로 분기합니다. 아래 그림은 인메모리 경로의 구성입니다.
 
 <picture>
@@ -67,7 +90,7 @@
 
 인메모리 게임 락은 대기 없는 `tryAcquire()`를 사용하고, 획득에 실패하면 `TRY_AGAIN`을 반환합니다. 반면 방 락은 timeout을 둔 `tryAcquire(timeout, unit)`의 대기를 `boundedElastic`에 격리합니다. 락 해제는 `Mono.usingWhen`으로 정상·오류·취소 경로를 처리합니다.
 
-고/스톱 처리에서는 최신 상태 검증부터 다음 턴 또는 종료 상태 저장까지 하나의 락 범위에서 끝냅니다. 아래는 [`GamePlayService.executeGoStop`](game-service/src/main/java/com/pomingmatgo/gameservice/domain/service/matgo/GamePlayService.java)의 발췌입니다. `markEnded`는 `END` 상태를 저장하므로, 락 해제 후 도착한 낡은 GO 요청은 phase 검증에서 거절됩니다.
+고/스톱 처리에서는 최신 상태 검증부터 다음 턴 또는 종료 상태 저장까지 하나의 락 범위에서 끝냅니다. 아래는 [`GamePlayService.executeGoStop`](game-service/src/main/java/com/pomingmatgo/gameservice/application/game/GamePlayService.java)의 발췌입니다. `markEnded`는 `END` 상태를 저장하므로, 락 해제 후 도착한 낡은 GO 요청은 phase 검증에서 거절됩니다.
 
 ```java
 @GameLock
@@ -175,7 +198,7 @@ k6 run gostop-afk-test.js
 | 타이머 취소가 실행 중 체인까지 끊어 종료 메시지 유실 | 취소 대상을 대기 중인 delay로 한정하고 발사 이후 실행 구독 분리 |
 | 접속 직후 첫 브로드캐스트 유실 | `Flux.defer`로 수신자 조회를 세션 등록 이후의 구독 시점까지 지연 |
 
-타이머는 늦게 등록됐다는 이유만으로 기존 타이머를 덮어쓰지 않습니다. [`AutoPlayScheduler.scheduleAutoPlay`](game-service/src/main/java/com/pomingmatgo/gameservice/scheduler/AutoPlayScheduler.java)는 `(round, turn, phase)` 순서를 비교해 유지할 타이머를 원자적으로 결정합니다. 아래는 등록·교체 부분의 발췌입니다.
+타이머는 늦게 등록됐다는 이유만으로 기존 타이머를 덮어쓰지 않습니다. [`AutoPlayScheduler.scheduleAutoPlay`](game-service/src/main/java/com/pomingmatgo/gameservice/infrastructure/scheduler/AutoPlayScheduler.java)는 `(round, turn, phase)` 순서를 비교해 유지할 타이머를 원자적으로 결정합니다. 아래는 등록·교체 부분의 발췌입니다.
 
 ```java
 Disposable[] toDispose = new Disposable[1];
@@ -199,7 +222,7 @@ if (toDispose[0] != null && !toDispose[0].isDisposed()) {
 
 바닥·획득 카드는 저장소 조회 시 `Card` natural order로 정렬해 선택지 인덱스와 피 뺏기 결과가 Set 순회 순서에 좌우되지 않게 합니다. 손패와 덱은 순서 자체가 게임 의미를 가지므로 유지합니다.
 
-[`DeterminismReplayTest`](game-service/src/test/java/com/pomingmatgo/gameservice/service/DeterminismReplayTest.java)는 고정 덱으로 실행한 게임의 명령을 다른 방에서 재실행하고 게임 상태·손패·획득 카드·바닥·잔여 덱을 비교합니다. 이 테스트는 게임 로직의 재현성을 확인하며, 영속 저장이나 서버 재시작 복구를 제공하지 않습니다.
+[`DeterminismReplayTest`](game-service/src/test/java/com/pomingmatgo/gameservice/application/game/DeterminismReplayTest.java)는 고정 덱으로 실행한 게임의 명령을 다른 방에서 재실행하고 게임 상태·손패·획득 카드·바닥·잔여 덱을 비교합니다. 이 테스트는 게임 로직의 재현성을 확인하며, 영속 저장이나 서버 재시작 복구를 제공하지 않습니다.
 
 ## 📊 부하 테스트 결과
 
