@@ -34,7 +34,7 @@ class InMemoryGameLockLifecycleTest {
     void setUp() {
         AspectJProxyFactory factory = new AspectJProxyFactory(new LockedAction());
         gate = new InMemoryRoomExecutionGate();
-        executor = new InMemoryGameActionExecutor(gate);
+        executor = new InMemoryGameActionExecutor(gate, event -> {});
         factory.addAspect(new InMemoryGameLockAspect(executor));
         action = factory.getProxy();
     }

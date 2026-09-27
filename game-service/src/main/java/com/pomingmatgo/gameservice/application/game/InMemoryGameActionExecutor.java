@@ -1,11 +1,13 @@
 package com.pomingmatgo.gameservice.application.game;
 
+import com.pomingmatgo.gameservice.domain.event.GameActionFailedEvent;
 import com.pomingmatgo.gameservice.infrastructure.lock.GameLockCleaner;
 import com.pomingmatgo.gameservice.infrastructure.lock.InMemoryRoomExecutionGate;
 import jakarta.annotation.PreDestroy;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.context.annotation.Profile;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Component;
 import reactor.core.publisher.Mono;
 import reactor.core.publisher.BaseSubscriber;
@@ -30,6 +32,7 @@ public class InMemoryGameActionExecutor implements GameLockCleaner {
     private static final Duration EXECUTION_TIMEOUT = Duration.ofSeconds(30);
 
     private final InMemoryRoomExecutionGate executionGate;
+    private final ApplicationEventPublisher eventPublisher;
     private final Set<ActionExecution> executions = new HashSet<>();
     private boolean stopped;
 
@@ -64,7 +67,16 @@ public class InMemoryGameActionExecutor implements GameLockCleaner {
                         // 검증부터 필수 후처리까지 제한한다. timeout도 해제 전에 수락 후 오류로 차단한다.
                         .timeout(EXECUTION_TIMEOUT)
                         .doOnError(error -> {
-                            if (execution.isAccepted()) executionGate.fail(s);
+                            if (execution.isAccepted()) {
+                                executionGate.fail(s);
+                                // 해제 뒤 발행하면 먼저 끝난 정리와 재생성 이후의 새 방을 지울 수 있다.
+                                try {
+                                    eventPublisher.publishEvent(new GameActionFailedEvent(roomId));
+                                } catch (RuntimeException cleanupError) {
+                                    log.error("Room ({}) failed action cleanup could not start; room remains blocked",
+                                            roomId, cleanupError);
+                                }
+                            }
                         }),
                 s -> Mono.fromRunnable(() -> execution.release(s)),
                 (s, err) -> Mono.fromRunnable(() -> execution.release(s)),
@@ -170,7 +182,7 @@ public class InMemoryGameActionExecutor implements GameLockCleaner {
         protected void hookOnError(Throwable error) {
             if (!terminated.compareAndSet(false, true)) return;
             remove();
-            if (isAccepted()) log.error("Room ({}) accepted game action failed; blocked until cleanup", roomId, error);
+            if (isAccepted()) log.error("Room ({}) accepted game action failed; cleanup requested", roomId, error);
             result.error(error);
         }
 

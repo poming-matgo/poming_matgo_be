@@ -38,7 +38,7 @@ class RoomRestartLifecycleTest {
     private static final long ROOM_ID = 19L;
     private static final Duration TIMEOUT = Duration.ofSeconds(3);
     private final InMemoryRoomExecutionGate gate = new InMemoryRoomExecutionGate();
-    private final InMemoryGameActionExecutor executor = new InMemoryGameActionExecutor(gate);
+    private final InMemoryGameActionExecutor executor = new InMemoryGameActionExecutor(gate, event -> {});
     private final InMemoryGameStateRepository state = spy(new InMemoryGameStateRepository(new RoomTimerLifecycle(), gate));
     private final InMemoryInstalledCardRepository cards = spy(new InMemoryInstalledCardRepository());
     private final AcquiredCardRepository acquired = mock(AcquiredCardRepository.class);

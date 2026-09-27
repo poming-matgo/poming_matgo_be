@@ -306,14 +306,13 @@ class GameActionCancellationTest {
     }
 
     @Test
-    void acceptedFailureAfterCallerCancellationBlocksFurtherActionsUntilCleanup() {
+    void acceptedFailureAfterCallerCancellationAutomaticallyCleansRoom() {
         pauseDraw(true);
         StepVerifier.create(submit()).then(() -> assertPaused(true)).thenCancel().verify(TIMEOUT);
         assertEquals(Sinks.EmitResult.OK, gate.tryEmitError(new IllegalStateException("draw failed")));
-        StepVerifier.create(submit()).expectErrorSatisfies(error -> assertCode(error, TRY_AGAIN)).verify(TIMEOUT);
         assertEquals(0, succeeded.get());
-        roomCleanupService.cleanupRoomData(ROOM_ID).block(TIMEOUT);
         assertNull(gameStateRepository.findById(ROOM_ID).block(TIMEOUT));
+        assertTrue(storedCards().isEmpty());
         gameStateRepository.create(GameState.builder().roomId(ROOM_ID).leadingPlayer(1).currentTurn(1)
                 .round(2).phase(GamePhase.AWAITING_GO_STOP_CHOICE).build()).block(TIMEOUT);
         assertEquals(GamePhase.END, gamePlayService.executeGoStop(ROOM_ID, Player.PLAYER_1, false, GameActionCompletion.NONE)

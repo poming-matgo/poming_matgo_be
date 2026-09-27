@@ -1,0 +1,183 @@
+package com.pomingmatgo.gameservice.application.game;
+
+import com.pomingmatgo.gameservice.application.room.RoomCleanupService;
+import com.pomingmatgo.gameservice.domain.GameState;
+import com.pomingmatgo.gameservice.domain.event.GameActionFailedEvent;
+import com.pomingmatgo.gameservice.domain.event.RoomCleanedUpEvent;
+import com.pomingmatgo.gameservice.domain.repository.AcquiredCardRepository;
+import com.pomingmatgo.gameservice.domain.repository.LeadingPlayerRepository;
+import com.pomingmatgo.gameservice.global.exception.WebSocketBusinessException;
+import com.pomingmatgo.gameservice.infrastructure.lock.InMemoryRoomExecutionGate;
+import com.pomingmatgo.gameservice.infrastructure.lock.RoomLockManager;
+import com.pomingmatgo.gameservice.infrastructure.repository.inmemory.InMemoryGameStateRepository;
+import com.pomingmatgo.gameservice.infrastructure.repository.inmemory.InMemoryInstalledCardRepository;
+import com.pomingmatgo.gameservice.infrastructure.scheduler.RoomTimerLifecycle;
+import com.pomingmatgo.gameservice.infrastructure.session.SessionManager;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
+import org.springframework.context.ApplicationEventPublisher;
+import org.springframework.test.util.ReflectionTestUtils;
+import reactor.core.publisher.Mono;
+import reactor.core.publisher.Sinks;
+import reactor.test.StepVerifier;
+import reactor.test.scheduler.VirtualTimeScheduler;
+
+import java.time.Duration;
+import java.util.Map;
+import java.util.Set;
+import java.util.concurrent.TimeoutException;
+
+import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.Mockito.*;
+
+class GameActionFailureCleanupTest {
+    private static final long ROOM_ID = 21L;
+    private static final Duration TIMEOUT = Duration.ofSeconds(3);
+    private final InMemoryRoomExecutionGate gate = new InMemoryRoomExecutionGate();
+    private final ApplicationEventPublisher events = mock(ApplicationEventPublisher.class);
+    private final InMemoryGameActionExecutor executor = new InMemoryGameActionExecutor(gate, events);
+    private final InMemoryGameStateRepository state = spy(new InMemoryGameStateRepository(new RoomTimerLifecycle(), gate));
+    private final InMemoryInstalledCardRepository cards = spy(new InMemoryInstalledCardRepository());
+    private final AcquiredCardRepository acquired = mock(AcquiredCardRepository.class);
+    private final LeadingPlayerRepository leader = mock(LeadingPlayerRepository.class);
+    private final RoomLockManager roomLock = mock(RoomLockManager.class);
+    private final SessionManager sessions = mock(SessionManager.class);
+    private final RoomCleanupService cleanup = new RoomCleanupService(state, cards, acquired, leader, roomLock,
+            executor, events, sessions);
+    private final IllegalStateException failure = new IllegalStateException("mutation failed");
+
+    @BeforeEach
+    void setUp() {
+        when(acquired.cleanup(ROOM_ID)).thenReturn(Mono.empty());
+        when(leader.cleanup(ROOM_ID)).thenReturn(Mono.empty());
+        when(roomLock.cleanup(ROOM_ID)).thenReturn(Mono.empty());
+        when(sessions.removeRoom(ROOM_ID)).thenReturn(Mono.empty());
+        doAnswer(call -> {
+            cleanup.onGameActionFailed(call.getArgument(0));
+            return null;
+        }).when(events).publishEvent(any(GameActionFailedEvent.class));
+        state.create(GameState.createEmptyRoom(ROOM_ID)).block(TIMEOUT);
+    }
+
+    @AfterEach
+    void tearDown() {
+        executor.shutdown();
+        cleanup.shutdown();
+        assertTrue(((Set<?>) ReflectionTestUtils.getField(executor, "executions")).isEmpty());
+        assertTrue(((Map<?, ?>) ReflectionTestUtils.getField(cleanup, "executions")).isEmpty());
+    }
+
+    @Test
+    void acceptedErrorCleansDataAndSessionsBeforeReuseAndPreservesOriginalError() {
+        StepVerifier.create(accepted(Mono.error(failure))).expectErrorMatches(error -> error == failure).verify(TIMEOUT);
+        assertNull(state.findById(ROOM_ID).block(TIMEOUT));
+        verify(cards).cleanup(ROOM_ID);
+        verify(acquired).cleanup(ROOM_ID);
+        verify(leader).cleanup(ROOM_ID);
+        verify(roomLock).cleanup(ROOM_ID);
+        verify(sessions).removeRoom(ROOM_ID);
+        verify(events).publishEvent(new RoomCleanedUpEvent(ROOM_ID));
+        assertReusable();
+    }
+
+    @Test
+    void pendingCleanupBlocksReuseButDoesNotDelayOriginalErrorOrOtherRooms() {
+        Sinks.Empty<Void> pause = Sinks.empty();
+        when(acquired.cleanup(ROOM_ID)).thenReturn(pause.asMono());
+        StepVerifier.create(accepted(Mono.error(failure))).expectErrorMatches(error -> error == failure).verify(TIMEOUT);
+        assertEquals(1, pause.currentSubscriberCount());
+        assertBlocked();
+        StepVerifier.create(executor.execute(22, () -> Mono.just("other"))).expectNext("other").verifyComplete();
+        StepVerifier.create(cleanup.cleanupRoom(ROOM_ID)).thenCancel().verify(TIMEOUT);
+        assertEquals(1, pause.currentSubscriberCount());
+        pause.tryEmitEmpty();
+        verify(acquired).cleanup(ROOM_ID);
+        verify(sessions).removeRoom(ROOM_ID);
+        assertReusable();
+    }
+
+    @Test
+    void existingCleanupMergesFailureBeforeGateReleaseAndDoesNotDeleteRecreatedRoom() {
+        Sinks.One<Object> action = Sinks.one();
+        StepVerifier.create(accepted(action.asMono()))
+                .then(() -> assertEquals(1, action.currentSubscriberCount()))
+                .thenCancel().verify(TIMEOUT);
+        StepVerifier.create(cleanup.cleanupRoom(ROOM_ID).doOnSuccess(ignored ->
+                        state.create(GameState.createEmptyRoom(ROOM_ID)).block(TIMEOUT)))
+                .then(() -> {
+                    verify(state, never()).cleanup(ROOM_ID);
+                    action.tryEmitError(failure);
+                }).verifyComplete();
+        verify(state).cleanup(ROOM_ID);
+        assertNotNull(state.findById(ROOM_ID).block(TIMEOUT));
+        assertReusable();
+    }
+
+    @ParameterizedTest(name = "세션 정리 실패={0}")
+    @ValueSource(booleans = {false, true})
+    void cleanupFailureKeepsRoomBlockedUntilExplicitSuccessfulCleanup(boolean sessionFailure) {
+        if (sessionFailure) when(sessions.removeRoom(ROOM_ID)).thenReturn(Mono.error(new IllegalStateException("session failure")));
+        else when(acquired.cleanup(ROOM_ID)).thenReturn(Mono.error(new IllegalStateException("card failure")));
+        StepVerifier.create(accepted(Mono.error(failure))).expectErrorMatches(error -> error == failure).verify(TIMEOUT);
+        verify(sessions).removeRoom(ROOM_ID);
+        assertBlocked();
+        when(sessions.removeRoom(ROOM_ID)).thenReturn(Mono.empty());
+        when(acquired.cleanup(ROOM_ID)).thenReturn(Mono.empty());
+        cleanup.cleanupRoom(ROOM_ID).block(TIMEOUT);
+        assertReusable();
+    }
+
+    @Test
+    void acceptedTimeoutAfterCallerCancellationStartsCleanup() {
+        VirtualTimeScheduler clock = VirtualTimeScheduler.getOrSet();
+        try {
+            Sinks.One<Object> pending = Sinks.one();
+            StepVerifier.create(accepted(pending.asMono()))
+                    .then(() -> assertEquals(1, pending.currentSubscriberCount()))
+                    .thenCancel().verify(TIMEOUT);
+            clock.advanceTimeBy(Duration.ofSeconds(30));
+            assertEquals(0, pending.currentSubscriberCount());
+            verify(sessions).removeRoom(ROOM_ID);
+            assertNull(state.findById(ROOM_ID).block(TIMEOUT));
+            assertReusable();
+        } finally {
+            VirtualTimeScheduler.reset();
+        }
+    }
+
+    @Test
+    void validationFailureTimeoutAndSuccessDoNotRequestCleanup() {
+        StepVerifier.create(executor.execute(ROOM_ID, () -> Mono.error(failure))).expectErrorMatches(error -> error == failure).verify(TIMEOUT);
+        StepVerifier.withVirtualTime(() -> executor.execute(ROOM_ID, Mono::never))
+                .thenAwait(Duration.ofSeconds(30)).expectError(TimeoutException.class).verify(TIMEOUT);
+        StepVerifier.create(accepted(Mono.just("ok"))).expectNext("ok").verifyComplete();
+        verify(events, never()).publishEvent(any(GameActionFailedEvent.class));
+        assertNotNull(state.findById(ROOM_ID).block(TIMEOUT));
+    }
+
+    @Test
+    void eventDispatchFailurePreservesActionErrorAndRoomBlock() {
+        doThrow(new IllegalStateException("listener unavailable")).when(events).publishEvent(any(GameActionFailedEvent.class));
+        StepVerifier.create(accepted(Mono.error(failure))).expectErrorMatches(error -> error == failure).verify(TIMEOUT);
+        assertBlocked();
+        assertNotNull(state.findById(ROOM_ID).block(TIMEOUT));
+    }
+
+    private Mono<Object> accepted(Mono<Object> operation) {
+        return executor.execute(ROOM_ID, () -> GameActionAcceptance.beforeMutation(() -> operation));
+    }
+
+    private void assertBlocked() {
+        StepVerifier.create(executor.execute(ROOM_ID, () -> Mono.just("blocked")))
+                .expectError(WebSocketBusinessException.class).verify(TIMEOUT);
+        assertThrows(RuntimeException.class, () -> gate.create(ROOM_ID, () -> "blocked"));
+    }
+
+    private void assertReusable() {
+        assertEquals("created", gate.create(ROOM_ID, () -> "created"));
+        StepVerifier.create(executor.execute(ROOM_ID, () -> Mono.just("next"))).expectNext("next").verifyComplete();
+    }
+}

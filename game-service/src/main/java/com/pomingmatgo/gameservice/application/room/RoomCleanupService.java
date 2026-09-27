@@ -1,6 +1,7 @@
 package com.pomingmatgo.gameservice.application.room;
 
 import com.pomingmatgo.gameservice.domain.event.RoomCleanedUpEvent;
+import com.pomingmatgo.gameservice.domain.event.GameActionFailedEvent;
 import com.pomingmatgo.gameservice.domain.GameState;
 import com.pomingmatgo.gameservice.domain.repository.AcquiredCardRepository;
 import com.pomingmatgo.gameservice.domain.repository.GameStateRepository;
@@ -13,6 +14,7 @@ import jakarta.annotation.PreDestroy;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.log4j.Log4j2;
 import org.springframework.context.ApplicationEventPublisher;
+import org.springframework.context.event.EventListener;
 import org.springframework.stereotype.Service;
 import reactor.core.publisher.BaseSubscriber;
 import reactor.core.publisher.Flux;
@@ -49,20 +51,28 @@ public class RoomCleanupService {
 
     /** 최초 요청의 종료 안내를 최대 5초 기다린 뒤 정리하며, 중복 요청은 기존 실행을 관찰한다. */
     public Mono<Void> cleanupRoom(long roomId, Mono<Void> notification) {
-        return Mono.defer(() -> {
-            CleanupExecution execution;
-            synchronized (executions) {
-                if (stopped) return Mono.error(new IllegalStateException("Room cleanup service stopped"));
-                execution = executions.get(roomId);
-                if (execution != null) return execution.result.asMono();
-                execution = new CleanupExecution(roomId);
-                executions.put(roomId, execution);
-            }
-            // 호출자는 결과만 관찰한다. 실제 정리 구독은 방별로 하나만 소유한다.
-            Mono.defer(() -> gameLockCleaner.withCleanup(roomId, () -> cleanup(roomId, notification)))
-                    .subscribe(execution);
-            return execution.result.asMono();
-        });
+        return Mono.defer(() -> startCleanup(roomId, notification));
+    }
+
+    @EventListener
+    public void onGameActionFailed(GameActionFailedEvent event) {
+        // 동기 리스너에서 기존 관리 실행을 시작한다. gate 해제를 기다리는 결과에는 구독하지 않는다.
+        startCleanup(event.roomId(), Mono.empty());
+    }
+
+    private Mono<Void> startCleanup(long roomId, Mono<Void> notification) {
+        CleanupExecution execution;
+        synchronized (executions) {
+            if (stopped) throw new IllegalStateException("Room cleanup service stopped");
+            execution = executions.get(roomId);
+            if (execution != null) return execution.result.asMono();
+            execution = new CleanupExecution(roomId);
+            executions.put(roomId, execution);
+        }
+        // 호출자는 결과만 관찰한다. 실제 정리 구독은 방별로 하나만 소유한다.
+        Mono.defer(() -> gameLockCleaner.withCleanup(roomId, () -> cleanup(roomId, notification)))
+                .subscribe(execution);
+        return execution.result.asMono();
     }
 
     private Mono<Void> cleanup(long roomId, Mono<Void> notification) {
