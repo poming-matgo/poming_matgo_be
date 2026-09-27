@@ -10,6 +10,8 @@ import reactor.test.StepVerifier;
 import java.time.Duration;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
+import reactor.util.context.ContextView;
 
 import org.springframework.test.util.ReflectionTestUtils;
 
@@ -115,6 +117,23 @@ class InMemoryRoomExecutionGateTest {
     private void assertBlocked() {
         assertThrows(WebSocketBusinessException.class, () -> gate.acquire(1));
         assertThrows(BusinessException.class, () -> gate.create(1, () -> "created"));
+    }
+
+    @Test
+    void restartPermissionCannotCreateInAnotherRoomOrSurviveRelease() {
+        var active = gate.acquire(1);
+        AtomicReference<ContextView> captured = new AtomicReference<>();
+        StepVerifier.create(gate.inRestart(active, () -> Mono.deferContextual(context -> {
+                    captured.set(context);
+                    assertThrows(BusinessException.class, () -> gate.create(2, context, () -> "wrong room"));
+                    return Mono.just(gate.create(1, context, () -> "recreated"));
+                })))
+                .expectNext("recreated").verifyComplete();
+        gate.release(active);
+        assertThrows(BusinessException.class, () -> gate.create(1, captured.get(), () -> "late"));
+        var nextAction = gate.acquire(1);
+        assertThrows(BusinessException.class, () -> gate.create(1, captured.get(), () -> "stale owner"));
+        gate.release(nextAction);
     }
 
     private void assertEmpty() {

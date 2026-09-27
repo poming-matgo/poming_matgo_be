@@ -18,6 +18,7 @@ import java.util.Set;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.BooleanSupplier;
+import java.util.function.Function;
 import java.util.function.Supplier;
 
 @Profile("in-memory")
@@ -32,6 +33,10 @@ public class InMemoryGameActionExecutor implements GameLockCleaner {
 
     // 수락 이후 호출자 취소와 분리하는 범위는 락 내부 실행과 해제까지다.
     public Mono<Object> execute(long roomId, Supplier<Mono<Object>> operation) {
+        return execute(roomId, ignored -> Mono.defer(operation));
+    }
+
+    private Mono<Object> execute(long roomId, Function<InMemoryRoomExecutionGate.Entry, Mono<Object>> operation) {
         return Mono.create(sink -> {
             ActionExecution execution = new ActionExecution(roomId, sink);
             synchronized (executions) {
@@ -48,10 +53,11 @@ public class InMemoryGameActionExecutor implements GameLockCleaner {
         });
     }
 
-    private Mono<Object> locked(Supplier<Mono<Object>> operation, long roomId, ActionExecution execution) {
+    private Mono<Object> locked(Function<InMemoryRoomExecutionGate.Entry, Mono<Object>> operation,
+                                long roomId, ActionExecution execution) {
         return Mono.usingWhen(
                 Mono.fromSupplier(() -> executionGate.acquire(roomId)),
-                s -> Mono.defer(operation).contextWrite(context -> context.put(GameActionAcceptance.class,
+                s -> Mono.defer(() -> operation.apply(s)).contextWrite(context -> context.put(GameActionAcceptance.class,
                         (BooleanSupplier) () -> execution.accept(s)))
                         .doOnError(error -> {
                             if (execution.isAccepted()) executionGate.fail(s);
@@ -163,5 +169,11 @@ public class InMemoryGameActionExecutor implements GameLockCleaner {
     @Override
     public Mono<Void> withCleanup(long roomId, Supplier<Mono<Void>> operation) {
         return executionGate.withCleanup(roomId, operation);
+    }
+
+    @Override
+    public Mono<Void> withRestart(long roomId, Supplier<Mono<Void>> operation) {
+        return execute(roomId, entry -> GameActionAcceptance.beforeMutation(() ->
+                executionGate.inRestart(entry, operation)).thenReturn((Object) Boolean.TRUE)).then();
     }
 }

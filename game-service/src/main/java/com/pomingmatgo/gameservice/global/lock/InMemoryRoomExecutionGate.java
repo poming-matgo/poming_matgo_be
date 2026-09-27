@@ -7,6 +7,7 @@ import org.springframework.context.annotation.Profile;
 import org.springframework.stereotype.Component;
 import reactor.core.publisher.Mono;
 import reactor.core.publisher.Sinks;
+import reactor.util.context.ContextView;
 
 import java.util.HashMap;
 import java.util.Map;
@@ -40,6 +41,7 @@ public class InMemoryRoomExecutionGate {
         Sinks.Empty<Void> drained;
         synchronized (this) {
             entry.active = false;
+            entry.restartPermit = null;
             drained = entry.drained;
         }
         // 완료 신호는 정리 체인을 실행할 수 있으므로 monitor 밖에서 전달한다.
@@ -47,11 +49,32 @@ public class InMemoryRoomExecutionGate {
     }
 
     public synchronized <T> T create(long roomId, Supplier<T> creation) {
+        return create(roomId, (RestartPermit) null, creation);
+    }
+
+    public <T> T create(long roomId, ContextView context, Supplier<T> creation) {
+        RestartPermit permit = context.getOrDefault(RestartPermit.class, null);
+        return create(roomId, permit, creation);
+    }
+
+    private synchronized <T> T create(long roomId, RestartPermit permit, Supplier<T> creation) {
         Entry entry = rooms.get(roomId);
+        // 재생성 권한은 현재 실행 하나에만 유효하다. 대기 중인 전체 정리는 이 실행 해제 뒤 진행한다.
+        if (permit != null) {
+            if (permit.entry == entry && entry.active && !entry.failed && entry.restartPermit == permit) return creation.get();
+            throw new BusinessException(ErrorCode.ALREADY_EXISTED_ROOM);
+        }
         if (entry != null && (entry.active || entry.cleanups > 0 || entry.failed)) {
             throw new BusinessException(ErrorCode.ALREADY_EXISTED_ROOM);
         }
         return creation.get();
+    }
+
+    public synchronized <T> Mono<T> inRestart(Entry entry, Supplier<Mono<T>> operation) {
+        if (!entry.active || entry.failed) throw new WebSocketBusinessException(TRY_AGAIN);
+        RestartPermit permit = new RestartPermit(entry);
+        entry.restartPermit = permit;
+        return Mono.defer(operation).contextWrite(context -> context.put(RestartPermit.class, permit));
     }
 
     public Mono<Void> withCleanup(long roomId, Supplier<Mono<Void>> cleanup) {
@@ -86,8 +109,11 @@ public class InMemoryRoomExecutionGate {
         private boolean active;
         private boolean failed;
         private int cleanups;
+        private RestartPermit restartPermit;
         private Sinks.Empty<Void> drained = Sinks.empty();
     }
 
     private record CleanupLease(Entry entry, Mono<Void> drained) {}
+
+    private record RestartPermit(Entry entry) {}
 }

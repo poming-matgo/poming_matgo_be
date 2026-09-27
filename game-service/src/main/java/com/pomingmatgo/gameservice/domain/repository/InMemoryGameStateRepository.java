@@ -29,7 +29,7 @@ public class InMemoryGameStateRepository implements GameStateRepository {
 
     @Override
     public Mono<Long> create(GameState gameState) {
-        return Mono.fromCallable(() -> executionGate.create(gameState.getRoomId(), () -> {
+        return Mono.deferContextual(context -> Mono.fromCallable(() -> executionGate.create(gameState.getRoomId(), context, () -> {
             synchronized (timerLifecycle) {
                 GameState existing = store.putIfAbsent(gameState.getRoomId(), gameState);
                 if (existing != null) {
@@ -38,7 +38,7 @@ public class InMemoryGameStateRepository implements GameStateRepository {
                 timerLifecycle.open(gameState.getRoomId());
             }
             return gameState.getRoomId();
-        }));
+        })));
     }
 
     @Override

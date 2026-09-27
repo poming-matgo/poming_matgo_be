@@ -208,10 +208,7 @@ public class GameService {
                 .phase(GamePhase.END)
                 .build();
         long roomId = gameState.getRoomId();
-        GameState initState = GameState.createEmptyRoom(roomId);
-
-        return roomCleanupService.cleanupRoomData(roomId)
-                .then(Mono.defer(() -> gameStateRepository.create(initState)))
+        return roomCleanupService.restartRoom(roomId)
                 .thenReturn(newState);
     }
 }
