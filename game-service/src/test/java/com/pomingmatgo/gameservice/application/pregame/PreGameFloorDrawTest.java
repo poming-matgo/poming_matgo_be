@@ -22,7 +22,10 @@ import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Primary;
 import reactor.core.publisher.Mono;
+import reactor.core.publisher.Sinks;
+import reactor.test.StepVerifier;
 
+import java.time.Duration;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -91,6 +94,32 @@ class PreGameFloorDrawTest {
         Mockito.verify(preGameService, never()).setFirstTurn(any());
         assertEquals(GamePhase.NONE, gameStateRepository.findById(roomId).block().getPhase(),
                 "무승부 종료 후 빈 방 상태로 초기화돼야 한다");
+    }
+
+    @Test
+    @DisplayName("무승부 재시작은 첫 안내 전에 완료되고 송신 취소에도 빈 방을 유지한다")
+    void floorDrawRestartsBeforeCancelledSend() {
+        roomId = 940_003L;
+        stubLeaderSelection();
+        stubDeal(List.of(Card.JAN_1, Card.JAN_2, Card.JAN_3, Card.JAN_4,
+                Card.FEB_1, Card.MAR_1, Card.APR_1, Card.MAY_1));
+        gameStateRepository.create(pendingStartState()).block();
+        Sinks.Empty<Void> send = Sinks.empty();
+        when(gameMessageSender.sendLeaderSelectionMessage(eq(roomId), any(), anyInt()))
+                .thenReturn(send.asMono());
+
+        StepVerifier.create(preGameFlowService.processLeaderSelection(pendingStartState(), Player.PLAYER_1, 0))
+                .then(() -> {
+                    assertEquals(1, send.currentSubscriberCount());
+                    assertEquals(GamePhase.NONE, gameStateRepository.findById(roomId).block().getPhase());
+                })
+                .thenCancel().verify(Duration.ofSeconds(3));
+
+        assertEquals(0, send.currentSubscriberCount());
+        assertEquals(GamePhase.NONE, gameStateRepository.findById(roomId).block().getPhase());
+        Mockito.verify(preGameService, never()).setFirstTurn(any());
+        Mockito.verify(gameMessageSender, never()).sendGameOverMessage(any(), any(), any());
+        Mockito.verify(gameMessageSender, never()).sendTurnInfo(any(), anyLong());
     }
 
     @Test

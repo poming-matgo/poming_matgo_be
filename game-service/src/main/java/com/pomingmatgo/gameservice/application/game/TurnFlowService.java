@@ -94,12 +94,16 @@ public class TurnFlowService {
 
     /** 첫 턴 시작(PreGameFlowService)이 이후 턴 전환과 같은 경로를 타게 하는 공개 진입점 */
     public Mono<Void> startTurn(GameState state, TurnScheduler scheduler) {
-        return Mono.defer(() -> startTurnInRoom(state, timerLifecycle.bind(state.getRoomId(), scheduler)));
+        return prepareFirstTurn(state, scheduler)
+                .flatMap(prepared -> gameMessageSender.sendTurnInfo(prepared, TURN_TIMEOUT_MILLIS));
     }
 
-    private Mono<Void> startTurnInRoom(GameState state, TurnScheduler scheduler) {
-        scheduleNextStep(state.getRoomId(), state, scheduler);
-        return gameMessageSender.sendTurnInfo(state, TURN_TIMEOUT_MILLIS);
+    /** 준비 흐름의 안내가 시작되기 전에 첫 턴 타이머를 등록한다. */
+    public Mono<GameState> prepareFirstTurn(GameState state, TurnScheduler scheduler) {
+        return Mono.fromSupplier(() -> {
+            scheduleNextStep(state.getRoomId(), state, timerLifecycle.bind(state.getRoomId(), scheduler));
+            return state;
+        });
     }
 
     /** 정상 제출/바닥 선택 완료가 공유하는 턴 완료 처리 — 다음 단계는 이미 락 안에서 결정·저장돼 있다 */
@@ -139,11 +143,15 @@ public class TurnFlowService {
 
     /** 첫 턴 시작 전 종료용 재시작·안내 경로. 액션 END는 완료 콜백에서 재시작을 마친다. */
     public Mono<GameState> processGameOver(GameState gameState, Player winner) {
-        return gamePlayService.gameOver(gameState)
+        return completeGameOver(gameState)
                 .delayUntil(finalState -> announceGameOver(finalState, winner));
     }
 
-    private Mono<Void> announceGameOver(GameState finalState, Player winner) {
+    public Mono<GameState> completeGameOver(GameState gameState) {
+        return gamePlayService.gameOver(gameState);
+    }
+
+    public Mono<Void> announceGameOver(GameState finalState, Player winner) {
         return gameMessageSender.sendGameOverMessage(
                 finalState, winner, payoutCalculator.finalPayout(finalState, winner));
     }

@@ -33,8 +33,8 @@ import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
 import static org.awaitility.Awaitility.await;
 
-// 결함 재현 기준선이다. 보호 구현 시 기대값을 취소 후 완료·낡은 쓰기 거부로 전환한다.
-@DisplayName("첫 턴 전 송신 취소·정리 경합 기준선 (미해결 동작 재현)")
+// 송신 경계는 정상 보장, 저장 대기 경계는 실행 소유권 도입 전 결함 재현이다.
+@DisplayName("준비 흐름 송신 분리 및 저장 경합 기준선")
 class PreGameLifecycleBaselineTest {
     private static final long ROOM_ID = 940_045L;
     private static final Duration TIMEOUT = Duration.ofSeconds(3);
@@ -89,12 +89,17 @@ class PreGameLifecycleBaselineTest {
         verify(scheduler).scheduleAutoPlay(eq(ROOM_ID), eq(1), eq(1), eq(Player.PLAYER_2),
                 anyLong(), eq(GamePhase.IN_PROGRESS));
         assertFalse(preGame.checkAllSelected(ROOM_ID).block(TIMEOUT));
+        var order = inOrder(sender);
+        order.verify(sender).sendLeaderSelectionMessage(ROOM_ID, Player.PLAYER_2, 1);
+        order.verify(sender).sendLeaderSelectionResult(eq(ROOM_ID), any());
+        order.verify(sender).sendDistributedCardInfo(eq(ROOM_ID), any());
+        order.verify(sender).sendTurnInfo(any(), anyLong());
     }
 
     @ParameterizedTest(name = "분배 안내 중 취소={0}")
     @ValueSource(booleans = {false, true})
-    @DisplayName("재현: 트리거 획득 뒤 송신 취소는 첫 턴 없이 준비 상태를 남긴다")
-    void cancellationAfterClaimStrandsGameStart(boolean afterDeal) {
+    @DisplayName("안내 송신 취소 전에 첫 턴과 타이머 등록을 완료한다")
+    void cancellationDuringSendPreservesGameStart(boolean afterDeal) {
         pauseSend(afterDeal);
         StepVerifier.create(selectSecondPlayer())
                 .then(this::awaitSend)
@@ -102,18 +107,18 @@ class PreGameLifecycleBaselineTest {
 
         assertEquals(0, sendRelease.currentSubscriberCount());
         sendRelease.tryEmitEmpty();
-        assertEquals(GamePhase.DETERMINING_STARTING_PLAYER, states.findById(ROOM_ID).block(TIMEOUT).getPhase());
+        assertStarted();
         assertFalse(preGame.checkAllSelected(ROOM_ID).block(TIMEOUT), "후속 진행 트리거는 이미 소비됐다");
-        if (afterDeal) assertDealt();
-        else assertEquals(List.of(), cards.getPlayerCards(ROOM_ID, Player.PLAYER_1).block(TIMEOUT));
-        verifyNoInteractions(scheduler);
+        assertDealt();
+        verify(scheduler).scheduleAutoPlay(eq(ROOM_ID), eq(1), eq(1), eq(Player.PLAYER_2),
+                anyLong(), eq(GamePhase.IN_PROGRESS));
         verify(sender, never()).sendTurnInfo(any(), anyLong());
     }
 
     @ParameterizedTest(name = "같은 ID 재생성={0}")
     @ValueSource(booleans = {false, true})
-    @DisplayName("재현: 정리 뒤 늦은 분배는 고아 카드를 남기거나 새 방 상태를 덮어쓴다")
-    void delayedDealWritesAfterCleanup(boolean recreate) {
+    @DisplayName("정리 뒤 늦은 안내는 카드나 새 방 상태를 쓰지 않는다")
+    void delayedSendDoesNotWriteAfterCleanup(boolean recreate) {
         pauseSend(false);
         var verification = StepVerifier.create(selectSecondPlayer())
                 .then(this::awaitSend)
@@ -121,17 +126,52 @@ class PreGameLifecycleBaselineTest {
                     cleanup.cleanupRoom(ROOM_ID).block(TIMEOUT);
                     assertNull(states.findById(ROOM_ID).block(TIMEOUT));
                     assertEquals(List.of(), cards.getPlayerCards(ROOM_ID, Player.PLAYER_1).block(TIMEOUT));
-                    assertEquals(1, sendRelease.currentSubscriberCount(), "정리는 진행 중 준비 흐름을 기다리지 않는다");
+                    assertEquals(1, sendRelease.currentSubscriberCount());
                     if (recreate) states.create(GameState.createEmptyRoom(ROOM_ID)).block(TIMEOUT);
                     assertEquals(Sinks.EmitResult.OK, sendRelease.tryEmitEmpty());
                 });
+        verification.expectComplete().verify(TIMEOUT);
+
+        assertEquals(List.of(), cards.getPlayerCards(ROOM_ID, Player.PLAYER_1).block(TIMEOUT));
+        assertEquals(List.of(), cards.getAllRevealedCards(ROOM_ID).block(TIMEOUT));
+        if (recreate) assertEquals(GamePhase.NONE, states.findById(ROOM_ID).block(TIMEOUT).getPhase());
+        else assertNull(states.findById(ROOM_ID).block(TIMEOUT), "삭제된 상태 자체는 부활하지 않는다");
+        verify(scheduler).scheduleAutoPlay(eq(ROOM_ID), eq(1), eq(1), eq(Player.PLAYER_2),
+                anyLong(), eq(GamePhase.IN_PROGRESS));
+    }
+
+    @ParameterizedTest(name = "같은 ID 재생성={0}")
+    @ValueSource(booleans = {false, true})
+    @DisplayName("미해결 재현: 분배 저장 대기 중 정리는 낡은 카드·상태 쓰기를 막지 못한다")
+    void delayedDealStillWritesAfterCleanup(boolean recreate) {
+        doReturn(sendRelease.asMono().then(Mono.defer(() -> preGame.distributeCards(ROOM_ID, DECK))))
+                .when(preGame).distributeCards(ROOM_ID);
+        var verification = StepVerifier.create(selectSecondPlayer())
+                .then(this::awaitSend)
+                .then(() -> {
+                    cleanup.cleanupRoom(ROOM_ID).block(TIMEOUT);
+                    if (recreate) states.create(GameState.createEmptyRoom(ROOM_ID)).block(TIMEOUT);
+                    sendRelease.tryEmitEmpty();
+                });
         if (recreate) verification.expectComplete().verify(TIMEOUT);
         else verification.expectError(BusinessException.class).verify(TIMEOUT);
-
         assertDealt();
         if (recreate) assertStarted();
-        else assertNull(states.findById(ROOM_ID).block(TIMEOUT), "삭제된 상태 자체는 부활하지 않는다");
-        verifyNoInteractions(scheduler); // 이전 수명의 타이머만 차단되고 카드·상태 쓰기는 차단되지 않는다.
+        else assertNull(states.findById(ROOM_ID).block(TIMEOUT));
+        verifyNoInteractions(scheduler);
+    }
+
+    @Test
+    @DisplayName("선택 안내 오류도 이미 저장한 첫 턴과 타이머를 취소하지 않는다")
+    void selectionSendFailurePreservesGameStart() {
+        RuntimeException failure = new IllegalStateException("send failed");
+        when(sender.sendLeaderSelectionMessage(anyLong(), any(), anyInt())).thenReturn(Mono.error(failure));
+        StepVerifier.create(selectSecondPlayer()).expectErrorMatches(error -> error == failure).verify(TIMEOUT);
+        assertStarted();
+        assertDealt();
+        verify(scheduler).scheduleAutoPlay(eq(ROOM_ID), eq(1), eq(1), eq(Player.PLAYER_2),
+                anyLong(), eq(GamePhase.IN_PROGRESS));
+        verify(sender, never()).sendLeaderSelectionResult(anyLong(), any());
     }
 
     private Mono<Void> selectSecondPlayer() {
