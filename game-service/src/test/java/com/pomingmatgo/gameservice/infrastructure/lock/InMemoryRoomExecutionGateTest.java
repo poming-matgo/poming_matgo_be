@@ -97,10 +97,13 @@ class InMemoryRoomExecutionGateTest {
     }
 
     @Test
-    void synchronousCleanupFailureReleasesBarrierAndPreservesError() {
+    void synchronousCleanupFailurePreservesErrorAndBlocksUntilSuccessfulCleanup() {
         var failure = new IllegalStateException("cleanup failed");
         StepVerifier.create(gate.withCleanup(1, () -> { throw failure; }))
                 .expectErrorSatisfies(error -> assertSame(failure, error)).verify(TIMEOUT);
+        gate.discardIdle(1);
+        assertBlocked();
+        StepVerifier.create(gate.withCleanup(1, Mono::empty)).verifyComplete();
         assertEmpty();
     }
 

@@ -32,6 +32,7 @@ import java.util.concurrent.CancellationException;
 @Log4j2
 public class RoomCleanupService {
     private static final Duration TERMINATION_NOTIFICATION_TIMEOUT = Duration.ofSeconds(5);
+    private static final Duration CLEANUP_STEP_TIMEOUT = Duration.ofSeconds(30);
 
     private final GameStateRepository gameStateRepository;
     private final InstalledCardRepository installedCardRepository;
@@ -80,7 +81,7 @@ public class RoomCleanupService {
         return Flux.concatDelayError(
                 Mono.defer(() -> notification).timeout(TERMINATION_NOTIFICATION_TIMEOUT),
                 Mono.defer(() -> deleteRoomData(roomId)),
-                Mono.defer(() -> sessionManager.removeRoom(roomId))
+                Mono.defer(() -> sessionManager.removeRoom(roomId)).timeout(CLEANUP_STEP_TIMEOUT)
         ).then().doOnError(error -> log.error("Room ({}) cleanup failed", roomId, error));
     }
 
@@ -144,13 +145,14 @@ public class RoomCleanupService {
         // 개별 오류가 다른 정리를 취소하지 않게 하고, 동기 예외도 구독 시 오류로 합산한다.
         return Mono.whenDelayError(
                 // 데이터 삭제 전에 신규 타이머를 차단한다. 동기 리스너로 등록과 종료를 직렬화한다.
-                Mono.fromRunnable(() -> eventPublisher.publishEvent(new RoomCleanedUpEvent(roomId))),
-                Mono.defer(() -> gameStateRepository.cleanup(roomId)),
-                Mono.defer(() -> installedCardRepository.cleanup(roomId)),
-                Mono.defer(() -> acquiredCardRepository.cleanup(roomId)),
-                Mono.defer(() -> leadingPlayerRepository.cleanup(roomId)),
-                Mono.defer(() -> roomLockManager.cleanup(roomId)),
-                Mono.defer(() -> gameLockCleaner.cleanup(roomId))
+                Mono.fromRunnable(() -> eventPublisher.publishEvent(new RoomCleanedUpEvent(roomId))).timeout(CLEANUP_STEP_TIMEOUT),
+                // 집계 바깥의 timeout은 먼저 발생한 오류를 잃으므로 각 정리를 개별 제한한다.
+                Mono.defer(() -> gameStateRepository.cleanup(roomId)).timeout(CLEANUP_STEP_TIMEOUT),
+                Mono.defer(() -> installedCardRepository.cleanup(roomId)).timeout(CLEANUP_STEP_TIMEOUT),
+                Mono.defer(() -> acquiredCardRepository.cleanup(roomId)).timeout(CLEANUP_STEP_TIMEOUT),
+                Mono.defer(() -> leadingPlayerRepository.cleanup(roomId)).timeout(CLEANUP_STEP_TIMEOUT),
+                Mono.defer(() -> roomLockManager.cleanup(roomId)).timeout(CLEANUP_STEP_TIMEOUT),
+                Mono.defer(() -> gameLockCleaner.cleanup(roomId)).timeout(CLEANUP_STEP_TIMEOUT)
         ).doOnError(error -> log.error("Room ({}) data cleanup failed", roomId, error));
     }
 }

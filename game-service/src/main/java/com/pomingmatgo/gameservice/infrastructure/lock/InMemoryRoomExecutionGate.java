@@ -79,7 +79,9 @@ public class InMemoryRoomExecutionGate {
 
     public Mono<Void> withCleanup(long roomId, Supplier<Mono<Void>> cleanup) {
         return Mono.usingWhen(Mono.fromSupplier(() -> beginCleanup(roomId)),
-                lease -> lease.drained().then(Mono.defer(cleanup)),
+                lease -> lease.drained().then(Mono.defer(cleanup))
+                        // 일반 종료의 실패·timeout도 부분 삭제된 방을 재사용하게 해서는 안 된다.
+                        .doOnError(error -> fail(lease.entry())),
                 lease -> finishCleanup(roomId, lease.entry(), true),
                 (lease, error) -> finishCleanup(roomId, lease.entry(), false),
                 lease -> finishCleanup(roomId, lease.entry(), false));
