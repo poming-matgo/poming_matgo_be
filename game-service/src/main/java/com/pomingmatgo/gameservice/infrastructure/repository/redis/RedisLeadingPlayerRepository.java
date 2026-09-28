@@ -79,9 +79,10 @@ public class RedisLeadingPlayerRepository implements LeadingPlayerRepository {
         ));
     }
 
+    @Override
     public Mono<Boolean> tryClaimLeaderSelectionTrigger(Long roomId) {
         String key = String.format(LEADER_TRIGGER_KEY_FORMAT, roomId);
-        // TTL 없음. InMemory 영구 저장과 동일 의미 — cleanup(roomId)에서 명시적 삭제 보장
+        // Redis에는 수락 후 취소 분리·오류 차단이 없으므로 선점을 유지하며 cleanup에서 삭제한다.
         return cardRedisOps.opsForValue().setIfAbsent(key, "1");
     }
 

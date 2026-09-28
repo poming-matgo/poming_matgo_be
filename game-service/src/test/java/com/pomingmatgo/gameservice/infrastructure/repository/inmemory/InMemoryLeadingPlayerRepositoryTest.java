@@ -1,65 +1,38 @@
 package com.pomingmatgo.gameservice.infrastructure.repository.inmemory;
 
-import com.pomingmatgo.gameservice.infrastructure.repository.inmemory.InMemoryLeadingPlayerRepository;
-import org.junit.jupiter.api.DisplayName;
+import com.pomingmatgo.gameservice.domain.Player;
+import com.pomingmatgo.gameservice.domain.card.Card;
 import org.junit.jupiter.api.Test;
 
-import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
-import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicInteger;
+import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.*;
 
-@DisplayName("선 선택 트리거 원자성 단위 테스트")
 class InMemoryLeadingPlayerRepositoryTest {
-
     private final InMemoryLeadingPlayerRepository repository = new InMemoryLeadingPlayerRepository();
 
     @Test
-    @DisplayName("두 플레이어가 동시에 선택을 마쳐도 후속 트리거는 정확히 한 번만 claim된다")
-    void triggerClaimedExactlyOnceUnderContention() throws Exception {
-        long roomId = 1L;
-        int threads = 16;
-        AtomicInteger claims = new AtomicInteger();
-
-        ExecutorService pool = Executors.newFixedThreadPool(threads);
-        CountDownLatch start = new CountDownLatch(1);
-        CountDownLatch done = new CountDownLatch(threads);
-        try {
-            for (int i = 0; i < threads; i++) {
-                pool.submit(() -> {
-                    try {
-                        start.await();
-                        if (Boolean.TRUE.equals(repository.tryClaimLeaderSelectionTrigger(roomId).block())) {
-                            claims.incrementAndGet();
-                        }
-                    } catch (InterruptedException e) {
-                        Thread.currentThread().interrupt();
-                    } finally {
-                        done.countDown();
-                    }
-                });
-            }
-            start.countDown();
-            assertTrue(done.await(5, TimeUnit.SECONDS));
-        } finally {
-            pool.shutdownNow();
+    void cleanupResetsSelectionWithoutAffectingOtherRooms() {
+        for (long roomId : List.of(1L, 2L)) {
+            repository.saveSelectedCard(List.of(Card.JAN_1, Card.FEB_1), roomId).block();
+            repository.savePlayerMonth(roomId, Player.PLAYER_1, 1).block();
+            repository.savePlayerMonth(roomId, Player.PLAYER_2, 2).block();
         }
+        repository.cleanup(1L).block();
 
-        assertEquals(1, claims.get(), "게임 시작 트리거는 1회만 발사돼야 한다");
-    }
+        assertTrue(repository.getAllCards(1L).block().isEmpty());
+        var cleared = repository.getPlayerSelectedCard(1L).block();
+        assertEquals(0, cleared.getPlayer1Month());
+        assertEquals(0, cleared.getPlayer2Month());
+        assertEquals(List.of(Card.JAN_1, Card.FEB_1), repository.getAllCards(2L).block());
+        var preserved = repository.getPlayerSelectedCard(2L).block();
+        assertEquals(1, preserved.getPlayer1Month());
+        assertEquals(2, preserved.getPlayer2Month());
 
-    @Test
-    @DisplayName("cleanup 후에는 트리거를 다시 claim할 수 있다 (다음 게임 재사용)")
-    void triggerReclaimableAfterCleanup() {
-        long roomId = 2L;
-        assertTrue(repository.tryClaimLeaderSelectionTrigger(roomId).block());
-        assertFalse(repository.tryClaimLeaderSelectionTrigger(roomId).block());
-
-        repository.cleanup(roomId).block();
-
-        assertTrue(repository.tryClaimLeaderSelectionTrigger(roomId).block());
+        repository.saveSelectedCard(List.of(Card.MAR_1), 1L).block();
+        repository.savePlayerMonth(1L, Player.PLAYER_1, 3).block();
+        assertEquals(List.of(Card.MAR_1), repository.getAllCards(1L).block());
+        assertEquals(3, repository.getPlayerSelectedCard(1L).block().getPlayer1Month());
+        assertEquals(0, repository.getPlayerSelectedCard(1L).block().getPlayer2Month());
     }
 }

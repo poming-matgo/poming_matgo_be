@@ -72,8 +72,6 @@ class PreGameLifecycleBaselineTest {
 
     @BeforeEach
     void setUp() {
-        // 선점이 매번 성공해도 게임 락·phase·실행 소유권만으로 시작을 보호해야 한다.
-        doReturn(Mono.just(true)).when(leaders).tryClaimLeaderSelectionTrigger(ROOM_ID);
         AspectJProxyFactory proxy = new AspectJProxyFactory(new PreGameStartService(states, preGame, turns, lifecycle, scheduler));
         proxy.addAspect(new InMemoryGameLockAspect(executor));
         flow = new PreGameFlowService(proxy.getProxy(), sender, turns);
@@ -91,6 +89,34 @@ class PreGameLifecycleBaselineTest {
         cleanup.shutdown();
         executor.shutdown();
         sessions.shutdown();
+    }
+
+    @Test
+    @DisplayName("선택 조회는 반복해도 선점을 소비하지 않고 미완료 선택은 시작하지 않는다")
+    void selectionQueryDoesNotClaimStart() {
+        assertFalse(preGame.checkAllSelected(ROOM_ID).block(TIMEOUT));
+        leaders.savePlayerMonth(ROOM_ID, Player.PLAYER_1, 0).block(TIMEOUT);
+        StepVerifier.create(flow.processLeaderSelection(initial, Player.PLAYER_1, 0))
+                .expectComplete().verify(TIMEOUT);
+        verify(leaders, never()).tryClaimLeaderSelectionTrigger(ROOM_ID);
+        verify(preGame, never()).distributeCards(ROOM_ID);
+        leaders.savePlayerMonth(ROOM_ID, Player.PLAYER_2, 2).block(TIMEOUT);
+        assertTrue(preGame.checkAllSelected(ROOM_ID).block(TIMEOUT));
+        assertTrue(preGame.checkAllSelected(ROOM_ID).block(TIMEOUT));
+        verify(leaders, never()).tryClaimLeaderSelectionTrigger(ROOM_ID);
+    }
+
+    @Test
+    @DisplayName("선택이 완료돼도 프로파일 선점이 거부하면 분배와 첫 턴을 실행하지 않는다")
+    void rejectedProfileClaimPreventsStart() {
+        doReturn(Mono.just(false)).when(leaders).tryClaimLeaderSelectionTrigger(ROOM_ID);
+        StepVerifier.create(selectSecondPlayer()).expectComplete().verify(TIMEOUT);
+        assertTrue(preGame.checkAllSelected(ROOM_ID).block(TIMEOUT));
+        verify(leaders).tryClaimLeaderSelectionTrigger(ROOM_ID);
+        verify(preGame, never()).distributeCards(ROOM_ID);
+        verify(preGame, never()).setFirstTurn(any());
+        verifyNoInteractions(scheduler);
+        assertEquals(GamePhase.DETERMINING_STARTING_PLAYER, states.findById(ROOM_ID).block(TIMEOUT).getPhase());
     }
 
     @Test
@@ -122,7 +148,7 @@ class PreGameLifecycleBaselineTest {
         assertEquals(0, sendRelease.currentSubscriberCount());
         sendRelease.tryEmitEmpty();
         assertStarted();
-        assertTrue(preGame.checkAllSelected(ROOM_ID).block(TIMEOUT), "트리거 선점은 중복 시작을 막지 않는다");
+        assertTrue(preGame.checkAllSelected(ROOM_ID).block(TIMEOUT), "선택 조회는 시작 권한을 소비하지 않는다");
         assertRepeatedSelectionRejected();
         assertDealt();
         verify(scheduler).scheduleAutoPlay(eq(ROOM_ID), eq(1), eq(1), eq(Player.PLAYER_2),

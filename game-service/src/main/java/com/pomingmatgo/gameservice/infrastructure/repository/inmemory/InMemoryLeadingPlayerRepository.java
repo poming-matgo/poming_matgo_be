@@ -18,12 +18,9 @@ import java.util.concurrent.ConcurrentHashMap;
 @Repository
 public class InMemoryLeadingPlayerRepository implements LeadingPlayerRepository {
 
-    private static final Object PRESENT = new Object();
-
     private final ConcurrentHashMap<Long, List<Card>> selectedCards = new ConcurrentHashMap<>();
     private final ConcurrentHashMap<Long, Integer> player1Month = new ConcurrentHashMap<>();
     private final ConcurrentHashMap<Long, Integer> player2Month = new ConcurrentHashMap<>();
-    private final ConcurrentHashMap<Long, Object> trigger = new ConcurrentHashMap<>();
 
     @Override
     public Mono<Void> saveSelectedCard(List<Card> cards, Long roomId) {
@@ -69,7 +66,8 @@ public class InMemoryLeadingPlayerRepository implements LeadingPlayerRepository 
 
     @Override
     public Mono<Boolean> tryClaimLeaderSelectionTrigger(Long roomId) {
-        return Mono.fromCallable(() -> trigger.putIfAbsent(roomId, PRESENT) == null);
+        // 중복 시작은 게임 락·phase 전이·수락 후 실행 소유권으로 막는다.
+        return Mono.just(true);
     }
 
     @Override
@@ -78,7 +76,6 @@ public class InMemoryLeadingPlayerRepository implements LeadingPlayerRepository 
             selectedCards.remove(roomId);
             player1Month.remove(roomId);
             player2Month.remove(roomId);
-            trigger.remove(roomId);
         });
     }
 }

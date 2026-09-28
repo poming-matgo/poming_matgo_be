@@ -77,12 +77,15 @@ public class PreGameService {
                                 leadingPlayerRepository.savePlayerMonth(roomId, player, card.getMonth()))));
     }
 
-    /** true = 이 호출이 후속 진행 담당. 락 불필요 — putIfAbsent 트리거가 동시 도달에도 1회 발사를 보장한다 */
+    /** 선택 완료 여부만 조회한다. 시작 1회 보장은 게임 락 내부의 최신 phase 검증과 상태 전이가 담당한다. */
     public Mono<Boolean> checkAllSelected(long roomId) {
         return leadingPlayerRepository.getPlayerSelectedCard(roomId)
-                .flatMap(choice -> choice.getPlayer1Month() != 0 && choice.getPlayer2Month() != 0
-                        ? leadingPlayerRepository.tryClaimLeaderSelectionTrigger(roomId)
-                        : Mono.just(false));
+                .map(choice -> choice.getPlayer1Month() != 0 && choice.getPlayer2Month() != 0);
+    }
+
+    // 선택 완료 확인 뒤 게임 락 안에서 호출한다. Redis의 기존 선점 보호를 유지한다.
+    Mono<Boolean> tryClaimLeaderSelectionTrigger(long roomId) {
+        return leadingPlayerRepository.tryClaimLeaderSelectionTrigger(roomId);
     }
 
     public Mono<LeadSelectionRes> getLeadSelectionRes(Long roomId) {

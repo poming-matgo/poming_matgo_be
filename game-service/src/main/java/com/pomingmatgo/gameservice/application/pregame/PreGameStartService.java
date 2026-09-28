@@ -36,6 +36,9 @@ public class PreGameStartService {
                 .switchIfEmpty(Mono.error(new WebSocketBusinessException(INVALID_GAME_PHASE)))
                 .flatMap(state -> preGameService.selectLeaderCard(roomId, player, cardIndex)
                         .then(Mono.defer(() -> preGameService.checkAllSelected(roomId)
+                                .flatMap(selected -> selected
+                                        ? preGameService.tryClaimLeaderSelectionTrigger(roomId)
+                                        : Mono.just(false))
                                 .flatMap(ready -> ready
                                         ? prepareGameStart(state, timerLifecycle.bind(roomId, turnScheduler))
                                         : Mono.empty()))));

@@ -188,6 +188,7 @@ class PreGameFloorDrawTest {
         when(preGameService.selectLeaderCard(anyLong(), any(), anyInt()))
                 .thenReturn(GameActionAcceptance.beforeMutation(Mono::empty));
         when(preGameService.checkAllSelected(anyLong())).thenReturn(Mono.just(true));
+        when(preGameService.tryClaimLeaderSelectionTrigger(anyLong())).thenReturn(Mono.just(true));
         when(preGameService.getLeadSelectionRes(anyLong())).thenReturn(Mono.just(leadSelectionRes));
         when(preGameService.hasChongtong(anyLong(), any())).thenReturn(Mono.just(false));
         when(preGameService.setFirstTurn(any())).thenAnswer(invocation -> {
