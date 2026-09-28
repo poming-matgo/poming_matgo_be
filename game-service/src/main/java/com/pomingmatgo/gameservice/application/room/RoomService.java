@@ -11,7 +11,6 @@ import com.pomingmatgo.gameservice.global.exception.BusinessException;
 import com.pomingmatgo.gameservice.global.exception.ErrorCode;
 import com.pomingmatgo.gameservice.global.exception.WebSocketBusinessException;
 import com.pomingmatgo.gameservice.global.exception.WebSocketErrorCode;
-import com.pomingmatgo.gameservice.infrastructure.lock.RoomLockManager;
 import com.pomingmatgo.gameservice.infrastructure.lock.GameLock;
 import com.pomingmatgo.gameservice.infrastructure.session.SessionManager;
 import lombok.RequiredArgsConstructor;
@@ -26,44 +25,37 @@ import static com.pomingmatgo.gameservice.domain.GamePhase.DETERMINING_STARTING_
 public class RoomService {
     private final GameStateRepository gameStateRepository;
     private final SessionManager sessionManager;
-    private final RoomLockManager roomLockManager;
     private final RoomCleanupService roomCleanupService;
 
-    // 방 상태 변경 경로의 통합 검증 전까지 게임 락 → 방 락 순서를 유지한다.
+    // Join·Leave·Ready·선택은 같은 방의 게임 락으로 직렬화한다.
     @GameLock
     public Mono<Void> joinRoom(long userId, long roomId) {
-        return roomLockManager.withLock(roomId,
-                gameStateRepository.findById(roomId)
-                        .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.NOT_EXISTED_ROOM)))
-                        .filter(gameState -> !gameState.isRoomFull())
-                        .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.FULL_ROOM)))
-                        .filter(gameState -> !gameState.hasUser(userId))
-                        .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.ALREADY_IN_ROOM)))
-                        .flatMap(gameState -> saveWithUserId(gameState, userId))
-                        .then(),
-                () -> new BusinessException(ErrorCode.SYSTEM_ERROR)
-        );
+        return gameStateRepository.findById(roomId)
+                .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.NOT_EXISTED_ROOM)))
+                .filter(gameState -> !gameState.isRoomFull())
+                .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.FULL_ROOM)))
+                .filter(gameState -> !gameState.hasUser(userId))
+                .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.ALREADY_IN_ROOM)))
+                .flatMap(gameState -> saveWithUserId(gameState, userId))
+                .then();
     }
 
     @GameLock
     public Mono<Void> leaveRoom(long userId, long roomId) {
-        return roomLockManager.withLock(roomId,
-                gameStateRepository.findById(roomId)
-                        .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.NOT_EXISTED_ROOM)))
-                        .filter(gameState -> gameState.hasUser(userId))
-                        .flatMap(gameState -> {
-                            // 진행 중 이탈은 WS disconnect 흐름이 담당 — REST leave를 허용하면 PlayerState만 초기화된 어긋난 상태가 된다
-                            if (gameState.getPhase() != GamePhase.NONE) {
-                                return Mono.error(new BusinessException(ErrorCode.GAME_IN_PROGRESS));
-                            }
-                            Player player = gameState.getPlayerType(userId);
+        return gameStateRepository.findById(roomId)
+                .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.NOT_EXISTED_ROOM)))
+                .filter(gameState -> gameState.hasUser(userId))
+                .flatMap(gameState -> {
+                    // 진행 중 이탈은 WS disconnect 흐름이 담당 — REST leave를 허용하면 PlayerState만 초기화된 어긋난 상태가 된다
+                    if (gameState.getPhase() != GamePhase.NONE) {
+                        return Mono.error(new BusinessException(ErrorCode.GAME_IN_PROGRESS));
+                    }
+                    Player player = gameState.getPlayerType(userId);
 
-                            GameState newState = gameState.updatePlayerState(player, new PlayerState());
-                            return GameActionAcceptance.beforeMutation(() -> gameStateRepository.save(newState));
-                        })
-                        .then(),
-                () -> new BusinessException(ErrorCode.SYSTEM_ERROR)
-        );
+                    GameState newState = gameState.updatePlayerState(player, new PlayerState());
+                    return GameActionAcceptance.beforeMutation(() -> gameStateRepository.save(newState));
+                })
+                .then();
     }
 
     public Mono<Void> deleteRoom(long roomId) {
@@ -96,7 +88,7 @@ public class RoomService {
                 });
     }
 
-    public Mono<GameState> readyFresh(long roomId, Player player, boolean isReady) {
+    Mono<GameState> readyFresh(long roomId, Player player, boolean isReady) {
         return gameStateRepository.findById(roomId)
                 .switchIfEmpty(Mono.error(new WebSocketBusinessException(WebSocketErrorCode.NOT_EXISTED_ROOM)))
                 .flatMap(state -> state.getPhase() == GamePhase.NONE
@@ -108,7 +100,7 @@ public class RoomService {
     }
 
 
-    public Mono<GameState> startGame(GameState gameState) {
+    Mono<GameState> startGame(GameState gameState) {
         GameState newState = gameState.toBuilder()
                 .phase(DETERMINING_STARTING_PLAYER)
                 .build();

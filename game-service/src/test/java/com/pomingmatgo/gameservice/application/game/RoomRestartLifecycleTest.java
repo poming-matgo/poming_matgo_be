@@ -12,7 +12,6 @@ import com.pomingmatgo.gameservice.domain.card.Card;
 import com.pomingmatgo.gameservice.global.exception.BusinessException;
 import com.pomingmatgo.gameservice.global.exception.WebSocketBusinessException;
 import com.pomingmatgo.gameservice.infrastructure.lock.InMemoryRoomExecutionGate;
-import com.pomingmatgo.gameservice.infrastructure.lock.RoomLockManager;
 import com.pomingmatgo.gameservice.infrastructure.session.SessionManager;
 import com.pomingmatgo.gameservice.infrastructure.scheduler.RoomTimerLifecycle;
 import org.junit.jupiter.api.AfterEach;
@@ -43,9 +42,8 @@ class RoomRestartLifecycleTest {
     private final InMemoryInstalledCardRepository cards = spy(new InMemoryInstalledCardRepository());
     private final AcquiredCardRepository acquired = mock(AcquiredCardRepository.class);
     private final LeadingPlayerRepository leader = mock(LeadingPlayerRepository.class);
-    private final RoomLockManager roomLock = mock(RoomLockManager.class);
     private final SessionManager sessions = spy(new SessionManager());
-    private final RoomCleanupService cleanup = new RoomCleanupService(state, cards, acquired, leader, roomLock,
+    private final RoomCleanupService cleanup = new RoomCleanupService(state, cards, acquired, leader,
             executor, mock(ApplicationEventPublisher.class), sessions);
     private final Sinks.Empty<Void> pause = Sinks.empty();
 
@@ -53,7 +51,6 @@ class RoomRestartLifecycleTest {
     void setUp() {
         when(acquired.cleanup(ROOM_ID)).thenReturn(Mono.empty());
         when(leader.cleanup(ROOM_ID)).thenReturn(Mono.empty());
-        when(roomLock.cleanup(ROOM_ID)).thenReturn(Mono.empty());
         state.create(GameState.createEmptyRoom(ROOM_ID)).block(TIMEOUT);
         cards.savePlayerCards(List.of(Card.JAN_3), ROOM_ID, Player.PLAYER_1).block(TIMEOUT);
         clearInvocations(state);

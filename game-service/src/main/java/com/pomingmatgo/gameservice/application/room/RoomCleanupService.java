@@ -8,7 +8,6 @@ import com.pomingmatgo.gameservice.domain.repository.GameStateRepository;
 import com.pomingmatgo.gameservice.domain.repository.InstalledCardRepository;
 import com.pomingmatgo.gameservice.domain.repository.LeadingPlayerRepository;
 import com.pomingmatgo.gameservice.infrastructure.lock.GameLockCleaner;
-import com.pomingmatgo.gameservice.infrastructure.lock.RoomLockManager;
 import com.pomingmatgo.gameservice.infrastructure.session.SessionManager;
 import jakarta.annotation.PreDestroy;
 import lombok.RequiredArgsConstructor;
@@ -38,7 +37,6 @@ public class RoomCleanupService {
     private final InstalledCardRepository installedCardRepository;
     private final AcquiredCardRepository acquiredCardRepository;
     private final LeadingPlayerRepository leadingPlayerRepository;
-    private final RoomLockManager roomLockManager;
     private final GameLockCleaner gameLockCleaner;
     private final ApplicationEventPublisher eventPublisher;
     private final SessionManager sessionManager;
@@ -151,7 +149,6 @@ public class RoomCleanupService {
                 Mono.defer(() -> installedCardRepository.cleanup(roomId)).timeout(CLEANUP_STEP_TIMEOUT),
                 Mono.defer(() -> acquiredCardRepository.cleanup(roomId)).timeout(CLEANUP_STEP_TIMEOUT),
                 Mono.defer(() -> leadingPlayerRepository.cleanup(roomId)).timeout(CLEANUP_STEP_TIMEOUT),
-                Mono.defer(() -> roomLockManager.cleanup(roomId)).timeout(CLEANUP_STEP_TIMEOUT),
                 Mono.defer(() -> gameLockCleaner.cleanup(roomId)).timeout(CLEANUP_STEP_TIMEOUT)
         ).doOnError(error -> log.error("Room ({}) data cleanup failed", roomId, error));
     }

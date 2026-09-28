@@ -9,7 +9,6 @@ import com.pomingmatgo.gameservice.domain.repository.GameStateRepository;
 import com.pomingmatgo.gameservice.domain.repository.InstalledCardRepository;
 import com.pomingmatgo.gameservice.domain.repository.LeadingPlayerRepository;
 import com.pomingmatgo.gameservice.infrastructure.lock.GameLockCleaner;
-import com.pomingmatgo.gameservice.infrastructure.lock.RoomLockManager;
 import com.pomingmatgo.gameservice.infrastructure.session.SessionManager;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -42,12 +41,11 @@ class RoomCleanupFailureTest {
     private final InstalledCardRepository installed = mock(InstalledCardRepository.class);
     private final AcquiredCardRepository acquired = mock(AcquiredCardRepository.class);
     private final LeadingPlayerRepository leader = mock(LeadingPlayerRepository.class);
-    private final RoomLockManager roomLock = mock(RoomLockManager.class);
     private final GameLockCleaner gameLock = mock(GameLockCleaner.class, CALLS_REAL_METHODS);
     private final ApplicationEventPublisher events = mock(ApplicationEventPublisher.class);
     private final List<String> completed = new ArrayList<>();
     private final RoomCleanupService cleanup = new RoomCleanupService(
-            state, installed, acquired, leader, roomLock, gameLock, events, new SessionManager());
+            state, installed, acquired, leader, gameLock, events, new SessionManager());
 
     @BeforeEach
     void setUp() {
@@ -55,7 +53,6 @@ class RoomCleanupFailureTest {
         when(installed.cleanup(ROOM_ID)).thenReturn(done("installed"));
         when(acquired.cleanup(ROOM_ID)).thenReturn(done("acquired"));
         when(leader.cleanup(ROOM_ID)).thenReturn(done("leader"));
-        when(roomLock.cleanup(ROOM_ID)).thenReturn(done("roomLock"));
         when(gameLock.cleanup(ROOM_ID)).thenReturn(done("gameLock"));
         doAnswer(invocation -> {
             completed.add("event");
@@ -65,11 +62,11 @@ class RoomCleanupFailureTest {
 
     @Test
     void successfulCleanupIsLazyAndCompletesAllResources() {
-        clearInvocations(state, installed, acquired, leader, roomLock, gameLock, events);
+        clearInvocations(state, installed, acquired, leader, gameLock, events);
         Mono<Void> result = cleanup.cleanupRoomData(ROOM_ID);
-        verifyNoInteractions(state, installed, acquired, leader, roomLock, gameLock, events);
+        verifyNoInteractions(state, installed, acquired, leader, gameLock, events);
         StepVerifier.create(result).expectComplete().verify(TIMEOUT);
-        assertEquals(List.of("event", "state", "installed", "acquired", "leader", "roomLock", "gameLock"), completed);
+        assertEquals(List.of("event", "state", "installed", "acquired", "leader", "gameLock"), completed);
     }
 
     @Test
@@ -78,7 +75,7 @@ class RoomCleanupFailureTest {
         when(state.cleanup(ROOM_ID)).thenReturn(Mono.error(failure));
         StepVerifier.create(cleanup.cleanupRoomData(ROOM_ID))
                 .expectErrorSatisfies(error -> assertSame(failure, error)).verify(TIMEOUT);
-        assertEquals(List.of("event", "installed", "acquired", "leader", "roomLock", "gameLock"), completed);
+        assertEquals(List.of("event", "installed", "acquired", "leader", "gameLock"), completed);
     }
 
     @Test
@@ -87,7 +84,7 @@ class RoomCleanupFailureTest {
         when(state.cleanup(ROOM_ID)).thenThrow(failure);
         StepVerifier.create(cleanup.cleanupRoomData(ROOM_ID))
                 .expectErrorSatisfies(error -> assertSame(failure, error)).verify(TIMEOUT);
-        assertEquals(List.of("event", "installed", "acquired", "leader", "roomLock", "gameLock"), completed);
+        assertEquals(List.of("event", "installed", "acquired", "leader", "gameLock"), completed);
     }
 
     @Test
@@ -100,7 +97,7 @@ class RoomCleanupFailureTest {
                 .expectErrorSatisfies(error -> assertEquals(
                         List.of(first, second), Exceptions.unwrapMultipleExcludingTracebacks(error)))
                 .verify(TIMEOUT);
-        assertEquals(List.of("event", "installed", "acquired", "leader", "roomLock"), completed);
+        assertEquals(List.of("event", "installed", "acquired", "leader"), completed);
     }
 
     @Test

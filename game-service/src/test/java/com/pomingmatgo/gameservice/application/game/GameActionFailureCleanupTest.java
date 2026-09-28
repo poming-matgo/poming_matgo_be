@@ -8,7 +8,6 @@ import com.pomingmatgo.gameservice.domain.repository.AcquiredCardRepository;
 import com.pomingmatgo.gameservice.domain.repository.LeadingPlayerRepository;
 import com.pomingmatgo.gameservice.global.exception.WebSocketBusinessException;
 import com.pomingmatgo.gameservice.infrastructure.lock.InMemoryRoomExecutionGate;
-import com.pomingmatgo.gameservice.infrastructure.lock.RoomLockManager;
 import com.pomingmatgo.gameservice.infrastructure.repository.inmemory.InMemoryGameStateRepository;
 import com.pomingmatgo.gameservice.infrastructure.repository.inmemory.InMemoryInstalledCardRepository;
 import com.pomingmatgo.gameservice.infrastructure.scheduler.RoomTimerLifecycle;
@@ -47,9 +46,8 @@ class GameActionFailureCleanupTest {
     private final InMemoryInstalledCardRepository cards = spy(new InMemoryInstalledCardRepository());
     private final AcquiredCardRepository acquired = mock(AcquiredCardRepository.class);
     private final LeadingPlayerRepository leader = mock(LeadingPlayerRepository.class);
-    private final RoomLockManager roomLock = mock(RoomLockManager.class);
     private final SessionManager sessions = mock(SessionManager.class);
-    private final RoomCleanupService cleanup = new RoomCleanupService(state, cards, acquired, leader, roomLock,
+    private final RoomCleanupService cleanup = new RoomCleanupService(state, cards, acquired, leader,
             executor, events, sessions);
     private final IllegalStateException failure = new IllegalStateException("mutation failed");
 
@@ -57,7 +55,6 @@ class GameActionFailureCleanupTest {
     void setUp() {
         when(acquired.cleanup(ROOM_ID)).thenReturn(Mono.empty());
         when(leader.cleanup(ROOM_ID)).thenReturn(Mono.empty());
-        when(roomLock.cleanup(ROOM_ID)).thenReturn(Mono.empty());
         when(sessions.removeRoom(ROOM_ID)).thenReturn(Mono.empty());
         doAnswer(call -> {
             cleanup.onGameActionFailed(call.getArgument(0));
@@ -81,7 +78,6 @@ class GameActionFailureCleanupTest {
         verify(cards).cleanup(ROOM_ID);
         verify(acquired).cleanup(ROOM_ID);
         verify(leader).cleanup(ROOM_ID);
-        verify(roomLock).cleanup(ROOM_ID);
         verify(sessions).removeRoom(ROOM_ID);
         verify(events).publishEvent(new RoomCleanedUpEvent(ROOM_ID));
         assertReusable();

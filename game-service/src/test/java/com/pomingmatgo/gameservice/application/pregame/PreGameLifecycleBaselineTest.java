@@ -2,16 +2,18 @@ package com.pomingmatgo.gameservice.application.pregame;
 
 import com.pomingmatgo.gameservice.application.game.*;
 import com.pomingmatgo.gameservice.application.room.RoomCleanupService;
+import com.pomingmatgo.gameservice.application.room.RoomReadyService;
+import com.pomingmatgo.gameservice.application.room.RoomService;
 import com.pomingmatgo.gameservice.domain.*;
 import com.pomingmatgo.gameservice.domain.card.Card;
 import com.pomingmatgo.gameservice.domain.repository.AcquiredCardRepository;
 import com.pomingmatgo.gameservice.domain.score.PayoutCalculator;
 import com.pomingmatgo.gameservice.global.exception.BusinessException;
 import com.pomingmatgo.gameservice.global.exception.WebSocketBusinessException;
+import com.pomingmatgo.gameservice.global.exception.WebSocketErrorCode;
 import com.pomingmatgo.gameservice.infrastructure.lock.InMemoryGameLockAspect;
 import org.springframework.aop.aspectj.annotation.AspectJProxyFactory;
 import com.pomingmatgo.gameservice.infrastructure.lock.InMemoryRoomExecutionGate;
-import com.pomingmatgo.gameservice.infrastructure.lock.InMemoryRoomLockManager;
 import com.pomingmatgo.gameservice.infrastructure.messaging.GameMessageSender;
 import com.pomingmatgo.gameservice.infrastructure.repository.inmemory.*;
 import com.pomingmatgo.gameservice.infrastructure.scheduler.RoomTimerLifecycle;
@@ -50,12 +52,11 @@ class PreGameLifecycleBaselineTest {
     private final InMemoryGameStateRepository states = new InMemoryGameStateRepository(lifecycle, gate);
     private final InMemoryInstalledCardRepository cards = new InMemoryInstalledCardRepository();
     private final InMemoryLeadingPlayerRepository leaders = spy(new InMemoryLeadingPlayerRepository());
-    private final InMemoryRoomLockManager roomLock = new InMemoryRoomLockManager();
     private final SessionManager sessions = new SessionManager();
     private final AcquiredCardRepository acquired = mock(AcquiredCardRepository.class);
     private final RoomCleanupService cleanup = new RoomCleanupService(states, cards, acquired, leaders,
-            roomLock, executor, event -> {}, sessions);
-    private final PreGameService preGame = spy(new PreGameService(leaders, cards, states, roomLock));
+            executor, event -> {}, sessions);
+    private final PreGameService preGame = spy(new PreGameService(leaders, cards, states));
     private final GameMessageSender sender = mock(GameMessageSender.class, invocation -> Mono.empty());
     private final TurnScheduler scheduler = mock(TurnScheduler.class);
     private final TurnFlowService turns = new TurnFlowService(lifecycle, mock(GamePlayService.class), sender,
@@ -372,6 +373,47 @@ class PreGameLifecycleBaselineTest {
     private void pauseSelectionSave() {
         Mono<Void> save = leaders.savePlayerMonth(ROOM_ID, Player.PLAYER_2, 2);
         doReturn(sendRelease.asMono().then(save)).when(leaders).savePlayerMonth(ROOM_ID, Player.PLAYER_2, 2);
+    }
+
+    @Test
+    @DisplayName("선택 저장 중 Join·Leave·Ready·선택은 같은 락에서 거부하고 다른 방은 진행한다")
+    void selectionSerializesWithRoomAdmission() {
+        AspectJProxyFactory roomProxy = new AspectJProxyFactory(new RoomService(states, sessions, cleanup));
+        roomProxy.addAspect(new InMemoryGameLockAspect(executor));
+        RoomService rooms = roomProxy.getProxy();
+        AspectJProxyFactory readyProxy = new AspectJProxyFactory(new RoomReadyService(rooms, preGame));
+        readyProxy.addAspect(new InMemoryGameLockAspect(executor));
+        RoomReadyService ready = readyProxy.getProxy();
+        long otherRoom = ROOM_ID + 1;
+        states.create(GameState.createEmptyRoom(otherRoom)).block(TIMEOUT);
+        pauseSelectionSave();
+        var selecting = selectSecondPlayer().toFuture();
+        try {
+            awaitSend();
+            for (Mono<?> competing : List.of(rooms.joinRoom(101L, ROOM_ID), rooms.leaveRoom(101L, ROOM_ID),
+                    ready.readyAndPrepare(ROOM_ID, Player.PLAYER_1, false), selectSecondPlayer())) {
+                StepVerifier.create(competing)
+                        .expectErrorSatisfies(error -> assertEquals(WebSocketErrorCode.TRY_AGAIN,
+                                assertInstanceOf(WebSocketBusinessException.class, error).getWebsocketErrorCode()))
+                        .verify(TIMEOUT);
+            }
+            rooms.joinRoom(101L, otherRoom).block(TIMEOUT);
+            assertTrue(states.findById(otherRoom).block(TIMEOUT).hasUser(101L));
+            assertFalse(selecting.isDone());
+            assertEquals(0, leaders.getPlayerSelectedCard(ROOM_ID).block(TIMEOUT).getPlayer2Month());
+            sendRelease.tryEmitEmpty();
+            await().atMost(TIMEOUT).until(selecting::isDone);
+            selecting.join();
+            assertStarted();
+            verify(preGame).distributeCards(ROOM_ID);
+            StepVerifier.create(selectSecondPlayer())
+                    .expectErrorSatisfies(error -> assertEquals(WebSocketErrorCode.INVALID_GAME_PHASE,
+                            assertInstanceOf(WebSocketBusinessException.class, error).getWebsocketErrorCode()))
+                    .verify(TIMEOUT);
+        } finally {
+            sendRelease.tryEmitEmpty();
+            states.cleanup(otherRoom).block(TIMEOUT);
+        }
     }
 
     @Test

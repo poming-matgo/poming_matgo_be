@@ -16,7 +16,6 @@ import com.pomingmatgo.gameservice.domain.card.Card;
 import com.pomingmatgo.gameservice.domain.event.RoomCleanedUpEvent;
 import com.pomingmatgo.gameservice.infrastructure.messaging.MessageSender;
 import com.pomingmatgo.gameservice.infrastructure.lock.GameLockCleaner;
-import com.pomingmatgo.gameservice.infrastructure.lock.RoomLockManager;
 import com.pomingmatgo.gameservice.application.connection.GameConnectionService;
 import com.pomingmatgo.gameservice.infrastructure.session.SessionManager;
 import org.junit.jupiter.api.BeforeEach;
@@ -47,7 +46,6 @@ class RoomTerminationCancellationTest {
     private final InMemoryInstalledCardRepository installed = spy(new InMemoryInstalledCardRepository());
     private final AcquiredCardRepository acquired = mock(AcquiredCardRepository.class);
     private final LeadingPlayerRepository leader = mock(LeadingPlayerRepository.class);
-    private final RoomLockManager roomLock = mock(RoomLockManager.class);
     private final GameLockCleaner gameLock = mock(GameLockCleaner.class, CALLS_REAL_METHODS);
     private final ApplicationEventPublisher events = mock(ApplicationEventPublisher.class);
     private final SessionManager sessions = spy(new SessionManager());
@@ -56,7 +54,7 @@ class RoomTerminationCancellationTest {
     private final WebSocketSession first = mock(WebSocketSession.class);
     private final WebSocketSession second = mock(WebSocketSession.class);
     private final RoomCleanupService cleanup = new RoomCleanupService(
-            state, installed, acquired, leader, roomLock, gameLock, events, sessions);
+            state, installed, acquired, leader, gameLock, events, sessions);
     private final Sinks.Empty<Void> gate = Sinks.empty();
     private final AtomicInteger cancelled = new AtomicInteger();
     private final AtomicInteger completed = new AtomicInteger();
@@ -65,7 +63,6 @@ class RoomTerminationCancellationTest {
     void setUp() {
         when(acquired.cleanup(ROOM_ID)).thenReturn(Mono.empty());
         when(leader.cleanup(ROOM_ID)).thenReturn(Mono.empty());
-        when(roomLock.cleanup(ROOM_ID)).thenReturn(Mono.empty());
         when(gameLock.cleanup(ROOM_ID)).thenReturn(Mono.empty());
         when(sender.sendMessageToAllUser(eq(ROOM_ID), any())).thenReturn(Mono.empty());
         when(game.findGameState(ROOM_ID)).thenAnswer(invocation -> state.findById(ROOM_ID));
@@ -216,7 +213,7 @@ class RoomTerminationCancellationTest {
         Mono<Void> result = disconnect
                 ? new GameConnectionService(game, sessions, sender, cleanup,
                         mock(ReconnectService.class)).disconnect(first)
-                : new RoomService(state, sessions, roomLock, cleanup).deleteRoom(ROOM_ID);
+                : new RoomService(state, sessions, cleanup).deleteRoom(ROOM_ID);
         return result.doOnSuccess(ignored -> completed.incrementAndGet());
     }
 

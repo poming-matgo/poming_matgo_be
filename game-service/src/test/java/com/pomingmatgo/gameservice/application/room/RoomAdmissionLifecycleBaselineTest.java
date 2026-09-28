@@ -13,7 +13,6 @@ import com.pomingmatgo.gameservice.global.exception.ErrorCode;
 import com.pomingmatgo.gameservice.global.exception.WebSocketBusinessException;
 import com.pomingmatgo.gameservice.global.exception.WebSocketErrorCode;
 import com.pomingmatgo.gameservice.infrastructure.lock.InMemoryRoomExecutionGate;
-import com.pomingmatgo.gameservice.infrastructure.lock.InMemoryRoomLockManager;
 import com.pomingmatgo.gameservice.infrastructure.messaging.MessageSender;
 import com.pomingmatgo.gameservice.infrastructure.repository.inmemory.*;
 import com.pomingmatgo.gameservice.infrastructure.scheduler.RoomTimerLifecycle;
@@ -48,12 +47,11 @@ class RoomAdmissionLifecycleBaselineTest {
     private final InMemoryGameStateRepository states = spy(new InMemoryGameStateRepository(new RoomTimerLifecycle(), gate));
     private final InMemoryInstalledCardRepository cards = new InMemoryInstalledCardRepository();
     private final InMemoryLeadingPlayerRepository leaders = spy(new InMemoryLeadingPlayerRepository());
-    private final InMemoryRoomLockManager lock = new InMemoryRoomLockManager();
     private final SessionManager sessions = new SessionManager();
     private final RoomCleanupService cleanup = new RoomCleanupService(states, cards,
-            new InMemoryAcquiredCardRepository(), leaders, lock, executor, event -> {}, sessions);
+            new InMemoryAcquiredCardRepository(), leaders, executor, event -> {}, sessions);
     private RoomService rooms;
-    private final PreGameService preGame = new PreGameService(leaders, cards, states, lock);
+    private final PreGameService preGame = new PreGameService(leaders, cards, states);
     private final MessageSender sender = mock(MessageSender.class, invocation -> Mono.empty());
     private WsRoomHandler handler;
     private RoomReadyService readyService;
@@ -64,10 +62,10 @@ class RoomAdmissionLifecycleBaselineTest {
 
     @BeforeEach
     void setUp() {
-        AspectJProxyFactory roomProxy = new AspectJProxyFactory(new RoomService(states, sessions, lock, cleanup));
+        AspectJProxyFactory roomProxy = new AspectJProxyFactory(new RoomService(states, sessions, cleanup));
         roomProxy.addAspect(new InMemoryGameLockAspect(executor));
         rooms = roomProxy.getProxy();
-        AspectJProxyFactory proxy = new AspectJProxyFactory(new RoomReadyService(rooms, preGame, lock));
+        AspectJProxyFactory proxy = new AspectJProxyFactory(new RoomReadyService(rooms, preGame));
         proxy.addAspect(new InMemoryGameLockAspect(executor));
         readyService = proxy.getProxy();
         handler = new WsRoomHandler(sender, readyService);
@@ -106,7 +104,6 @@ class RoomAdmissionLifecycleBaselineTest {
         assertTrue(current().allPlayersReady());
         assertEquals(GamePhase.DETERMINING_STARTING_PLAYER, current().getPhase());
         assertEquals(5, leaders.getAllCards(ROOM_ID).block(TIMEOUT).size());
-        lock.withLock(ROOM_ID, Mono.just(true), IllegalStateException::new).block(TIMEOUT);
     }
 
     @ParameterizedTest(name = "같은 ID 재생성={0}")
@@ -143,7 +140,6 @@ class RoomAdmissionLifecycleBaselineTest {
             assertEquals(5, leaders.getAllCards(ROOM_ID).block(TIMEOUT).size());
         });
         verifyNoInteractions(sender);
-        lock.withLock(ROOM_ID, Mono.just(true), IllegalStateException::new).block(TIMEOUT);
     }
 
     @ParameterizedTest(name = "저장 경계={0}")
