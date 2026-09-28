@@ -5,6 +5,8 @@ import com.pomingmatgo.gameservice.domain.GamePhase;
 import com.pomingmatgo.gameservice.domain.GameState;
 import com.pomingmatgo.gameservice.domain.InstalledCard;
 import com.pomingmatgo.gameservice.domain.Player;
+import com.pomingmatgo.gameservice.global.exception.WebSocketBusinessException;
+import com.pomingmatgo.gameservice.global.exception.WebSocketErrorCode;
 import com.pomingmatgo.gameservice.domain.card.Card;
 import com.pomingmatgo.gameservice.infrastructure.messaging.GameMessageSender;
 import com.pomingmatgo.gameservice.domain.messaging.LeadSelectionRes;
@@ -20,6 +22,7 @@ import org.mockito.Mockito;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.context.TestConfiguration;
+import org.springframework.boot.test.mock.mockito.SpyBean;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Primary;
 import reactor.core.publisher.Mono;
@@ -30,6 +33,7 @@ import java.time.Duration;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyLong;
@@ -65,7 +69,7 @@ class PreGameFloorDrawTest {
     @Autowired PreGameService preGameService;
     @Autowired GameMessageSender gameMessageSender;
     @Autowired GameStateRepository gameStateRepository;
-    @Autowired RoomCleanupService roomCleanupService;
+    @SpyBean RoomCleanupService roomCleanupService;
 
     private long roomId;
 
@@ -137,6 +141,43 @@ class PreGameFloorDrawTest {
         Mockito.verify(gameMessageSender, never()).sendGameOverMessage(any(), any(), any());
         Mockito.verify(preGameService).setFirstTurn(any());
         assertEquals(GamePhase.IN_PROGRESS, gameStateRepository.findById(roomId).block().getPhase());
+    }
+
+    @Test
+    @DisplayName("트리거 없는 무승부 재시작은 호출자 취소 후에도 락을 유지하고 반복 시작을 거부한다")
+    void cancelledDrawRestartKeepsStartExclusive() {
+        roomId = 940_004L;
+        stubLeaderSelection();
+        stubDeal(List.of(Card.JAN_1, Card.JAN_2, Card.JAN_3, Card.JAN_4,
+                Card.FEB_1, Card.MAR_1, Card.APR_1, Card.MAY_1));
+        gameStateRepository.create(pendingStartState()).block();
+        Sinks.Empty<Void> restartRelease = Sinks.empty();
+        Mono<Void> restart = roomCleanupService.restartRoom(roomId);
+        Mockito.clearInvocations(roomCleanupService);
+        Mockito.doReturn(restartRelease.asMono().then(restart)).when(roomCleanupService).restartRoom(roomId);
+        try {
+            StepVerifier.create(preGameFlowService.processLeaderSelection(pendingStartState(), Player.PLAYER_1, 0))
+                    .then(() -> assertEquals(1, restartRelease.currentSubscriberCount()))
+                    .thenCancel().verify(Duration.ofSeconds(3));
+            assertEquals(1, restartRelease.currentSubscriberCount());
+            assertSelectionRejected(WebSocketErrorCode.TRY_AGAIN);
+            Mockito.verify(gameMessageSender, never()).sendLeaderSelectionMessage(anyLong(), any(), anyInt());
+            restartRelease.tryEmitEmpty();
+            assertEquals(GamePhase.NONE, gameStateRepository.findById(roomId).block().getPhase());
+            assertSelectionRejected(WebSocketErrorCode.INVALID_GAME_PHASE);
+            Mockito.verify(preGameService).distributeCards(roomId);
+            Mockito.verify(preGameService, never()).setFirstTurn(any());
+            Mockito.verify(roomCleanupService).restartRoom(roomId);
+        } finally {
+            restartRelease.tryEmitEmpty();
+        }
+    }
+
+    private void assertSelectionRejected(WebSocketErrorCode code) {
+        StepVerifier.create(preGameFlowService.processLeaderSelection(pendingStartState(), Player.PLAYER_1, 0))
+                .expectErrorSatisfies(error -> assertEquals(code,
+                        assertInstanceOf(WebSocketBusinessException.class, error).getWebsocketErrorCode()))
+                .verify(Duration.ofSeconds(3));
     }
 
     private void stubLeaderSelection() {

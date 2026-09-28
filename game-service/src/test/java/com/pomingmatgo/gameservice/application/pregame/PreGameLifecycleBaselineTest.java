@@ -39,7 +39,7 @@ import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
 import static org.awaitility.Awaitility.await;
 
-@DisplayName("준비 흐름 실행 소유권과 송신 분리")
+@DisplayName("시작 트리거 없이 준비 흐름 실행 소유권과 송신 분리")
 class PreGameLifecycleBaselineTest {
     private static final long ROOM_ID = 940_045L;
     private static final Duration TIMEOUT = Duration.ofSeconds(3);
@@ -72,6 +72,8 @@ class PreGameLifecycleBaselineTest {
 
     @BeforeEach
     void setUp() {
+        // 선점이 매번 성공해도 게임 락·phase·실행 소유권만으로 시작을 보호해야 한다.
+        doReturn(Mono.just(true)).when(leaders).tryClaimLeaderSelectionTrigger(ROOM_ID);
         AspectJProxyFactory proxy = new AspectJProxyFactory(new PreGameStartService(states, preGame, turns, lifecycle, scheduler));
         proxy.addAspect(new InMemoryGameLockAspect(executor));
         flow = new PreGameFlowService(proxy.getProxy(), sender, turns);
@@ -99,7 +101,8 @@ class PreGameLifecycleBaselineTest {
         assertDealt();
         verify(scheduler).scheduleAutoPlay(eq(ROOM_ID), eq(1), eq(1), eq(Player.PLAYER_2),
                 anyLong(), eq(GamePhase.IN_PROGRESS));
-        assertFalse(preGame.checkAllSelected(ROOM_ID).block(TIMEOUT));
+        assertTrue(preGame.checkAllSelected(ROOM_ID).block(TIMEOUT));
+        assertRepeatedSelectionRejected();
         var order = inOrder(sender);
         order.verify(sender).sendLeaderSelectionMessage(ROOM_ID, Player.PLAYER_2, 1);
         order.verify(sender).sendLeaderSelectionResult(eq(ROOM_ID), any());
@@ -119,7 +122,8 @@ class PreGameLifecycleBaselineTest {
         assertEquals(0, sendRelease.currentSubscriberCount());
         sendRelease.tryEmitEmpty();
         assertStarted();
-        assertFalse(preGame.checkAllSelected(ROOM_ID).block(TIMEOUT), "후속 진행 트리거는 이미 소비됐다");
+        assertTrue(preGame.checkAllSelected(ROOM_ID).block(TIMEOUT), "트리거 선점은 중복 시작을 막지 않는다");
+        assertRepeatedSelectionRejected();
         assertDealt();
         verify(scheduler).scheduleAutoPlay(eq(ROOM_ID), eq(1), eq(1), eq(Player.PLAYER_2),
                 anyLong(), eq(GamePhase.IN_PROGRESS));
@@ -203,6 +207,36 @@ class PreGameLifecycleBaselineTest {
         assertStarted();
     }
 
+    @ParameterizedTest(name = "호출자 취소={0}")
+    @ValueSource(booleans = {false, true})
+    @DisplayName("첫 턴 저장 대기와 완료 뒤 반복 선택은 트리거 없이도 중복 시작하지 않는다")
+    void firstTurnSaveKeepsStartExclusive(boolean cancelCaller) throws Exception {
+        doAnswer(invocation -> {
+            Mono<GameState> saving = ((Mono<?>) invocation.callRealMethod()).cast(GameState.class);
+            return sendRelease.asMono().then(saving);
+        }).when(preGame).setFirstTurn(any());
+        var selecting = selectSecondPlayer().toFuture();
+        try {
+            awaitSend();
+            if (cancelCaller) selecting.cancel(false);
+            assertEquals(1, sendRelease.currentSubscriberCount());
+            assertEquals(GamePhase.DETERMINING_STARTING_PLAYER, states.findById(ROOM_ID).block(TIMEOUT).getPhase());
+            StepVerifier.create(selectSecondPlayer())
+                    .expectErrorSatisfies(error -> assertEquals(WebSocketErrorCode.TRY_AGAIN,
+                            assertInstanceOf(WebSocketBusinessException.class, error).getWebsocketErrorCode()))
+                    .verify(TIMEOUT);
+            verifyNoInteractions(scheduler, sender);
+            sendRelease.tryEmitEmpty();
+            if (!cancelCaller) selecting.get(TIMEOUT.toMillis(), java.util.concurrent.TimeUnit.MILLISECONDS);
+            assertStarted();
+            assertRepeatedSelectionRejected();
+            verify(scheduler).scheduleAutoPlay(eq(ROOM_ID), eq(1), eq(1), eq(Player.PLAYER_2),
+                    anyLong(), eq(GamePhase.IN_PROGRESS));
+        } finally {
+            sendRelease.tryEmitEmpty();
+        }
+    }
+
     @Test
     @DisplayName("첫 번째 선택은 안내만 한 번 보내고 두 번째 선택이 시작한다")
     void firstSelectionOnlyNotifiesOnce() {
@@ -251,6 +285,8 @@ class PreGameLifecycleBaselineTest {
         doReturn(Mono.error(failure)).when(preGame).distributeCards(ROOM_ID);
         StepVerifier.create(selectSecondPlayer()).expectErrorMatches(error -> error == failure).verify(TIMEOUT);
         assertNull(states.findById(ROOM_ID).block(TIMEOUT));
+        StepVerifier.create(selectSecondPlayer()).expectError(WebSocketBusinessException.class).verify(TIMEOUT);
+        verify(preGame).distributeCards(ROOM_ID);
         states.create(GameState.createEmptyRoom(ROOM_ID)).block(TIMEOUT);
         verifyNoInteractions(sender, scheduler);
     }
@@ -266,6 +302,8 @@ class PreGameLifecycleBaselineTest {
                 .expectError(TimeoutException.class).verify(TIMEOUT);
         assertEquals(0, sendRelease.currentSubscriberCount());
         assertNull(states.findById(ROOM_ID).block(TIMEOUT));
+        StepVerifier.create(selectSecondPlayer()).expectError(WebSocketBusinessException.class).verify(TIMEOUT);
+        verify(preGame).distributeCards(ROOM_ID);
         verifyNoInteractions(sender, scheduler);
     }
 
@@ -445,6 +483,15 @@ class PreGameLifecycleBaselineTest {
 
     private Mono<Void> selectSecondPlayer() {
         return flow.processLeaderSelection(initial, Player.PLAYER_2, 1);
+    }
+
+    private void assertRepeatedSelectionRejected() {
+        StepVerifier.create(selectSecondPlayer())
+                .expectErrorSatisfies(error -> assertEquals(WebSocketErrorCode.INVALID_GAME_PHASE,
+                        assertInstanceOf(WebSocketBusinessException.class, error).getWebsocketErrorCode()))
+                .verify(TIMEOUT);
+        verify(preGame).distributeCards(ROOM_ID);
+        verify(preGame).setFirstTurn(any());
     }
 
     private void pauseSend(boolean afterDeal) {
