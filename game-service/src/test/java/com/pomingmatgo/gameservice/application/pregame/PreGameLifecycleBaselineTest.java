@@ -7,6 +7,9 @@ import com.pomingmatgo.gameservice.domain.card.Card;
 import com.pomingmatgo.gameservice.domain.repository.AcquiredCardRepository;
 import com.pomingmatgo.gameservice.domain.score.PayoutCalculator;
 import com.pomingmatgo.gameservice.global.exception.BusinessException;
+import com.pomingmatgo.gameservice.global.exception.WebSocketBusinessException;
+import com.pomingmatgo.gameservice.infrastructure.lock.InMemoryGameLockAspect;
+import org.springframework.aop.aspectj.annotation.AspectJProxyFactory;
 import com.pomingmatgo.gameservice.infrastructure.lock.InMemoryRoomExecutionGate;
 import com.pomingmatgo.gameservice.infrastructure.lock.InMemoryRoomLockManager;
 import com.pomingmatgo.gameservice.infrastructure.messaging.GameMessageSender;
@@ -27,14 +30,14 @@ import reactor.test.StepVerifier;
 import java.time.Duration;
 import java.util.Comparator;
 import java.util.List;
+import java.util.concurrent.TimeoutException;
 import java.util.stream.Stream;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
 import static org.awaitility.Awaitility.await;
 
-// 송신 경계는 정상 보장, 저장 대기 경계는 실행 소유권 도입 전 결함 재현이다.
-@DisplayName("준비 흐름 송신 분리 및 저장 경합 기준선")
+@DisplayName("준비 흐름 실행 소유권과 송신 분리")
 class PreGameLifecycleBaselineTest {
     private static final long ROOM_ID = 940_045L;
     private static final Duration TIMEOUT = Duration.ofSeconds(3);
@@ -43,7 +46,7 @@ class PreGameLifecycleBaselineTest {
 
     private final RoomTimerLifecycle lifecycle = new RoomTimerLifecycle();
     private final InMemoryRoomExecutionGate gate = new InMemoryRoomExecutionGate();
-    private final InMemoryGameActionExecutor executor = new InMemoryGameActionExecutor(gate, event -> {});
+    private final InMemoryGameActionExecutor executor = new InMemoryGameActionExecutor(gate, this::onFailure);
     private final InMemoryGameStateRepository states = new InMemoryGameStateRepository(lifecycle, gate);
     private final InMemoryInstalledCardRepository cards = new InMemoryInstalledCardRepository();
     private final InMemoryLeadingPlayerRepository leaders = new InMemoryLeadingPlayerRepository();
@@ -57,13 +60,20 @@ class PreGameLifecycleBaselineTest {
     private final TurnScheduler scheduler = mock(TurnScheduler.class);
     private final TurnFlowService turns = new TurnFlowService(lifecycle, mock(GamePlayService.class), sender,
             mock(GameNotificationService.class), mock(PayoutCalculator.class));
-    private final PreGameFlowService flow = new PreGameFlowService(lifecycle, preGame, sender, turns, scheduler);
+    private PreGameFlowService flow;
     private final Sinks.Empty<Void> sendRelease = Sinks.empty();
     private final GameState initial = GameState.builder().roomId(ROOM_ID)
             .phase(GamePhase.DETERMINING_STARTING_PLAYER).build();
 
+    private void onFailure(Object event) {
+        cleanup.onGameActionFailed((com.pomingmatgo.gameservice.domain.event.GameActionFailedEvent) event);
+    }
+
     @BeforeEach
     void setUp() {
+        AspectJProxyFactory proxy = new AspectJProxyFactory(new PreGameStartService(states, preGame, turns, lifecycle, scheduler));
+        proxy.addAspect(new InMemoryGameLockAspect(executor));
+        flow = new PreGameFlowService(proxy.getProxy(), sender, turns);
         when(acquired.cleanup(ROOM_ID)).thenReturn(Mono.empty());
         states.create(initial).block(TIMEOUT);
         leaders.saveSelectedCard(List.of(Card.JAN_1, Card.FEB_1), ROOM_ID).block(TIMEOUT);
@@ -142,23 +152,156 @@ class PreGameLifecycleBaselineTest {
 
     @ParameterizedTest(name = "같은 ID 재생성={0}")
     @ValueSource(booleans = {false, true})
-    @DisplayName("미해결 재현: 분배 저장 대기 중 정리는 낡은 카드·상태 쓰기를 막지 못한다")
-    void delayedDealStillWritesAfterCleanup(boolean recreate) {
+    @DisplayName("분배 저장 대기 중 정리는 시작 완료를 기다리고 이후 재생성을 허용한다")
+    void cleanupWaitsForDelayedDeal(boolean recreate) {
         doReturn(sendRelease.asMono().then(Mono.defer(() -> preGame.distributeCards(ROOM_ID, DECK))))
                 .when(preGame).distributeCards(ROOM_ID);
         var verification = StepVerifier.create(selectSecondPlayer())
                 .then(this::awaitSend)
                 .then(() -> {
-                    cleanup.cleanupRoom(ROOM_ID).block(TIMEOUT);
-                    if (recreate) states.create(GameState.createEmptyRoom(ROOM_ID)).block(TIMEOUT);
+                    var cleaning = cleanup.cleanupRoom(ROOM_ID).toFuture();
+                    assertFalse(cleaning.isDone());
+                    assertEquals(GamePhase.DETERMINING_STARTING_PLAYER, states.findById(ROOM_ID).block(TIMEOUT).getPhase());
+                    StepVerifier.create(states.create(GameState.createEmptyRoom(ROOM_ID)))
+                            .expectError(BusinessException.class).verify(TIMEOUT);
                     sendRelease.tryEmitEmpty();
+                    await().atMost(TIMEOUT).until(cleaning::isDone);
+                    cleaning.join();
+                    if (recreate) states.create(GameState.createEmptyRoom(ROOM_ID)).block(TIMEOUT);
                 });
-        if (recreate) verification.expectComplete().verify(TIMEOUT);
-        else verification.expectError(BusinessException.class).verify(TIMEOUT);
-        assertDealt();
-        if (recreate) assertStarted();
+        verification.expectComplete().verify(TIMEOUT);
+        assertEquals(List.of(), cards.getPlayerCards(ROOM_ID, Player.PLAYER_1).block(TIMEOUT));
+        assertEquals(List.of(), cards.getAllRevealedCards(ROOM_ID).block(TIMEOUT));
+        if (recreate) assertEquals(GamePhase.NONE, states.findById(ROOM_ID).block(TIMEOUT).getPhase());
         else assertNull(states.findById(ROOM_ID).block(TIMEOUT));
-        verifyNoInteractions(scheduler);
+        verify(scheduler).scheduleAutoPlay(eq(ROOM_ID), eq(1), eq(1), eq(Player.PLAYER_2),
+                anyLong(), eq(GamePhase.IN_PROGRESS));
+    }
+
+    @Test
+    @DisplayName("분배 저장 중 호출자 취소 뒤에도 첫 턴과 타이머까지 완료한다")
+    void cancellationDuringDealPreservesStart() {
+        doReturn(sendRelease.asMono().then(Mono.defer(() -> preGame.distributeCards(ROOM_ID, DECK))))
+                .when(preGame).distributeCards(ROOM_ID);
+        StepVerifier.create(selectSecondPlayer()).then(this::awaitSend).thenCancel().verify(TIMEOUT);
+        assertEquals(1, sendRelease.currentSubscriberCount());
+        sendRelease.tryEmitEmpty();
+        assertStarted();
+        assertDealt();
+        verify(scheduler).scheduleAutoPlay(eq(ROOM_ID), eq(1), eq(1), eq(Player.PLAYER_2),
+                anyLong(), eq(GamePhase.IN_PROGRESS));
+        verifyNoInteractions(sender);
+    }
+
+    @Test
+    @DisplayName("락 안에서 이미 시작한 phase를 재검증하고 중복 분배하지 않는다")
+    void staleStateCannotStartAgain() {
+        selectSecondPlayer().block(TIMEOUT);
+        StepVerifier.create(selectSecondPlayer()).expectError(WebSocketBusinessException.class).verify(TIMEOUT);
+        verify(preGame, times(1)).distributeCards(ROOM_ID);
+        assertStarted();
+    }
+
+    @Test
+    @DisplayName("첫 번째 선택은 안내만 한 번 보내고 두 번째 선택이 시작한다")
+    void firstSelectionOnlyNotifiesOnce() {
+        leaders.cleanup(ROOM_ID).block(TIMEOUT);
+        leaders.saveSelectedCard(List.of(Card.JAN_1, Card.FEB_1), ROOM_ID).block(TIMEOUT);
+        flow.processLeaderSelection(initial, Player.PLAYER_1, 0).block(TIMEOUT);
+        verify(sender, times(1)).sendLeaderSelectionMessage(ROOM_ID, Player.PLAYER_1, 0);
+        verify(preGame, never()).distributeCards(ROOM_ID);
+        selectSecondPlayer().block(TIMEOUT);
+        assertStarted();
+    }
+
+    @Test
+    @DisplayName("트리거 저장 대기 중 취소도 트리거와 첫 턴 사이를 끊지 않는다")
+    void cancellationDuringTriggerClaimPreservesStart() {
+        doReturn(sendRelease.asMono().thenReturn(true)).when(preGame).checkAllSelected(ROOM_ID);
+        StepVerifier.create(selectSecondPlayer()).then(this::awaitSend).thenCancel().verify(TIMEOUT);
+        assertEquals(1, sendRelease.currentSubscriberCount());
+        sendRelease.tryEmitEmpty();
+        assertStarted();
+        assertDealt();
+        verifyNoInteractions(sender);
+    }
+
+    @Test
+    @DisplayName("호출자 취소 후에도 정리는 진행 중 분배가 끝날 때까지 기다린다")
+    void cleanupWaitsAfterCallerCancellation() {
+        doReturn(sendRelease.asMono().then(Mono.defer(() -> preGame.distributeCards(ROOM_ID, DECK))))
+                .when(preGame).distributeCards(ROOM_ID);
+        StepVerifier.create(selectSecondPlayer()).then(this::awaitSend).thenCancel().verify(TIMEOUT);
+        var cleaning = cleanup.cleanupRoom(ROOM_ID).toFuture();
+        assertFalse(cleaning.isDone());
+        StepVerifier.create(selectSecondPlayer()).expectError(WebSocketBusinessException.class).verify(TIMEOUT);
+        sendRelease.tryEmitEmpty();
+        await().atMost(TIMEOUT).until(cleaning::isDone);
+        cleaning.join();
+        assertNull(states.findById(ROOM_ID).block(TIMEOUT));
+        assertEquals(List.of(), cards.getPlayerCards(ROOM_ID, Player.PLAYER_1).block(TIMEOUT));
+        verifyNoInteractions(sender);
+    }
+
+    @Test
+    @DisplayName("분배 오류는 원래 오류를 보존하고 전체 정리를 요청한다")
+    void dealFailureCleansRoom() {
+        RuntimeException failure = new IllegalStateException("deal failed");
+        doReturn(Mono.error(failure)).when(preGame).distributeCards(ROOM_ID);
+        StepVerifier.create(selectSecondPlayer()).expectErrorMatches(error -> error == failure).verify(TIMEOUT);
+        assertNull(states.findById(ROOM_ID).block(TIMEOUT));
+        states.create(GameState.createEmptyRoom(ROOM_ID)).block(TIMEOUT);
+        verifyNoInteractions(sender, scheduler);
+    }
+
+    @Test
+    @DisplayName("끝나지 않는 분배는 30초 뒤 취소하고 방을 정리한다")
+    void dealTimeoutCleansRoom() {
+        doReturn(sendRelease.asMono().then(Mono.defer(() -> preGame.distributeCards(ROOM_ID, DECK))))
+                .when(preGame).distributeCards(ROOM_ID);
+        StepVerifier.withVirtualTime(this::selectSecondPlayer)
+                .then(this::awaitSend)
+                .thenAwait(Duration.ofSeconds(30))
+                .expectError(TimeoutException.class).verify(TIMEOUT);
+        assertEquals(0, sendRelease.currentSubscriberCount());
+        assertNull(states.findById(ROOM_ID).block(TIMEOUT));
+        verifyNoInteractions(sender, scheduler);
+    }
+
+    @Test
+    @DisplayName("수락 전 잘못된 선택은 방을 정리하지 않는다")
+    void invalidSelectionDoesNotCleanRoom() {
+        StepVerifier.create(flow.processLeaderSelection(initial, Player.PLAYER_2, 0))
+                .expectError(WebSocketBusinessException.class).verify(TIMEOUT);
+        assertEquals(GamePhase.DETERMINING_STARTING_PLAYER, states.findById(ROOM_ID).block(TIMEOUT).getPhase());
+        selectSecondPlayer().block(TIMEOUT);
+        assertStarted();
+    }
+
+    @Test
+    @DisplayName("수락 전 취소는 선택 대기를 회수하고 시작 트리거를 소비하지 않는다")
+    void cancellationBeforeAcceptanceDoesNotClaimTrigger() {
+        doReturn(sendRelease.asMono()).when(preGame).selectLeaderCard(ROOM_ID, Player.PLAYER_2, 1);
+        StepVerifier.create(selectSecondPlayer()).then(this::awaitSend).thenCancel().verify(TIMEOUT);
+        assertEquals(0, sendRelease.currentSubscriberCount());
+        verify(preGame, never()).checkAllSelected(ROOM_ID);
+        doCallRealMethod().when(preGame).selectLeaderCard(ROOM_ID, Player.PLAYER_2, 1);
+        selectSecondPlayer().block(TIMEOUT);
+        assertStarted();
+    }
+
+    @Test
+    @DisplayName("락 경쟁 요청은 선택을 쓰기 전에 거부되고 해제 뒤 재시도할 수 있다")
+    void contentionRejectsBeforeSelection() {
+        var entry = gate.acquire(ROOM_ID);
+        try {
+            StepVerifier.create(selectSecondPlayer()).expectError(WebSocketBusinessException.class).verify(TIMEOUT);
+            verify(preGame, never()).selectLeaderCard(ROOM_ID, Player.PLAYER_2, 1);
+        } finally {
+            gate.release(entry);
+        }
+        selectSecondPlayer().block(TIMEOUT);
+        assertStarted();
     }
 
     @Test
