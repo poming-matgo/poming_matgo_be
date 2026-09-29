@@ -1,9 +1,7 @@
 package com.pomingmatgo.gameservice.application.game;
 
-import com.pomingmatgo.gameservice.application.pregame.PreGameFlowService;
 import com.pomingmatgo.gameservice.domain.rule.ProcessCardResult;
 import com.pomingmatgo.gameservice.domain.rule.SpecialEvent;
-import com.pomingmatgo.gameservice.infrastructure.lock.GameLock;
 
 import com.pomingmatgo.gameservice.infrastructure.messaging.GameMessageSender;
 import com.pomingmatgo.gameservice.domain.GameState;
@@ -92,12 +90,6 @@ public class TurnFlowService {
         });
     }
 
-    /** 첫 턴 시작(PreGameFlowService)이 이후 턴 전환과 같은 경로를 타게 하는 공개 진입점 */
-    public Mono<Void> startTurn(GameState state, TurnScheduler scheduler) {
-        return prepareFirstTurn(state, scheduler)
-                .flatMap(prepared -> gameMessageSender.sendTurnInfo(prepared, TURN_TIMEOUT_MILLIS));
-    }
-
     /** 준비 흐름의 안내가 시작되기 전에 첫 턴 타이머를 등록한다. */
     public Mono<GameState> prepareFirstTurn(GameState state, TurnScheduler scheduler) {
         return Mono.fromSupplier(() -> {
@@ -139,12 +131,6 @@ public class TurnFlowService {
     /** 세번뻑 즉시 승리 > 점수 달성자(최종 라운드 자동 스톱) > 마지막 턴 미달성 무승부 */
     private Player endWinner(GameState endedState, Player actor) {
         return endedState.hasPpeokWin(actor) || endedState.canGoStop(actor) ? actor : Player.PLAYER_NOTHING;
-    }
-
-    /** 첫 턴 시작 전 종료용 재시작·안내 경로. 액션 END는 완료 콜백에서 재시작을 마친다. */
-    public Mono<GameState> processGameOver(GameState gameState, Player winner) {
-        return completeGameOver(gameState)
-                .delayUntil(finalState -> announceGameOver(finalState, winner));
     }
 
     public Mono<GameState> completeGameOver(GameState gameState) {

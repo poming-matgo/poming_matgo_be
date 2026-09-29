@@ -261,18 +261,6 @@ class TurnFlowSendLifecycleTest {
                 .expectComplete().verify(TIMEOUT);
     }
 
-    @Test
-    @DisplayName("첫 턴 안내가 취소돼도 첫 타이머는 한 번 등록된다")
-    void firstTurnCancellationPreservesTimer() {
-        GameState state = gameStateRepository.findById(ROOM_ID).block(TIMEOUT);
-        StepVerifier.create(turnFlowService.startTurn(state, scheduler))
-                .then(() -> assertEquals(1, slow.turnStarted.get()))
-                .thenCancel().verify(TIMEOUT);
-        assertEquals(1, slow.turnCancelled.get());
-        verify(scheduler).scheduleAutoPlay(eq(ROOM_ID), eq(1), eq(1),
-                eq(Player.PLAYER_1), anyLong(), eq(GamePhase.IN_PROGRESS));
-    }
-
     @ParameterizedTest(name = "고스톱 대기={0}")
     @ValueSource(booleans = {false, true})
     @DisplayName("제출 안내부터 송신이 막혀도 바닥 선택·고스톱 대기 타이머는 등록된다")
@@ -297,20 +285,6 @@ class TurnFlowSendLifecycleTest {
         assertEquals(1, slow.turnCancelled.get());
         verify(scheduler).cancelAutoPlay(ROOM_ID);
         verifyNoMoreInteractions(scheduler);
-    }
-
-    @Test
-    @DisplayName("첫 턴 안내도 방 정리 후 완료되면 타이머를 등록하지 않는다")
-    void firstTurnSendCannotRegisterAfterCleanup() {
-        GameState state = gameStateRepository.findById(ROOM_ID).block(TIMEOUT);
-        StepVerifier.create(turnFlowService.startTurn(state, autoPlayScheduler))
-                .then(() -> {
-                    assertEquals(1, slow.turnStarted.get());
-                    cleanupRoom();
-                    assertEquals(Sinks.EmitResult.OK, slow.completion.tryEmitEmpty());
-                    assertFalse(scheduledTimers().containsKey(ROOM_ID));
-                })
-                .expectComplete().verify(TIMEOUT);
     }
 
     private void cleanupRoom() {
