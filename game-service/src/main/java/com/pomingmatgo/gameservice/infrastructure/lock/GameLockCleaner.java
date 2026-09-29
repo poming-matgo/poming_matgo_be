@@ -11,7 +11,7 @@ public interface GameLockCleaner {
         return Mono.defer(operation);
     }
 
-    // in-memory는 데이터 삭제부터 재생성까지 같은 실행을 소유한다. Redis는 기존 취소 의미를 유지한다.
+    // in-memory는 이미 수락한 같은 방의 실행 안에서만 재시작한다. Redis는 기존 취소 의미를 유지한다.
     default Mono<Void> withRestart(long roomId, Supplier<Mono<Void>> operation) {
         return Mono.defer(operation);
     }

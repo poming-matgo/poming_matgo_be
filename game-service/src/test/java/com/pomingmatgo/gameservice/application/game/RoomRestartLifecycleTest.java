@@ -68,7 +68,7 @@ class RoomRestartLifecycleTest {
     @ValueSource(booleans = {false, true})
     void acceptedRestartCompletesAfterCallerCancellation(boolean duringCreate) {
         pauseRestart(duringCreate);
-        StepVerifier.create(cleanup.restartRoom(ROOM_ID))
+        StepVerifier.create(restartInsideAcceptedAction())
                 .then(this::assertPausedAndExclusive)
                 .thenCancel().verify(TIMEOUT);
         assertEquals(1, pause.currentSubscriberCount());
@@ -82,7 +82,7 @@ class RoomRestartLifecycleTest {
     @Test
     void normalRestartCompletesOnlyAfterRecreation() {
         pauseRestart(false);
-        StepVerifier.create(cleanup.restartRoom(ROOM_ID))
+        StepVerifier.create(restartInsideAcceptedAction())
                 .then(this::assertPausedAndExclusive)
                 .then(() -> pause.tryEmitEmpty())
                 .verifyComplete();
@@ -94,7 +94,7 @@ class RoomRestartLifecycleTest {
     void cleanupAlreadyInProgressRejectsRestartBeforeDeletion() {
         var deletion = executor.withCleanup(ROOM_ID, pause::asMono).subscribe();
         try {
-            StepVerifier.create(cleanup.restartRoom(ROOM_ID))
+            StepVerifier.create(restartInsideAcceptedAction())
                     .expectError(WebSocketBusinessException.class).verify(TIMEOUT);
             verify(cards, never()).cleanup(ROOM_ID);
             verify(state, never()).create(any(GameState.class));
@@ -108,7 +108,7 @@ class RoomRestartLifecycleTest {
     @Test
     void fullCleanupWaitsForRestartAndDoesNotLeaveRecreatedRoom() {
         pauseRestart(true);
-        var caller = cleanup.restartRoom(ROOM_ID).subscribe();
+        var caller = restartInsideAcceptedAction().subscribe();
         caller.dispose();
         StepVerifier.create(cleanup.cleanupRoom(ROOM_ID))
                 .then(() -> {
@@ -128,7 +128,7 @@ class RoomRestartLifecycleTest {
     @ValueSource(booleans = {false, true})
     void restartFailureIsObservedAndBlocksRoomUntilCleanup(boolean duringCreate) {
         pauseRestart(duringCreate);
-        StepVerifier.create(cleanup.restartRoom(ROOM_ID))
+        StepVerifier.create(restartInsideAcceptedAction())
                 .then(() -> pause.tryEmitError(new IllegalStateException("restart failed")))
                 .expectErrorMessage("restart failed").verify(TIMEOUT);
         assertNoOwnedExecutions();
@@ -142,35 +142,40 @@ class RoomRestartLifecycleTest {
     @Test
     void shutdownCancelsOwnedRestartAndRejectsLaterRestart() {
         pauseRestart(false);
-        StepVerifier.create(cleanup.restartRoom(ROOM_ID))
+        StepVerifier.create(restartInsideAcceptedAction())
                 .then(executor::shutdown)
                 .expectError(CancellationException.class).verify(TIMEOUT);
         assertEquals(0, pause.currentSubscriberCount());
         pause.tryEmitEmpty();
         assertNull(state.findById(ROOM_ID).block(TIMEOUT));
         verify(state, never()).create(any(GameState.class));
-        StepVerifier.create(cleanup.restartRoom(ROOM_ID))
+        StepVerifier.create(restartInsideAcceptedAction())
                 .expectErrorMessage("Game action execution stopped").verify(TIMEOUT);
     }
 
-    @ParameterizedTest(name = "서버 종료={0}")
-    @ValueSource(booleans = {false, true})
-    void restartInsideAcceptedActionSharesFailureAndShutdownOwnership(boolean shutdown) {
-        pauseRestart(false);
-        Mono<Object> action = executor.execute(ROOM_ID, () -> GameActionAcceptance.beforeMutation(() ->
-                cleanup.restartRoom(ROOM_ID).thenReturn((Object) Boolean.TRUE)));
-        StepVerifier.create(action)
-                .then(() -> {
-                    assertPausedAndExclusive();
-                    if (shutdown) executor.shutdown();
-                    else pause.tryEmitError(new IllegalStateException("nested restart failed"));
-                })
-                .expectError(shutdown ? CancellationException.class : IllegalStateException.class)
-                .verify(TIMEOUT);
-        assertEquals(0, pause.currentSubscriberCount());
+    @Test
+    void restartWithoutActionContextIsRejectedBeforeDeletion() {
+        StepVerifier.create(cleanup.restartRoom(ROOM_ID))
+                .expectError(IllegalStateException.class).verify(TIMEOUT);
+        verify(cards, never()).cleanup(ROOM_ID);
         verify(state, never()).create(any(GameState.class));
+        assertNotNull(state.findById(ROOM_ID).block(TIMEOUT));
         assertNoOwnedExecutions();
-        if (!shutdown) assertThrows(WebSocketBusinessException.class, () -> gate.acquire(ROOM_ID));
+        var nextAction = gate.acquire(ROOM_ID);
+        gate.release(nextAction);
+    }
+
+    @Test
+    void restartBeforeActionAcceptanceIsRejectedBeforeDeletion() {
+        StepVerifier.create(executor.execute(ROOM_ID, () ->
+                        cleanup.restartRoom(ROOM_ID).thenReturn((Object) Boolean.TRUE)))
+                .expectError(IllegalStateException.class).verify(TIMEOUT);
+        verify(cards, never()).cleanup(ROOM_ID);
+        verify(state, never()).create(any(GameState.class));
+        assertNotNull(state.findById(ROOM_ID).block(TIMEOUT));
+        assertNoOwnedExecutions();
+        var nextAction = gate.acquire(ROOM_ID);
+        gate.release(nextAction);
     }
 
     @Test
@@ -184,6 +189,11 @@ class RoomRestartLifecycleTest {
                 .expectError(IllegalStateException.class).verify(TIMEOUT);
         verify(cards, never()).cleanup(ROOM_ID);
         assertEquals(List.of(Card.JAN_3), cards.getPlayerCards(ROOM_ID, Player.PLAYER_1).block(TIMEOUT));
+    }
+
+    private Mono<Void> restartInsideAcceptedAction() {
+        return executor.execute(ROOM_ID, () -> GameActionAcceptance.beforeMutation(() ->
+                cleanup.restartRoom(ROOM_ID).thenReturn((Object) Boolean.TRUE))).then();
     }
 
     @SuppressWarnings("unchecked")
