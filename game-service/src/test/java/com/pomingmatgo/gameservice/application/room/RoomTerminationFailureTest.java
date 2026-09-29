@@ -223,14 +223,6 @@ class RoomTerminationFailureTest {
         verify(state).cleanup(ROOM_ID);
     }
 
-    @Test
-    void dataOnlyCleanupPreservesSessionsForGameOverNotification() {
-        StepVerifier.create(cleanup.cleanupRoomData(ROOM_ID)).expectComplete().verify(TIMEOUT);
-        verify(sessions, never()).removeRoom(ROOM_ID);
-        assertSame(first, sessions.getSession(ROOM_ID, 1));
-        assertSame(second, sessions.getSession(ROOM_ID, 2));
-    }
-
     private Mono<Void> terminate(boolean disconnect) {
         if (disconnect) {
             return new GameConnectionService(game, sessions, mock(MessageSender.class), cleanup,

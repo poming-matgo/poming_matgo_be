@@ -126,11 +126,6 @@ public class RoomCleanupService {
         }
     }
 
-    /** 테스트 초기화·정리 등에 쓰는 독립 데이터 정리이며, 세션은 유지하고 호출자 취소를 따른다. */
-    public Mono<Void> cleanupRoomData(long roomId) {
-        return Mono.defer(() -> gameLockCleaner.withCleanup(roomId, () -> deleteRoomData(roomId)));
-    }
-
     public Mono<Void> restartRoom(long roomId) {
         // withCleanup은 현재 실행의 해제를 기다리므로 재시작 소유 구간에서 중첩 호출하지 않는다.
         return Mono.defer(() -> gameLockCleaner.withRestart(roomId, () -> deleteRoomData(roomId)
@@ -139,7 +134,7 @@ public class RoomCleanupService {
     }
 
     private Mono<Void> deleteRoomData(long roomId) {
-        // 전체·독립 정리 또는 재시작의 보호 구간 안에서만 호출한다.
+        // 전체 정리 또는 재시작의 보호 구간 안에서만 호출한다.
         // 개별 오류가 다른 정리를 취소하지 않게 하고, 동기 예외도 구독 시 오류로 합산한다.
         return Mono.whenDelayError(
                 // 데이터 삭제 전에 신규 타이머를 차단한다. 동기 리스너로 등록과 종료를 직렬화한다.

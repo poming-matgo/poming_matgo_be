@@ -82,8 +82,7 @@ class TurnFlowSendLifecycleTest {
     @AfterEach
     void cleanup() {
         for (long roomId : List.of(ROOM_ID, OTHER_ROOM_ID)) {
-            roomCleanupService.cleanupRoomData(roomId).block(TIMEOUT);
-            sessionManager.removeRoom(roomId).block(TIMEOUT);
+            roomCleanupService.cleanupRoom(roomId).block(TIMEOUT);
         }
     }
 
@@ -164,8 +163,7 @@ class TurnFlowSendLifecycleTest {
         StepVerifier.create(submit(ROOM_ID))
                 .then(() -> {
                     assertWaitingForSend();
-                    roomCleanupService.cleanupRoomData(ROOM_ID).block(TIMEOUT);
-                    sessionManager.removeRoom(ROOM_ID).block(TIMEOUT);
+                    roomCleanupService.cleanupRoom(ROOM_ID).block(TIMEOUT);
                     assertNull(gameStateRepository.findById(ROOM_ID).block(TIMEOUT));
                     assertTrue(sessionManager.getAllUser(ROOM_ID).isEmpty());
                     assertNull(sessionManager.getPlayerContext(slow.session).block(TIMEOUT));
@@ -288,8 +286,7 @@ class TurnFlowSendLifecycleTest {
     }
 
     private void cleanupRoom() {
-        roomCleanupService.cleanupRoomData(ROOM_ID).block(TIMEOUT);
-        sessionManager.removeRoom(ROOM_ID).block(TIMEOUT);
+        roomCleanupService.cleanupRoom(ROOM_ID).block(TIMEOUT);
     }
 
     @ParameterizedTest(name = "자동플레이={0}")
@@ -333,6 +330,8 @@ class TurnFlowSendLifecycleTest {
                 .then(() -> {
                     assertEquals(1, slow.turnStarted.get());
                     assertEquals(GamePhase.NONE, gameStateRepository.findById(ROOM_ID).block(TIMEOUT).getPhase());
+                    assertSame(slow.session, sessionManager.getSession(ROOM_ID, 1));
+                    assertSame(opponent.session, sessionManager.getSession(ROOM_ID, 2));
                     recreated[0] = GameState.createEmptyRoom(ROOM_ID).toBuilder().round(7).build();
                     gameStateRepository.save(recreated[0]).block(TIMEOUT);
                     installedCardRepository.savePlayerCards(List.of(Card.DEC_1), ROOM_ID, Player.PLAYER_1).block(TIMEOUT);

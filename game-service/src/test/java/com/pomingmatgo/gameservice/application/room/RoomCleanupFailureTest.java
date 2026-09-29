@@ -63,7 +63,7 @@ class RoomCleanupFailureTest {
     @Test
     void successfulCleanupIsLazyAndCompletesAllResources() {
         clearInvocations(state, installed, acquired, leader, gameLock, events);
-        Mono<Void> result = cleanup.cleanupRoomData(ROOM_ID);
+        Mono<Void> result = cleanup.cleanupRoom(ROOM_ID);
         verifyNoInteractions(state, installed, acquired, leader, gameLock, events);
         StepVerifier.create(result).expectComplete().verify(TIMEOUT);
         assertEquals(List.of("event", "state", "installed", "acquired", "leader", "gameLock"), completed);
@@ -73,7 +73,7 @@ class RoomCleanupFailureTest {
     void firstFailureStillCleansOtherResourcesAndPublishesEvent() {
         RuntimeException failure = new IllegalStateException("state cleanup failed");
         when(state.cleanup(ROOM_ID)).thenReturn(Mono.error(failure));
-        StepVerifier.create(cleanup.cleanupRoomData(ROOM_ID))
+        StepVerifier.create(cleanup.cleanupRoom(ROOM_ID))
                 .expectErrorSatisfies(error -> assertSame(failure, error)).verify(TIMEOUT);
         assertEquals(List.of("event", "installed", "acquired", "leader", "gameLock"), completed);
     }
@@ -82,7 +82,7 @@ class RoomCleanupFailureTest {
     void synchronousFailureDoesNotPreventOtherCleanup() {
         RuntimeException failure = new IllegalStateException("cleanup construction failed");
         when(state.cleanup(ROOM_ID)).thenThrow(failure);
-        StepVerifier.create(cleanup.cleanupRoomData(ROOM_ID))
+        StepVerifier.create(cleanup.cleanupRoom(ROOM_ID))
                 .expectErrorSatisfies(error -> assertSame(failure, error)).verify(TIMEOUT);
         assertEquals(List.of("event", "installed", "acquired", "leader", "gameLock"), completed);
     }
@@ -93,7 +93,7 @@ class RoomCleanupFailureTest {
         RuntimeException second = new IllegalStateException("lock cleanup failed");
         when(state.cleanup(ROOM_ID)).thenReturn(Mono.error(first));
         when(gameLock.cleanup(ROOM_ID)).thenReturn(Mono.error(second));
-        StepVerifier.create(cleanup.cleanupRoomData(ROOM_ID))
+        StepVerifier.create(cleanup.cleanupRoom(ROOM_ID))
                 .expectErrorSatisfies(error -> assertEquals(
                         List.of(first, second), Exceptions.unwrapMultipleExcludingTracebacks(error)))
                 .verify(TIMEOUT);
@@ -106,7 +106,7 @@ class RoomCleanupFailureTest {
         RuntimeException failure = new IllegalStateException("state cleanup failed");
         when(state.cleanup(ROOM_ID)).thenReturn(Mono.error(failure));
         when(installed.cleanup(ROOM_ID)).thenReturn(pending.asMono().then(done("installed")));
-        StepVerifier.create(cleanup.cleanupRoomData(ROOM_ID))
+        StepVerifier.create(cleanup.cleanupRoom(ROOM_ID))
                 .then(() -> {
                     assertEquals(1, pending.currentSubscriberCount());
                     assertTrue(completed.contains("event"));
@@ -124,7 +124,7 @@ class RoomCleanupFailureTest {
         RuntimeException failure = new IllegalStateException("listener failed");
         when(state.cleanup(ROOM_ID)).thenReturn(pending.asMono().then(done("state")));
         doThrow(failure).when(events).publishEvent(new RoomCleanedUpEvent(ROOM_ID));
-        StepVerifier.create(cleanup.cleanupRoomData(ROOM_ID))
+        StepVerifier.create(cleanup.cleanupRoom(ROOM_ID))
                 .then(() -> {
                     assertEquals(1, pending.currentSubscriberCount());
                     assertEquals(Sinks.EmitResult.OK, pending.tryEmitEmpty());

@@ -63,8 +63,7 @@ class DisconnectReconnectTest {
 
     @AfterEach
     void cleanup() {
-        roomCleanupService.cleanupRoomData(roomId).block();
-        sessionManager.removeRoom(roomId).block();
+        roomCleanupService.cleanupRoom(roomId).block();
     }
 
     /** 인바운드/아웃바운드를 조작·관측할 수 있는 WebSocketSession 목 */

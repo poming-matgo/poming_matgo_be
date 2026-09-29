@@ -89,7 +89,7 @@ class GameActionCancellationTest {
     @AfterEach
     void cleanup() {
         gate.tryEmitEmpty();
-        roomCleanupService.cleanupRoomData(ROOM_ID).block(TIMEOUT);
+        roomCleanupService.cleanupRoom(ROOM_ID).block(TIMEOUT);
     }
 
     @ParameterizedTest(name = "덱 제거 후 대기={0}")

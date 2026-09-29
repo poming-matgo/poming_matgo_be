@@ -15,8 +15,7 @@ import com.pomingmatgo.gameservice.global.exception.WebSocketBusinessException;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
-import org.junit.jupiter.params.ParameterizedTest;
-import org.junit.jupiter.params.provider.ValueSource;
+import org.junit.jupiter.api.Test;
 import org.springframework.aop.support.AopUtils;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -74,15 +73,14 @@ class GameActionCleanupRaceTest {
         roomCleanupService.cleanupRoom(ROOM_ID).block(TIMEOUT);
     }
 
-    @ParameterizedTest(name = "전체 정리={0}")
-    @ValueSource(booleans = {false, true})
+    @Test
     @DisplayName("정리는 진행 중 액션 완료를 기다린 뒤 상태와 카드를 삭제한다")
-    void cleanupWaitsForActionAndLeavesNoCards(boolean fullCleanup) {
+    void cleanupWaitsForActionAndLeavesNoCards() {
         Sinks.Empty<Void> cleaned = Sinks.empty();
         StepVerifier.create(submit())
                 .then(() -> {
                     assertPausedAndLocked();
-                    subscriptions.add(cleanup(fullCleanup).subscribe(ignored -> {}, cleaned::tryEmitError, cleaned::tryEmitEmpty));
+                    subscriptions.add(roomCleanupService.cleanupRoom(ROOM_ID).subscribe(ignored -> {}, cleaned::tryEmitError, cleaned::tryEmitEmpty));
                     assertNotNull(gameStateRepository.findById(ROOM_ID).block(TIMEOUT));
                     assertEquals(List.of(Card.FEB_3), installedCardRepository
                             .getPlayerCards(ROOM_ID, Player.PLAYER_2).block(TIMEOUT));
@@ -98,15 +96,14 @@ class GameActionCleanupRaceTest {
         assertEquals(1, succeeded.get());
     }
 
-    @ParameterizedTest(name = "전체 정리={0}")
-    @ValueSource(booleans = {false, true})
+    @Test
     @DisplayName("같은 ID 재생성은 정리 완료 후 가능하며 이전 액션의 쓰기가 남지 않는다")
-    void recreationWaitsForCleanupAndKeepsNewState(boolean fullCleanup) {
+    void recreationWaitsForCleanupAndKeepsNewState() {
         Sinks.Empty<Void> cleaned = Sinks.empty();
         StepVerifier.create(submit())
                 .then(() -> {
                     assertPausedAndLocked();
-                    subscriptions.add(cleanup(fullCleanup).subscribe(ignored -> {}, cleaned::tryEmitError, cleaned::tryEmitEmpty));
+                    subscriptions.add(roomCleanupService.cleanupRoom(ROOM_ID).subscribe(ignored -> {}, cleaned::tryEmitError, cleaned::tryEmitEmpty));
                     StepVerifier.create(gameStateRepository.create(state(7, GamePhase.AWAITING_GO_STOP_CHOICE)))
                             .expectErrorSatisfies(error -> assertEquals(ErrorCode.ALREADY_EXISTED_ROOM,
                                     assertInstanceOf(BusinessException.class, error).getErrorCode()))
@@ -133,10 +130,9 @@ class GameActionCleanupRaceTest {
         assertEquals(1, succeeded.get());
     }
 
-    @ParameterizedTest(name = "전체 정리={0}")
-    @ValueSource(booleans = {false, true})
+    @Test
     @DisplayName("대조군: 액션 완료 후 정리하면 상태와 카드가 남지 않는다")
-    void cleanupAfterActionCompletionLeavesNoCards(boolean fullCleanup) {
+    void cleanupAfterActionCompletionLeavesNoCards() {
         StepVerifier.create(submit())
                 .then(() -> {
                     assertPausedAndLocked();
@@ -146,14 +142,13 @@ class GameActionCleanupRaceTest {
                 .expectComplete().verify(TIMEOUT);
         assertEquals(1, succeeded.get());
         assertEquals(List.of(Card.JAN_3, Card.MAR_1), floor());
-        cleanup(fullCleanup).block(TIMEOUT);
+        roomCleanupService.cleanupRoom(ROOM_ID).block(TIMEOUT);
         assertRoomAbsent();
     }
 
-    @ParameterizedTest(name = "전체 정리={0}")
-    @ValueSource(booleans = {false, true})
+    @Test
     @DisplayName("상태 삭제 뒤 카드 정리가 대기 중이어도 신규 액션과 방 재생성은 거부한다")
-    void deletedStateDoesNotAllowRecreationBeforeRemainingCleanup(boolean fullCleanup) {
+    void deletedStateDoesNotAllowRecreationBeforeRemainingCleanup() {
         Sinks.Empty<Void> deleting = Sinks.empty();
         doAnswer(invocation -> {
             Mono<Void> deletion = (Mono<Void>) invocation.callRealMethod();
@@ -161,7 +156,7 @@ class GameActionCleanupRaceTest {
         }).when(installedCardRepository).cleanup(ROOM_ID);
 
         try {
-            StepVerifier.create(cleanup(fullCleanup))
+            StepVerifier.create(roomCleanupService.cleanupRoom(ROOM_ID))
                     .then(() -> {
                         assertEquals(1, deleting.currentSubscriberCount());
                         assertNull(gameStateRepository.findById(ROOM_ID).block(TIMEOUT));
@@ -202,10 +197,6 @@ class GameActionCleanupRaceTest {
     private Mono<TurnExecutionResult> submit() {
         return gamePlayService.executeNormalSubmit(ROOM_ID, Player.PLAYER_1, 0,
                 state -> Mono.fromRunnable(succeeded::incrementAndGet));
-    }
-
-    private Mono<Void> cleanup(boolean fullCleanup) {
-        return fullCleanup ? roomCleanupService.cleanupRoom(ROOM_ID) : roomCleanupService.cleanupRoomData(ROOM_ID);
     }
 
     private void assertPausedAndLocked() {

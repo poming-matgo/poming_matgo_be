@@ -65,7 +65,7 @@ class LastTurnGameOverTest {
 
     @AfterEach
     void cleanup() {
-        roomCleanupService.cleanupRoomData(roomId).block();
+        roomCleanupService.cleanupRoom(roomId).block();
     }
 
     @Test

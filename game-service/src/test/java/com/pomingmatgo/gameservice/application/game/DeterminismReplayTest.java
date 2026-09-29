@@ -56,8 +56,8 @@ class DeterminismReplayTest {
 
     @AfterEach
     void cleanup() {
-        roomCleanupService.cleanupRoomData(ROOM_LIVE).block();
-        roomCleanupService.cleanupRoomData(ROOM_REPLAY).block();
+        roomCleanupService.cleanupRoom(ROOM_LIVE).block();
+        roomCleanupService.cleanupRoom(ROOM_REPLAY).block();
     }
 
     @Test
