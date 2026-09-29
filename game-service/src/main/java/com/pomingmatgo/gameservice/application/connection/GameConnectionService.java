@@ -60,8 +60,14 @@ public class GameConnectionService {
                 .then(reconnectService.buildSnapshot(roomId, player))
                 // 조회 실패 뒤 CONNECT가 ALREADY_JOIN으로 막히지 않도록 기존 identity·방 보존 정책으로 해제한다.
                 .onErrorResume(error -> disconnect(session).then(Mono.error(error)))
-                .flatMap(snapshot -> messageSender.sendMessageToSession(
-                        session, WebSocketResDto.of(player, ResponseEvent.RECONNECT_STATE, "재접속 상태 동기화", snapshot)));
+                .flatMap(snapshot -> {
+                    // 조회 락 해제 중 정리되거나 교체된 연결에는 스냅샷 송신을 시작하지 않는다.
+                    if (sessionManager.getSession(roomId, player.getNumber()) != session) {
+                        return Mono.empty();
+                    }
+                    return messageSender.sendMessageToSession(
+                            session, WebSocketResDto.of(player, ResponseEvent.RECONNECT_STATE, "재접속 상태 동기화", snapshot));
+                });
     }
 
     public Mono<Void> disconnect(WebSocketSession session) {

@@ -324,8 +324,45 @@ class ReconnectSnapshotBaselineTest {
             assertNull(states.findById(ROOM_ID).block(TIMEOUT));
             assertTrue(sessions.getAllUser(ROOM_ID).isEmpty());
             assertFalse(sessions.getPlayerContext(reconnecting.session()).hasElement().block(TIMEOUT));
+            assertEquals(0, reconnecting.count("RECONNECT_STATE"), "정리된 방의 스냅샷은 송신하지 않는다");
         } finally {
             cleaning.dispose();
+        }
+    }
+
+    @Test
+    void replacedConnectionDoesNotSendSnapshotWhileCloseIsPending() throws Exception {
+        // 조회 사이의 선점 중 독립 CONNECT가 슬롯을 교체한다. 이전 소켓 close 완료는 지연될 수 있다.
+        doAnswer(invocation -> {
+            pauseHere();
+            return invocation.callRealMethod();
+        }).when(cards).getPlayerCards(ROOM_ID, Player.PLAYER_2);
+        TestSession old = newSession("replaced-during-read", false);
+        Sinks.Empty<Void> closed = Sinks.empty();
+        doReturn(closed.asMono()).when(old.session()).close();
+        var connecting = reconnectWorker.submit(() -> old.emit(connectJson(USER_2)));
+        try {
+            assertTrue(paused.await(TIMEOUT.toMillis(), TimeUnit.MILLISECONDS));
+            TestSession replacement = newSession("replacement-during-read", false);
+            replacement.emit(connectJson(USER_2));
+            assertEquals("TRY_AGAIN", replacement.outbox().getLast().path("errorCode").asText());
+            assertNull(sessions.getSession(ROOM_ID, 2));
+            verify(old.session()).close();
+            assertFalse(old.subscription().isDisposed());
+
+            resume.countDown();
+            connecting.get(TIMEOUT.toMillis(), TimeUnit.MILLISECONDS);
+            assertEquals(0, old.count("RECONNECT_STATE"));
+            replacement.emit(connectJson(USER_2));
+            assertEquals(1, replacement.count("RECONNECT_STATE"));
+            assertSame(replacement.session(), sessions.getSession(ROOM_ID, 2));
+
+            old.drop();
+            assertSame(replacement.session(), sessions.getSession(ROOM_ID, 2));
+            assertNotNull(states.findById(ROOM_ID).block(TIMEOUT));
+        } finally {
+            resume.countDown();
+            closed.tryEmitEmpty();
         }
     }
 
