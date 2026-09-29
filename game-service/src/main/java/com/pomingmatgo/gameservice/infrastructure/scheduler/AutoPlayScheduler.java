@@ -186,26 +186,31 @@ public class AutoPlayScheduler implements TurnScheduler {
                     return inFlightManager.isSet(normalFlagKey)
                             .flatMap(isDelayed -> {
                                 if (isDelayed) {
-                                    return Mono.delay(Duration.ofSeconds(1))
-                                            .then(Mono.defer(() -> attemptAutoPlay(roomId, step, currentPlayer, boundScheduler, fired)));
+                                    return retryIfCurrent(roomId, step, currentPlayer, boundScheduler, fired);
                                 } else {
                                     return executeAutoPlayLogic(roomId, step, currentPlayer, boundScheduler)
                                             .onErrorResume(WebSocketBusinessException.class, error -> {
                                                 if (error.getWebsocketErrorCode() != WebSocketErrorCode.TRY_AGAIN) {
                                                     return Mono.error(error);
                                                 }
-                                                // 읽기 락 경합도 다음 턴을 만들지 않는다. 원래 방 수명에서만 다시 예약한다.
-                                                synchronized (timerLifecycle) {
-                                                    if (fired != null && scheduled.get(roomId) == fired) {
-                                                        boundScheduler.scheduleAutoPlay(roomId, step.round(), step.turn(), currentPlayer,
-                                                                System.nanoTime() + Duration.ofSeconds(1).toNanos(), step.phase());
-                                                    }
-                                                }
-                                                return Mono.empty();
+                                                return retryIfCurrent(roomId, step, currentPlayer, boundScheduler, fired);
                                             });
                                 }
                             });
                 });
+    }
+
+    private Mono<Void> retryIfCurrent(long roomId, TurnStep step, Player currentPlayer,
+                                      TurnScheduler boundScheduler, Scheduled fired) {
+        return Mono.fromRunnable(() -> {
+            // 재확인은 관리 타이머로 돌려 정리·교체 시 취소하고, 이미 시작한 액션은 끊지 않는다.
+            synchronized (timerLifecycle) {
+                if (fired != null && scheduled.get(roomId) == fired) {
+                    boundScheduler.scheduleAutoPlay(roomId, step.round(), step.turn(), currentPlayer,
+                            System.nanoTime() + Duration.ofSeconds(1).toNanos(), step.phase());
+                }
+            }
+        });
     }
 
     private Mono<Void> executeAutoPlayLogic(long roomId, TurnStep step, Player currentPlayer, TurnScheduler boundScheduler) {

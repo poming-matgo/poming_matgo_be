@@ -83,6 +83,59 @@ class AutoPlaySubscriptionLifecycleTest {
     }
 
     @Test
+    void busyUserRequestRearmsTimerAndReleasesWaitingExecution() {
+        when(inFlight.isSet(anyString())).thenReturn(Mono.just(true));
+        stubAction(Mono.empty());
+        schedule(ROOM_ID);
+        fire();
+
+        assertEquals(0, running().size());
+        assertFalse(timerTask(ROOM_ID).isDisposed());
+        verifyNoInteractions(turnFlow);
+        verify(inFlight, never()).trySetFlag(anyString(), anyString(), any(Duration.class));
+
+        when(inFlight.isSet(anyString())).thenReturn(Mono.just(false));
+        clock.advanceTimeBy(Duration.ofSeconds(1));
+        verify(turnFlow).processNormalSubmit(eq(ROOM_ID), eq(Player.PLAYER_1), eq(0),
+                eq(GameActionSource.AUTOPLAY), any(TurnScheduler.class));
+        assertEquals(0, running().size());
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void cancellingBusyUserRetryPreventsFurtherReadsEvenAfterRoomRecreation(boolean recreate) {
+        when(inFlight.isSet(anyString())).thenReturn(Mono.just(true));
+        schedule(ROOM_ID);
+        fire();
+        scheduler.onRoomCleanedUp(new RoomCleanedUpEvent(ROOM_ID));
+        if (recreate) lifecycle.open(ROOM_ID);
+        clearInvocations(gameService, inFlight);
+
+        clock.advanceTimeBy(Duration.ofSeconds(3));
+
+        assertEquals(0, running().size());
+        assertTrue(timers().isEmpty());
+        verifyNoInteractions(gameService, inFlight, turnFlow);
+    }
+
+    @Test
+    void lateBusyUserCheckDoesNotReplaceNewTimerForTheSameStep() {
+        Sinks.One<Boolean> busy = Sinks.one();
+        when(inFlight.isSet(anyString())).thenReturn(busy.asMono());
+        schedule(ROOM_ID);
+        fire();
+        schedule(ROOM_ID);
+        Disposable replacement = timerTask(ROOM_ID);
+
+        assertEquals(Sinks.EmitResult.OK, busy.tryEmitValue(true));
+
+        assertSame(replacement, timerTask(ROOM_ID));
+        assertFalse(replacement.isDisposed());
+        assertEquals(0, running().size());
+        verifyNoInteractions(turnFlow);
+    }
+
+    @Test
     void lockContentionReleasesExecutionAndFlagBeforeRetrying() {
         Sinks.Empty<Void> firstAttempt = Sinks.empty();
         stubAction(firstAttempt.asMono());
