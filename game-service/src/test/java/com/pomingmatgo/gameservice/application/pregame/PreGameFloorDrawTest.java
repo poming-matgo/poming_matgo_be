@@ -1,5 +1,6 @@
 package com.pomingmatgo.gameservice.application.pregame;
 
+import com.pomingmatgo.gameservice.application.game.GameActionAcceptance;
 import com.pomingmatgo.gameservice.domain.GamePhase;
 import com.pomingmatgo.gameservice.domain.GameState;
 import com.pomingmatgo.gameservice.domain.InstalledCard;
@@ -142,7 +143,9 @@ class PreGameFloorDrawTest {
         LeadSelectionRes leadSelectionRes = new LeadSelectionRes();
         leadSelectionRes.setLeadPlayer(1);
 
-        when(preGameService.selectLeaderCard(anyLong(), any(), anyInt())).thenReturn(Mono.empty());
+        // 실제 선택 서비스가 제공하는 저장 전 수락 경계를 대역에도 유지한다.
+        when(preGameService.selectLeaderCard(anyLong(), any(), anyInt()))
+                .thenReturn(GameActionAcceptance.beforeMutation(Mono::empty));
         when(preGameService.checkAllSelected(anyLong())).thenReturn(Mono.just(true));
         when(preGameService.getLeadSelectionRes(anyLong())).thenReturn(Mono.just(leadSelectionRes));
         when(preGameService.hasChongtong(anyLong(), any())).thenReturn(Mono.just(false));

@@ -49,7 +49,7 @@ class PreGameLifecycleBaselineTest {
     private final InMemoryGameActionExecutor executor = new InMemoryGameActionExecutor(gate, this::onFailure);
     private final InMemoryGameStateRepository states = new InMemoryGameStateRepository(lifecycle, gate);
     private final InMemoryInstalledCardRepository cards = new InMemoryInstalledCardRepository();
-    private final InMemoryLeadingPlayerRepository leaders = new InMemoryLeadingPlayerRepository();
+    private final InMemoryLeadingPlayerRepository leaders = spy(new InMemoryLeadingPlayerRepository());
     private final InMemoryRoomLockManager roomLock = new InMemoryRoomLockManager();
     private final SessionManager sessions = new SessionManager();
     private final AcquiredCardRepository acquired = mock(AcquiredCardRepository.class);
@@ -268,12 +268,16 @@ class PreGameLifecycleBaselineTest {
         verifyNoInteractions(sender, scheduler);
     }
 
-    @Test
-    @DisplayName("수락 전 잘못된 선택은 방을 정리하지 않는다")
-    void invalidSelectionDoesNotCleanRoom() {
-        StepVerifier.create(flow.processLeaderSelection(initial, Player.PLAYER_2, 0))
-                .expectError(WebSocketBusinessException.class).verify(TIMEOUT);
+    @ParameterizedTest(name = "카드 인덱스={0}")
+    @ValueSource(ints = {-1, 0, 2})
+    @DisplayName("수락 전 잘못된 인덱스·중복 월 선택은 방을 정리하지 않는다")
+    void invalidSelectionDoesNotCleanRoom(int cardIndex) {
+        StepVerifier.create(flow.processLeaderSelection(initial, Player.PLAYER_2, cardIndex))
+                .expectError(cardIndex == 0 ? WebSocketBusinessException.class : IndexOutOfBoundsException.class)
+                .verify(TIMEOUT);
         assertEquals(GamePhase.DETERMINING_STARTING_PLAYER, states.findById(ROOM_ID).block(TIMEOUT).getPhase());
+        assertEquals(0, leaders.getPlayerSelectedCard(ROOM_ID).block(TIMEOUT).getPlayer2Month());
+        verify(preGame, never()).checkAllSelected(ROOM_ID);
         selectSecondPlayer().block(TIMEOUT);
         assertStarted();
     }
@@ -281,13 +285,93 @@ class PreGameLifecycleBaselineTest {
     @Test
     @DisplayName("수락 전 취소는 선택 대기를 회수하고 시작 트리거를 소비하지 않는다")
     void cancellationBeforeAcceptanceDoesNotClaimTrigger() {
-        doReturn(sendRelease.asMono()).when(preGame).selectLeaderCard(ROOM_ID, Player.PLAYER_2, 1);
+        doReturn(sendRelease.asMono().thenReturn(Card.FEB_1)).when(leaders).getCardByIndex(ROOM_ID, 1);
         StepVerifier.create(selectSecondPlayer()).then(this::awaitSend).thenCancel().verify(TIMEOUT);
         assertEquals(0, sendRelease.currentSubscriberCount());
         verify(preGame, never()).checkAllSelected(ROOM_ID);
-        doCallRealMethod().when(preGame).selectLeaderCard(ROOM_ID, Player.PLAYER_2, 1);
+        assertEquals(0, leaders.getPlayerSelectedCard(ROOM_ID).block(TIMEOUT).getPlayer2Month());
+        doCallRealMethod().when(leaders).getCardByIndex(ROOM_ID, 1);
         selectSecondPlayer().block(TIMEOUT);
         assertStarted();
+    }
+
+    @ParameterizedTest(name = "두 번째 선택={0}")
+    @ValueSource(booleans = {false, true})
+    @DisplayName("선택 저장 중 호출자 취소는 저장과 후속 시작 처리를 끊지 않는다")
+    void cancellationDuringSelectionSavePreservesCompletion(boolean secondSelection) {
+        if (!secondSelection) {
+            leaders.cleanup(ROOM_ID).block(TIMEOUT);
+            leaders.saveSelectedCard(List.of(Card.JAN_1, Card.FEB_1), ROOM_ID).block(TIMEOUT);
+        }
+        pauseSelectionSave();
+        StepVerifier.create(selectSecondPlayer()).then(this::awaitSend).thenCancel().verify(TIMEOUT);
+        assertEquals(1, sendRelease.currentSubscriberCount());
+        sendRelease.tryEmitEmpty();
+        await().atMost(TIMEOUT).untilAsserted(() ->
+                assertEquals(2, leaders.getPlayerSelectedCard(ROOM_ID).block(TIMEOUT).getPlayer2Month()));
+        if (secondSelection) {
+            assertStarted();
+            assertDealt();
+            verify(scheduler).scheduleAutoPlay(eq(ROOM_ID), eq(1), eq(1), eq(Player.PLAYER_2),
+                    anyLong(), eq(GamePhase.IN_PROGRESS));
+        } else {
+            assertEquals(GamePhase.DETERMINING_STARTING_PLAYER, states.findById(ROOM_ID).block(TIMEOUT).getPhase());
+            verify(preGame, never()).distributeCards(ROOM_ID);
+            verifyNoInteractions(scheduler);
+        }
+        verify(preGame).checkAllSelected(ROOM_ID);
+        verifyNoInteractions(sender);
+    }
+
+    @Test
+    @DisplayName("선택 저장 중 취소 뒤 정리는 후속 시작까지 기다리고 새 방에 선택을 남기지 않는다")
+    void cleanupWaitsForSelectionSaveAfterCancellation() {
+        pauseSelectionSave();
+        StepVerifier.create(selectSecondPlayer()).then(this::awaitSend).thenCancel().verify(TIMEOUT);
+        var cleaning = cleanup.cleanupRoom(ROOM_ID).toFuture();
+        assertFalse(cleaning.isDone());
+        StepVerifier.create(states.create(GameState.createEmptyRoom(ROOM_ID)))
+                .expectError(BusinessException.class).verify(TIMEOUT);
+        sendRelease.tryEmitEmpty();
+        await().atMost(TIMEOUT).until(cleaning::isDone);
+        cleaning.join();
+        assertNull(states.findById(ROOM_ID).block(TIMEOUT));
+        states.create(GameState.createEmptyRoom(ROOM_ID)).block(TIMEOUT);
+        assertEquals(0, leaders.getPlayerSelectedCard(ROOM_ID).block(TIMEOUT).getPlayer2Month());
+        assertEquals(List.of(), cards.getPlayerCards(ROOM_ID, Player.PLAYER_1).block(TIMEOUT));
+        verify(preGame).distributeCards(ROOM_ID);
+        verifyNoInteractions(sender);
+    }
+
+    @Test
+    @DisplayName("선택 저장 오류는 원래 오류를 보존하고 부분 선택을 방과 함께 정리한다")
+    void selectionSaveFailureCleansRoom() {
+        RuntimeException failure = new IllegalStateException("selection save failed");
+        Mono<Void> save = leaders.savePlayerMonth(ROOM_ID, Player.PLAYER_2, 2);
+        doReturn(save.then(Mono.error(failure))).when(leaders).savePlayerMonth(ROOM_ID, Player.PLAYER_2, 2);
+        StepVerifier.create(selectSecondPlayer()).expectErrorMatches(error -> error == failure).verify(TIMEOUT);
+        assertNull(states.findById(ROOM_ID).block(TIMEOUT));
+        assertEquals(0, leaders.getPlayerSelectedCard(ROOM_ID).block(TIMEOUT).getPlayer2Month());
+        verify(preGame, never()).checkAllSelected(ROOM_ID);
+        verifyNoInteractions(sender, scheduler);
+    }
+
+    @Test
+    @DisplayName("끝나지 않는 선택 저장은 30초 뒤 취소하고 방을 정리한다")
+    void selectionSaveTimeoutCleansRoom() {
+        pauseSelectionSave();
+        StepVerifier.withVirtualTime(this::selectSecondPlayer)
+                .then(this::awaitSend).thenAwait(Duration.ofSeconds(30))
+                .expectError(TimeoutException.class).verify(TIMEOUT);
+        assertEquals(0, sendRelease.currentSubscriberCount());
+        assertNull(states.findById(ROOM_ID).block(TIMEOUT));
+        verify(preGame, never()).checkAllSelected(ROOM_ID);
+        verifyNoInteractions(sender, scheduler);
+    }
+
+    private void pauseSelectionSave() {
+        Mono<Void> save = leaders.savePlayerMonth(ROOM_ID, Player.PLAYER_2, 2);
+        doReturn(sendRelease.asMono().then(save)).when(leaders).savePlayerMonth(ROOM_ID, Player.PLAYER_2, 2);
     }
 
     @Test

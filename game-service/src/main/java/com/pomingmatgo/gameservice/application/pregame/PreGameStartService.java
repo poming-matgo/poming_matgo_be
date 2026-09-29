@@ -1,7 +1,6 @@
 package com.pomingmatgo.gameservice.application.pregame;
 
 import com.pomingmatgo.gameservice.application.game.TurnFlowService;
-import com.pomingmatgo.gameservice.application.game.GameActionAcceptance;
 import com.pomingmatgo.gameservice.domain.GamePhase;
 import com.pomingmatgo.gameservice.domain.repository.GameStateRepository;
 import com.pomingmatgo.gameservice.global.exception.WebSocketBusinessException;
@@ -29,14 +28,14 @@ public class PreGameStartService {
     private final RoomTimerLifecycle timerLifecycle;
     private final TurnScheduler turnScheduler;
 
-    // 트리거 소비 전 수락한다. 분배·첫 턴 또는 무승부 재시작까지 같은 gate를 유지한다.
+    // 선택 검증 뒤 첫 저장 전 수락한다. 트리거·분배·첫 턴 또는 무승부 재시작까지 같은 gate를 유지한다.
     @GameLock
     public Mono<PreparedStart> selectAndPrepare(long roomId, Player player, int cardIndex) {
         return states.findById(roomId)
                 .filter(state -> state.getPhase() == GamePhase.DETERMINING_STARTING_PLAYER)
                 .switchIfEmpty(Mono.error(new WebSocketBusinessException(INVALID_GAME_PHASE)))
                 .flatMap(state -> preGameService.selectLeaderCard(roomId, player, cardIndex)
-                        .then(GameActionAcceptance.beforeMutation(() -> preGameService.checkAllSelected(roomId)
+                        .then(Mono.defer(() -> preGameService.checkAllSelected(roomId)
                                 .flatMap(ready -> ready
                                         ? prepareGameStart(state, timerLifecycle.bind(roomId, turnScheduler))
                                         : Mono.empty()))));

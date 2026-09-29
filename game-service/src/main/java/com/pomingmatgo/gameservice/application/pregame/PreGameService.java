@@ -1,5 +1,6 @@
 package com.pomingmatgo.gameservice.application.pregame;
 
+import com.pomingmatgo.gameservice.application.game.GameActionAcceptance;
 import com.pomingmatgo.gameservice.domain.messaging.LeadSelectionRes;
 import com.pomingmatgo.gameservice.domain.*;
 import com.pomingmatgo.gameservice.domain.card.Card;
@@ -76,7 +77,8 @@ public class PreGameService {
                         .switchIfEmpty(Mono.error(new WebSocketBusinessException(INVALID_GAME_PHASE)))
                         .flatMap(card -> leadingPlayerRepository.getPlayerSelectedCard(roomId)
                                 .doOnNext(choice -> choice.validateSelection(player, card.getMonth()))
-                                .then(leadingPlayerRepository.savePlayerMonth(roomId, player, card.getMonth()))),
+                                .then(GameActionAcceptance.beforeMutation(() ->
+                                        leadingPlayerRepository.savePlayerMonth(roomId, player, card.getMonth())))),
                 () -> new WebSocketBusinessException(TOO_MANY_REQUESTS));
     }
 
