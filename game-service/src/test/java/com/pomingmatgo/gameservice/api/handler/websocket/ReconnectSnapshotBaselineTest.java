@@ -46,7 +46,7 @@ import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 
-// 조회 일관성은 정상 보장으로 검증하고, 늦은 스냅샷 송신은 미해결 기준선으로 유지한다.
+// 조회 일관성은 정상 보장으로 검증하고, 늦은 스냅샷·이전 액션 안내는 미해결 기준선으로 유지한다.
 @SpringBootTest(properties = "spring.autoconfigure.exclude="
         + "org.redisson.spring.starter.RedissonAutoConfigurationV2,"
         + "org.springframework.boot.autoconfigure.data.redis.RedisAutoConfiguration,"
@@ -223,6 +223,62 @@ class ReconnectSnapshotBaselineTest {
         if (current != null) {
             await(() -> current.subscription().isDisposed());
             assertSame(reconnecting.session(), sessions.getSession(ROOM_ID, 2));
+        }
+    }
+
+    @Test
+    void completedActionCanBroadcastAlreadySnapshottedCardsToANewSession() throws Exception {
+        Sinks.Empty<Void> sendCompleted = Sinks.empty();
+        AtomicBoolean waitingForSend = new AtomicBoolean();
+        // 세션 대역에서 SUBMIT_CARD 송신 완료만 보류한다. 상태 저장과 새 연결의 CONNECT는 지연하지 않는다.
+        doAnswer(invocation -> Flux.from(
+                        invocation.<Publisher<WebSocketMessage>>getArgument(0))
+                .concatMap(message -> Mono.fromCallable(() -> mapper.readTree(message.getPayloadAsText())))
+                .concatMap(node -> {
+                    opponent.outbox().add(node);
+                    if ("SUBMIT_CARD".equals(node.path("status").asText())) {
+                        return sendCompleted.asMono().doOnSubscribe(ignored -> waitingForSend.set(true));
+                    }
+                    return Mono.empty();
+                }).then()).when(opponent.session()).send(any());
+
+        try {
+            opponent.emit("{\"eventType\":{\"subType\":\"NORMAL_SUBMIT\"},\"data\":{\"cardIndex\":4}}");
+            assertTrue(waitingForSend.get());
+            assertEquals(2, states.findById(ROOM_ID).block(TIMEOUT).getCurrentTurn());
+            assertEquals(0, opponent.count("ACQUIRED_CARD"));
+
+            TestSession reconnecting = newSession("after-save-before-notification", false);
+            reconnecting.emit(connectJson(USER_2));
+            JsonNode snapshot = reconnecting.data("RECONNECT_STATE");
+            assertEquals(2, snapshot.path("currentTurn").asInt());
+            assertEquals(9, snapshot.path("opponentCardCount").asInt());
+            assertEquals(mapper.valueToTree(List.of(Card.MAY_1)),
+                    snapshot.path("opponentAcquiredCards").path(Card.MAY_1.getType().name()));
+            assertEquals(mapper.valueToTree(List.of(Card.MAY_2)),
+                    snapshot.path("opponentAcquiredCards").path(Card.MAY_2.getType().name()));
+            assertEquals(0, reconnecting.count("ACQUIRED_CARD"));
+            assertEquals(0, reconnecting.count("SUBMIT_CARD"));
+
+            assertEquals(Sinks.EmitResult.OK, sendCompleted.tryEmitEmpty());
+            await(() -> reconnecting.count("ANNOUNCE_TURN_INFORMATION") == 1);
+            // 후속 broadcast는 구독 때 수신자를 찾으므로 이미 결과를 받은 새 연결에도 도착한다.
+            assertEquals(snapshot.path("opponentAcquiredCards"), reconnecting.data("ACQUIRED_CARD"));
+            assertEquals(1, reconnecting.count("ACQUIRED_CARD"));
+            assertEquals(0, reconnecting.count("SUBMIT_CARD"));
+            assertEquals(0, reconnecting.count("CARD_REVEALED"));
+            assertEquals(2, reconnecting.data("ANNOUNCE_TURN_INFORMATION").path("turn").asInt());
+            List<String> statuses = reconnecting.outbox().stream()
+                    .map(node -> node.path("status").asText()).toList();
+            assertTrue(statuses.indexOf("RECONNECT_STATE") < statuses.indexOf("ACQUIRED_CARD"));
+            assertEquals(2, states.findById(ROOM_ID).block(TIMEOUT).getCurrentTurn());
+
+            reconnecting.emit(connectJson(USER_2));
+            assertEquals("ALREADY_JOIN", reconnecting.outbox().getLast().path("errorCode").asText());
+            assertEquals(1, reconnecting.count("RECONNECT_STATE"));
+            assertSame(reconnecting.session(), sessions.getSession(ROOM_ID, 2));
+        } finally {
+            sendCompleted.tryEmitEmpty();
         }
     }
 
