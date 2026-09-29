@@ -15,7 +15,7 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
-import org.junit.jupiter.params.provider.CsvSource;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.reactivestreams.Publisher;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -39,13 +39,14 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.BooleanSupplier;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 
-// 현재 동작의 기준선이다. 조회 혼합과 늦은 스냅샷을 해결하면 기대값도 정상 보장으로 전환한다.
+// 조회 일관성은 정상 보장으로 검증하고, 늦은 스냅샷 송신은 미해결 기준선으로 유지한다.
 @SpringBootTest(properties = "spring.autoconfigure.exclude="
         + "org.redisson.spring.starter.RedissonAutoConfigurationV2,"
         + "org.springframework.boot.autoconfigure.data.redis.RedisAutoConfiguration,"
@@ -61,7 +62,7 @@ class ReconnectSnapshotBaselineTest {
     @Autowired GameStateRepository states;
     @Autowired SessionManager sessions;
     @Autowired RoomCleanupService cleanup;
-    @Autowired AutoPlayScheduler autoPlay;
+    @SpyBean AutoPlayScheduler autoPlay;
     @Autowired ObjectMapper mapper;
     @SpyBean InMemoryInstalledCardRepository cards;
 
@@ -114,18 +115,50 @@ class ReconnectSnapshotBaselineTest {
         }
     }
 
-    @ParameterizedTest(name = "조회 사이 정지={0}, 자동플레이={1}")
-    @CsvSource({"true, false", "true, true", "false, false", "false, true"})
-    void reconnectCanPublishAnOldTurnAfterAnIndependentAction(boolean pauseBetweenReads, boolean autoplay)
-            throws Exception {
-        if (pauseBetweenReads) {
-            // 동기 조회 사이의 스레드 선점을 고정한다. 메모리 저장소의 I/O 지연을 가정하지 않는다.
-            doAnswer(invocation -> {
-                pauseHere();
-                return invocation.callRealMethod();
-            }).when(cards).getPlayerCards(ROOM_ID, Player.PLAYER_2);
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void snapshotReadsExcludeIndependentActionsAndAutoplayCanRetry(boolean autoplay) throws Exception {
+        // 동기 조회 사이의 스레드 선점을 고정한다. 메모리 저장소의 I/O 지연을 가정하지 않는다.
+        doAnswer(invocation -> {
+            pauseHere();
+            return invocation.callRealMethod();
+        }).when(cards).getPlayerCards(ROOM_ID, Player.PLAYER_2);
+        TestSession reconnecting = newSession("reading", false);
+        var connect = reconnectWorker.submit(() -> reconnecting.emit(connectJson(USER_2)));
+        assertTrue(paused.await(TIMEOUT.toMillis(), TimeUnit.MILLISECONDS));
+        assertSame(reconnecting.session(), sessions.getSession(ROOM_ID, 2));
+
+        if (autoplay) {
+            autoPlay.scheduleAutoPlay(ROOM_ID, 1, 1, Player.PLAYER_1, System.nanoTime(), GamePhase.IN_PROGRESS);
+            verify(autoPlay, timeout(3000).atLeast(2)).scheduleAutoPlay(eq(ROOM_ID), eq(1), eq(1),
+                    eq(Player.PLAYER_1), anyLong(), eq(GamePhase.IN_PROGRESS));
+        } else {
+            submit();
+            assertEquals("TRY_AGAIN", opponent.outbox().getLast().path("errorCode").asText());
         }
-        TestSession reconnecting = newSession("reconnecting", !pauseBetweenReads);
+        assertEquals(1, states.findById(ROOM_ID).block(TIMEOUT).getCurrentTurn());
+        assertEquals(10, cards.getPlayerCards(ROOM_ID, Player.PLAYER_1).block(TIMEOUT).size());
+
+        resume.countDown();
+        connect.get(TIMEOUT.toMillis(), TimeUnit.MILLISECONDS);
+        JsonNode snapshot = reconnecting.data("RECONNECT_STATE");
+        assertEquals(1, snapshot.path("currentTurn").asInt());
+        assertEquals("PLAYER_1", snapshot.path("currentPlayer").asText());
+        assertEquals(10, snapshot.path("opponentCardCount").asInt());
+        assertFalse(snapshot.path("floorCards").has("1"));
+        assertFalse(snapshot.path("floorCards").has("7"));
+        if (!autoplay) submit();
+        await(() -> reconnecting.count("ANNOUNCE_TURN_INFORMATION") == 1);
+        assertEquals(2, states.findById(ROOM_ID).block(TIMEOUT).getCurrentTurn());
+        assertEquals(1, reconnecting.count("SUBMIT_CARD"));
+        assertEquals(1, reconnecting.count("RECONNECT_STATE"));
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void reconnectCanStillPublishAnOldSnapshotAfterAnIndependentAction(boolean autoplay)
+            throws Exception {
+        TestSession reconnecting = newSession("reconnecting", true);
         var connect = reconnectWorker.submit(() -> reconnecting.emit(connectJson(USER_2)));
         assertTrue(paused.await(TIMEOUT.toMillis(), TimeUnit.MILLISECONDS), "재접속 경계에 도달하지 못함");
         assertSame(reconnecting.session(), sessions.getSession(ROOM_ID, 2));
@@ -147,9 +180,9 @@ class ReconnectSnapshotBaselineTest {
         assertEquals(1, snapshot.path("currentTurn").asInt());
         assertEquals("PLAYER_1", snapshot.path("currentPlayer").asText());
         assertEquals(10, snapshot.path("myCards").size());
-        assertEquals(pauseBetweenReads ? 9 : 10, snapshot.path("opponentCardCount").asInt());
-        assertEquals(pauseBetweenReads, snapshot.path("floorCards").has("1"));
-        assertEquals(pauseBetweenReads, snapshot.path("floorCards").has("7"));
+        assertEquals(10, snapshot.path("opponentCardCount").asInt());
+        assertFalse(snapshot.path("floorCards").has("1"));
+        assertFalse(snapshot.path("floorCards").has("7"));
         assertEquals("PLAYER_2", reconnecting.data("ANNOUNCE_TURN_INFORMATION").path("curPlayer").asText());
         assertEquals(2, reconnecting.data("ANNOUNCE_TURN_INFORMATION").path("turn").asInt());
         assertEquals("RECONNECT_STATE", reconnecting.outbox().getLast().path("status").asText());
@@ -160,6 +193,88 @@ class ReconnectSnapshotBaselineTest {
         assertSame(opponent.session(), sessions.getSession(ROOM_ID, 1));
         assertSame(reconnecting.session(), sessions.getSession(ROOM_ID, 2));
         assertFalse(reconnecting.subscription().isDisposed());
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void busySnapshotDetachesSessionAndSameConnectionCanRetry(boolean replacing) throws Exception {
+        TestSession current = replacing ? newSession("current", false) : null;
+        if (current != null) current.emit(connectJson(USER_2));
+        // 실제 WS 액션의 손패 저장을 지연해 재접속보다 먼저 게임 락을 획득한다.
+        Sinks.Empty<Void> save = Sinks.empty();
+        doAnswer(invocation -> {
+            Mono<Void> actual = (Mono<Void>) invocation.callRealMethod();
+            return save.asMono().then(actual);
+        }).when(cards).updatePlayerCards(eq(ROOM_ID), eq(Player.PLAYER_1), anyList());
+        submit();
+        TestSession reconnecting = newSession("busy", false);
+        reconnecting.emit(connectJson(USER_2));
+        assertEquals("TRY_AGAIN", reconnecting.outbox().getLast().path("errorCode").asText());
+        assertEquals(1, reconnecting.count("RECONNECT"));
+        assertEquals(0, reconnecting.count("RECONNECT_STATE"));
+        assertFalse(sessions.getPlayerContext(reconnecting.session()).hasElement().block(TIMEOUT));
+        assertNull(sessions.getSession(ROOM_ID, 2));
+
+        assertEquals(Sinks.EmitResult.OK, save.tryEmitEmpty());
+        reconnecting.emit(connectJson(USER_2));
+        assertEquals(1, reconnecting.count("RECONNECT_STATE"));
+        assertEquals(2, reconnecting.data("RECONNECT_STATE").path("currentTurn").asInt());
+        assertSame(reconnecting.session(), sessions.getSession(ROOM_ID, 2));
+        if (current != null) {
+            await(() -> current.subscription().isDisposed());
+            assertSame(reconnecting.session(), sessions.getSession(ROOM_ID, 2));
+        }
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void snapshotErrorOrCancellationReleasesReadLockAndDetachesSession(boolean cancel) throws Exception {
+        Sinks.One<List<Card>> read = Sinks.one();
+        doReturn(read.asMono()).when(cards).getPlayerCards(ROOM_ID, Player.PLAYER_2);
+        TestSession reconnecting = newSession("unfinished", false);
+        reconnecting.emit(connectJson(USER_2));
+        assertSame(reconnecting.session(), sessions.getSession(ROOM_ID, 2));
+        if (cancel) {
+            reconnecting.subscription().dispose();
+        } else {
+            assertEquals(Sinks.EmitResult.OK, read.tryEmitError(new IllegalStateException("controlled read error")));
+            assertEquals("SYSTEM_ERROR", reconnecting.outbox().getLast().path("errorCode").asText());
+        }
+        await(() -> sessions.getSession(ROOM_ID, 2) == null);
+        assertFalse(sessions.getPlayerContext(reconnecting.session()).hasElement().block(TIMEOUT));
+        doCallRealMethod().when(cards).getPlayerCards(ROOM_ID, Player.PLAYER_2);
+        submit();
+        await(() -> opponent.count("ANNOUNCE_TURN_INFORMATION") == 1);
+        assertEquals(2, states.findById(ROOM_ID).block(TIMEOUT).getCurrentTurn());
+        assertSame(opponent.session(), sessions.getSession(ROOM_ID, 1));
+        assertEquals(0, reconnecting.count("RECONNECT_STATE"));
+    }
+
+    @Test
+    void cleanupWaitsForSnapshotReadAndDoesNotLeaveRegisteredSession() {
+        List<Card> hand = cards.getPlayerCards(ROOM_ID, Player.PLAYER_2).block(TIMEOUT);
+        Sinks.One<List<Card>> read = Sinks.one();
+        doReturn(read.asMono()).when(cards).getPlayerCards(ROOM_ID, Player.PLAYER_2);
+        TestSession reconnecting = newSession("cleanup-during-read", false);
+        reconnecting.emit(connectJson(USER_2));
+        AtomicBoolean cleaned = new AtomicBoolean();
+        Disposable cleaning = cleanup.cleanupRoom(ROOM_ID).subscribe(ignored -> {},
+                error -> fail(error), () -> cleaned.set(true));
+        try {
+            assertFalse(cleaned.get());
+            assertNotNull(states.findById(ROOM_ID).block(TIMEOUT));
+            assertEquals(Sinks.EmitResult.OK, read.tryEmitValue(hand));
+            assertTrue(cleaned.get());
+            assertNull(states.findById(ROOM_ID).block(TIMEOUT));
+            assertTrue(sessions.getAllUser(ROOM_ID).isEmpty());
+            assertFalse(sessions.getPlayerContext(reconnecting.session()).hasElement().block(TIMEOUT));
+        } finally {
+            cleaning.dispose();
+        }
+    }
+
+    private void submit() {
+        opponent.emit("{\"eventType\":{\"subType\":\"NORMAL_SUBMIT\"},\"data\":{\"cardIndex\":0}}");
     }
 
     @Test

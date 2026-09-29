@@ -9,6 +9,8 @@ import com.pomingmatgo.gameservice.application.game.GameService;
 import com.pomingmatgo.gameservice.application.game.TurnFlowService;
 import com.pomingmatgo.gameservice.application.game.GameActionSource;
 import com.pomingmatgo.gameservice.infrastructure.lock.InFlightManager;
+import com.pomingmatgo.gameservice.global.exception.WebSocketBusinessException;
+import com.pomingmatgo.gameservice.global.exception.WebSocketErrorCode;
 import jakarta.annotation.PreDestroy;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.log4j.Log4j2;
@@ -130,7 +132,8 @@ public class AutoPlayScheduler implements TurnScheduler {
         };
         // 구독 전에 등록해 즉시 완료된 구독이 남거나 서버 종료 시 회수에서 빠지는 일을 막는다.
         if (runningAutoPlays.add(execution)) {
-            Mono.defer(() -> attemptAutoPlay(roomId, step, currentPlayer, boundScheduler)).subscribe(execution);
+            Scheduled fired = scheduled.get(roomId);
+            Mono.defer(() -> attemptAutoPlay(roomId, step, currentPlayer, boundScheduler, fired)).subscribe(execution);
         }
     }
 
@@ -169,7 +172,8 @@ public class AutoPlayScheduler implements TurnScheduler {
         }
     }
 
-    private Mono<Void> attemptAutoPlay(long roomId, TurnStep step, Player currentPlayer, TurnScheduler boundScheduler) {
+    private Mono<Void> attemptAutoPlay(long roomId, TurnStep step, Player currentPlayer,
+                                       TurnScheduler boundScheduler, Scheduled fired) {
         return gameService.findGameState(roomId)
                 .flatMap(gameState -> {
                     if (!step.matches(gameState)) {
@@ -183,9 +187,22 @@ public class AutoPlayScheduler implements TurnScheduler {
                             .flatMap(isDelayed -> {
                                 if (isDelayed) {
                                     return Mono.delay(Duration.ofSeconds(1))
-                                            .then(Mono.defer(() -> attemptAutoPlay(roomId, step, currentPlayer, boundScheduler)));
+                                            .then(Mono.defer(() -> attemptAutoPlay(roomId, step, currentPlayer, boundScheduler, fired)));
                                 } else {
-                                    return executeAutoPlayLogic(roomId, step, currentPlayer, boundScheduler);
+                                    return executeAutoPlayLogic(roomId, step, currentPlayer, boundScheduler)
+                                            .onErrorResume(WebSocketBusinessException.class, error -> {
+                                                if (error.getWebsocketErrorCode() != WebSocketErrorCode.TRY_AGAIN) {
+                                                    return Mono.error(error);
+                                                }
+                                                // 읽기 락 경합도 다음 턴을 만들지 않는다. 원래 방 수명에서만 다시 예약한다.
+                                                synchronized (timerLifecycle) {
+                                                    if (fired != null && scheduled.get(roomId) == fired) {
+                                                        boundScheduler.scheduleAutoPlay(roomId, step.round(), step.turn(), currentPlayer,
+                                                                System.nanoTime() + Duration.ofSeconds(1).toNanos(), step.phase());
+                                                    }
+                                                }
+                                                return Mono.empty();
+                                            });
                                 }
                             });
                 });

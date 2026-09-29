@@ -58,6 +58,8 @@ public class GameConnectionService {
         return messageSender.sendMessageToAllUser(
                         roomId, WebSocketResDto.of(player, ResponseEvent.RECONNECT, "재접속했습니다."))
                 .then(reconnectService.buildSnapshot(roomId, player))
+                // 조회 실패 뒤 CONNECT가 ALREADY_JOIN으로 막히지 않도록 기존 identity·방 보존 정책으로 해제한다.
+                .onErrorResume(error -> disconnect(session).then(Mono.error(error)))
                 .flatMap(snapshot -> messageSender.sendMessageToSession(
                         session, WebSocketResDto.of(player, ResponseEvent.RECONNECT_STATE, "재접속 상태 동기화", snapshot)));
     }

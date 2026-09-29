@@ -11,6 +11,8 @@ import com.pomingmatgo.gameservice.domain.event.RoomCleanedUpEvent;
 import com.pomingmatgo.gameservice.application.game.GameService;
 import com.pomingmatgo.gameservice.application.game.TurnFlowService;
 import com.pomingmatgo.gameservice.infrastructure.lock.InFlightManager;
+import com.pomingmatgo.gameservice.global.exception.WebSocketBusinessException;
+import com.pomingmatgo.gameservice.global.exception.WebSocketErrorCode;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -78,6 +80,79 @@ class AutoPlaySubscriptionLifecycleTest {
         assertEquals(Sinks.EmitResult.OK, completion.tryEmitEmpty());
         assertEquals(0, running().size());
         verify(inFlight).deleteFlag(eq(InFlightManager.autoplayKey(ROOM_ID, 1)), anyString());
+    }
+
+    @Test
+    void lockContentionReleasesExecutionAndFlagBeforeRetrying() {
+        Sinks.Empty<Void> firstAttempt = Sinks.empty();
+        stubAction(firstAttempt.asMono());
+        schedule(ROOM_ID);
+        fire();
+        stubAction(Mono.empty());
+        assertEquals(Sinks.EmitResult.OK, firstAttempt.tryEmitError(
+                new WebSocketBusinessException(WebSocketErrorCode.TRY_AGAIN)));
+        assertEquals(0, running().size());
+        assertFalse(timerTask(ROOM_ID).isDisposed());
+        verify(inFlight).deleteFlag(eq(InFlightManager.autoplayKey(ROOM_ID, 1)), anyString());
+
+        clock.advanceTimeBy(Duration.ofSeconds(1));
+        verify(turnFlow, times(2)).processNormalSubmit(eq(ROOM_ID), eq(Player.PLAYER_1), eq(0),
+                eq(GameActionSource.AUTOPLAY), any(TurnScheduler.class));
+        verify(inFlight, times(2)).deleteFlag(eq(InFlightManager.autoplayKey(ROOM_ID, 1)), anyString());
+        assertEquals(0, running().size());
+    }
+
+    @Test
+    void lateContentionDoesNotReplaceNewTimerForTheSameStep() {
+        Sinks.Empty<Void> action = Sinks.empty();
+        stubAction(action.asMono());
+        schedule(ROOM_ID);
+        fire();
+        schedule(ROOM_ID);
+        Disposable replacement = timerTask(ROOM_ID);
+        assertEquals(Sinks.EmitResult.OK, action.tryEmitError(
+                new WebSocketBusinessException(WebSocketErrorCode.TRY_AGAIN)));
+        assertSame(replacement, timerTask(ROOM_ID));
+        assertFalse(replacement.isDisposed());
+        assertEquals(0, running().size());
+    }
+
+    @Test
+    void retryRechecksCurrentStepBeforePlaying() {
+        stubAction(Mono.error(new WebSocketBusinessException(WebSocketErrorCode.TRY_AGAIN)));
+        schedule(ROOM_ID);
+        fire();
+        when(gameService.findGameState(ROOM_ID)).thenReturn(Mono.just(GameState.builder()
+                .roomId(ROOM_ID).round(1).currentTurn(2).leadingPlayer(1).phase(GamePhase.IN_PROGRESS).build()));
+        clock.advanceTimeBy(Duration.ofSeconds(1));
+        verify(turnFlow, times(1)).processNormalSubmit(eq(ROOM_ID), eq(Player.PLAYER_1), eq(0),
+                eq(GameActionSource.AUTOPLAY), any(TurnScheduler.class));
+        assertEquals(0, running().size());
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void lateContentionCannotRearmClosedOrRecreatedRoom(boolean recreate) {
+        Sinks.Empty<Void> action = Sinks.empty();
+        stubAction(action.asMono());
+        schedule(ROOM_ID);
+        fire();
+        scheduler.onRoomCleanedUp(new RoomCleanedUpEvent(ROOM_ID));
+        Disposable replacement = null;
+        if (recreate) {
+            lifecycle.open(ROOM_ID);
+            schedule(ROOM_ID);
+            replacement = timerTask(ROOM_ID);
+        }
+        assertEquals(Sinks.EmitResult.OK, action.tryEmitError(
+                new WebSocketBusinessException(WebSocketErrorCode.TRY_AGAIN)));
+        assertEquals(0, running().size());
+        if (recreate) {
+            assertSame(replacement, timerTask(ROOM_ID));
+            assertFalse(replacement.isDisposed());
+        } else {
+            assertTrue(timers().isEmpty());
+        }
     }
 
     @Test
