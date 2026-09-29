@@ -12,6 +12,7 @@ import com.pomingmatgo.gameservice.global.exception.ErrorCode;
 import com.pomingmatgo.gameservice.global.exception.WebSocketBusinessException;
 import com.pomingmatgo.gameservice.global.exception.WebSocketErrorCode;
 import com.pomingmatgo.gameservice.infrastructure.lock.RoomLockManager;
+import com.pomingmatgo.gameservice.infrastructure.lock.GameLock;
 import com.pomingmatgo.gameservice.infrastructure.session.SessionManager;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
@@ -28,6 +29,8 @@ public class RoomService {
     private final RoomLockManager roomLockManager;
     private final RoomCleanupService roomCleanupService;
 
+    // Leave 이관 전까지 게임 락 → 방 락 순서를 유지한다.
+    @GameLock
     public Mono<Void> joinRoom(long userId, long roomId) {
         return roomLockManager.withLock(roomId,
                 gameStateRepository.findById(roomId)
@@ -69,10 +72,10 @@ public class RoomService {
 
     private Mono<Void> saveWithUserId(GameState gameState, long userId) {
         if (!gameState.canJoin()) {
-            return Mono.error(new WebSocketBusinessException(WebSocketErrorCode.FULL_ROOM));
+            return Mono.error(new BusinessException(ErrorCode.FULL_ROOM));
         }
         GameState newState = gameState.join(userId);
-        return gameStateRepository.save(newState).then();
+        return GameActionAcceptance.beforeMutation(() -> gameStateRepository.save(newState).then());
     }
 
     public Mono<Long> createRoom(Long roomId) {

@@ -6,6 +6,10 @@ import com.pomingmatgo.gameservice.api.request.JoinRoomRequest;
 import com.pomingmatgo.gameservice.api.request.LeaveRoomRequest;
 import com.pomingmatgo.gameservice.application.room.RoomService;
 import com.pomingmatgo.gameservice.global.ApiResponseDto;
+import com.pomingmatgo.gameservice.global.exception.BusinessException;
+import com.pomingmatgo.gameservice.global.exception.ErrorCode;
+import com.pomingmatgo.gameservice.global.exception.WebSocketBusinessException;
+import com.pomingmatgo.gameservice.global.exception.WebSocketErrorCode;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Component;
@@ -32,6 +36,9 @@ public class RoomHandler {
         return request.bodyToMono(JoinRoomRequest.class)
                 .flatMap(req ->
                         roomService.joinRoom(req.getUserId(), req.getRoomId())
+                                .onErrorMap(WebSocketBusinessException.class, error ->
+                                        error.getWebsocketErrorCode() == WebSocketErrorCode.TRY_AGAIN
+                                                ? new BusinessException(ErrorCode.TRY_AGAIN) : error)
                                 .then(ServerResponse.ok().bodyValue(
                                         new ApiResponseDto<>(
                                                 HttpStatus.OK.value(),

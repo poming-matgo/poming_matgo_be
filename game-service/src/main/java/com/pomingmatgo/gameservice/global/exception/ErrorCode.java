@@ -12,6 +12,7 @@ public enum ErrorCode {
     FULL_ROOM(409, "방이 꽉 찼습니다."),
     ALREADY_IN_ROOM(409, "이미 방에 입장했습니다."),
     GAME_IN_PROGRESS(409, "게임이 진행 중인 방입니다."),
+    TRY_AGAIN(409, "방 상태 변경 중입니다. 상태를 확인한 뒤 다시 시도해주세요."),
 
     //시스템 예외
     SYSTEM_ERROR(500, "시스템 에러가 발생했습니다. 관리자에게 문의하세요.");

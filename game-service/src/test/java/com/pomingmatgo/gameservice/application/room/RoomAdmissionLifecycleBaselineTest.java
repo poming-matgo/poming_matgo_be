@@ -9,6 +9,9 @@ import com.pomingmatgo.gameservice.domain.GamePhase;
 import com.pomingmatgo.gameservice.domain.GameState;
 import com.pomingmatgo.gameservice.domain.Player;
 import com.pomingmatgo.gameservice.global.exception.BusinessException;
+import com.pomingmatgo.gameservice.global.exception.ErrorCode;
+import com.pomingmatgo.gameservice.global.exception.WebSocketBusinessException;
+import com.pomingmatgo.gameservice.global.exception.WebSocketErrorCode;
 import com.pomingmatgo.gameservice.infrastructure.lock.InMemoryRoomExecutionGate;
 import com.pomingmatgo.gameservice.infrastructure.lock.InMemoryRoomLockManager;
 import com.pomingmatgo.gameservice.infrastructure.messaging.MessageSender;
@@ -35,8 +38,7 @@ import static org.awaitility.Awaitility.await;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
 
-// Join 결함 기대값은 후속 소유권 구현 시 정상 보장으로 전환한다.
-@DisplayName("Ready 실행 소유권과 Join 미보호 경합 기준선")
+@DisplayName("Ready와 Join 실행 소유권 및 정리 경합")
 class RoomAdmissionLifecycleBaselineTest {
     private static final long ROOM_ID = 940_048L;
     private static final Duration TIMEOUT = Duration.ofSeconds(3);
@@ -50,7 +52,7 @@ class RoomAdmissionLifecycleBaselineTest {
     private final SessionManager sessions = new SessionManager();
     private final RoomCleanupService cleanup = new RoomCleanupService(states, cards,
             new InMemoryAcquiredCardRepository(), leaders, lock, executor, event -> {}, sessions);
-    private final RoomService rooms = new RoomService(states, sessions, lock, cleanup);
+    private RoomService rooms;
     private final PreGameService preGame = new PreGameService(leaders, cards, states, lock);
     private final MessageSender sender = mock(MessageSender.class, invocation -> Mono.empty());
     private WsRoomHandler handler;
@@ -62,6 +64,9 @@ class RoomAdmissionLifecycleBaselineTest {
 
     @BeforeEach
     void setUp() {
+        AspectJProxyFactory roomProxy = new AspectJProxyFactory(new RoomService(states, sessions, lock, cleanup));
+        roomProxy.addAspect(new InMemoryGameLockAspect(executor));
+        rooms = roomProxy.getProxy();
         AspectJProxyFactory proxy = new AspectJProxyFactory(new RoomReadyService(rooms, preGame, lock));
         proxy.addAspect(new InMemoryGameLockAspect(executor));
         readyService = proxy.getProxy();
@@ -258,38 +263,118 @@ class RoomAdmissionLifecycleBaselineTest {
     }
 
     @Test
-    @DisplayName("Join 저장 전 취소는 참여자를 남기지 않고 방 락을 해제한다")
-    void cancellationBeforeJoinSaveLeavesNoParticipant() {
+    @DisplayName("Join 조회 중 수락 전 취소는 저장하지 않고 락을 해제한다")
+    void cancellationBeforeJoinAcceptanceLeavesNoParticipant() {
         createJoinRoom();
-        pauseJoinSave();
+        GameState initial = current();
+        doReturn(release.asMono().thenReturn(initial)).when(states).findById(ROOM_ID);
         StepVerifier.create(rooms.joinRoom(202L, ROOM_ID))
                 .then(this::awaitPaused).thenCancel().verify(TIMEOUT);
         assertEquals(0, release.currentSubscriberCount());
-        assertFalse(current().hasUser(202L));
-        release.tryEmitEmpty();
+        doCallRealMethod().when(states).findById(ROOM_ID);
+        verify(states, never()).save(any());
         rooms.joinRoom(303L, ROOM_ID).block(TIMEOUT);
         assertTrue(current().hasUser(303L));
         assertFalse(current().hasUser(202L));
     }
 
-    @ParameterizedTest(name = "같은 ID 재생성={0}")
-    @ValueSource(booleans = {false, true})
-    @DisplayName("기준선: 정리는 Join 저장을 기다리지 않고 늦은 저장이 재생성된 방을 덮어쓴다")
-    void cleanupOvertakesJoinSave(boolean recreate) {
+    @Test
+    @DisplayName("Join 수락 후 저장 중 취소해도 참여자 저장을 완료한다")
+    void acceptedJoinSurvivesCancellation() {
         createJoinRoom();
         pauseJoinSave();
-        var verification = StepVerifier.create(rooms.joinRoom(202L, ROOM_ID))
-                .then(this::awaitPaused)
-                .then(() -> cleanupAndOptionallyRecreate(recreate))
-                .then(() -> assertEquals(Sinks.EmitResult.OK, release.tryEmitEmpty()));
-        if (recreate) verification.expectComplete().verify(TIMEOUT);
-        else verification.expectError(BusinessException.class).verify(TIMEOUT);
+        StepVerifier.create(rooms.joinRoom(202L, ROOM_ID))
+                .then(this::awaitPaused).thenCancel().verify(TIMEOUT);
+        assertEquals(1, release.currentSubscriberCount());
+        assertFalse(current().hasUser(202L));
+        release.tryEmitEmpty();
+        await().atMost(TIMEOUT).untilAsserted(() -> assertTrue(current().hasUser(202L)));
+        StepVerifier.create(rooms.joinRoom(303L, ROOM_ID))
+                .expectErrorSatisfies(error -> assertEquals(ErrorCode.FULL_ROOM,
+                        ((BusinessException) error).getErrorCode())).verify(TIMEOUT);
+    }
 
+    @ParameterizedTest(name = "같은 ID 재생성={0}")
+    @ValueSource(booleans = {false, true})
+    @DisplayName("정리는 수락한 Join 저장을 기다리고 이후 재생성된 방은 보존한다")
+    void cleanupWaitsForJoinSave(boolean recreate) {
+        createJoinRoom();
+        pauseJoinSave();
+        StepVerifier.create(rooms.joinRoom(202L, ROOM_ID))
+                .then(this::awaitPaused)
+                .then(() -> StepVerifier.create(cleanup.cleanupRoom(ROOM_ID))
+                        .then(() -> {
+                            assertNotNull(current());
+                            StepVerifier.create(states.create(GameState.createEmptyRoom(ROOM_ID)))
+                                    .expectError().verify(TIMEOUT);
+                            release.tryEmitEmpty();
+                        }).verifyComplete())
+                .verifyComplete();
+
+        assertNull(current());
         if (recreate) {
-            assertTrue(current().hasUser(101L));
-            assertTrue(current().hasUser(202L));
-            assertFalse(current().hasUser(303L), "새 방 참여자가 이전 Join 저장으로 사라지는 결함");
-        } else assertNull(current());
+            states.create(GameState.createEmptyRoom(ROOM_ID).join(303L)).block(TIMEOUT);
+            assertFalse(current().hasUser(101L));
+            assertFalse(current().hasUser(202L));
+            assertTrue(current().hasUser(303L));
+        }
+    }
+
+    @Test
+    @DisplayName("Join 수락 후 저장 오류는 방 자동 정리로 연결된다")
+    void acceptedJoinFailureCleansRoom() {
+        createJoinRoom();
+        pauseJoinSave();
+        StepVerifier.create(rooms.joinRoom(202L, ROOM_ID)).then(this::awaitPaused)
+                .then(() -> release.tryEmitError(new IllegalStateException("join save failed")))
+                .expectError(IllegalStateException.class).verify(TIMEOUT);
+        await().atMost(TIMEOUT).untilAsserted(() -> assertNull(current()));
+        states.create(GameState.createEmptyRoom(ROOM_ID)).block(TIMEOUT);
+    }
+
+    @Test
+    @DisplayName("Join 검증 실패는 저장하거나 기존 방을 정리하지 않는다")
+    void invalidJoinPreservesRoom() {
+        StepVerifier.create(rooms.joinRoom(202L, ROOM_ID))
+                .expectErrorSatisfies(error -> assertEquals(ErrorCode.NOT_EXISTED_ROOM,
+                        ((BusinessException) error).getErrorCode())).verify(TIMEOUT);
+        createJoinRoom();
+        StepVerifier.create(rooms.joinRoom(101L, ROOM_ID))
+                .expectErrorSatisfies(error -> assertEquals(ErrorCode.ALREADY_IN_ROOM,
+                        ((BusinessException) error).getErrorCode())).verify(TIMEOUT);
+        assertTrue(current().hasUser(101L));
+        verify(states, never()).save(any());
+    }
+
+    @Test
+    @DisplayName("Join 저장 중 같은 방 Join·Ready는 거부하고 다른 방은 독립 실행한다")
+    void joinSerializesWithReadyAndOtherJoins() {
+        createJoinRoom();
+        pauseJoinSave();
+        long otherRoom = ROOM_ID + 1;
+        states.create(GameState.createEmptyRoom(otherRoom)).block(TIMEOUT);
+        try {
+            StepVerifier.create(rooms.joinRoom(202L, ROOM_ID)).then(this::awaitPaused)
+                    .then(() -> {
+                        StepVerifier.create(rooms.joinRoom(303L, ROOM_ID))
+                                .expectErrorSatisfies(this::assertTryAgain).verify(TIMEOUT);
+                        StepVerifier.create(readyService.readyAndPrepare(ROOM_ID, Player.PLAYER_1, true))
+                                .expectErrorSatisfies(this::assertTryAgain).verify(TIMEOUT);
+                        doCallRealMethod().when(states).save(argThat(state -> state.getRoomId() == otherRoom));
+                        rooms.joinRoom(404L, otherRoom).block(TIMEOUT);
+                        assertTrue(states.findById(otherRoom).block(TIMEOUT).hasUser(404L));
+                    })
+                    .then(() -> release.tryEmitEmpty()).verifyComplete();
+            readyService.readyAndPrepare(ROOM_ID, Player.PLAYER_1, true).block(TIMEOUT);
+            assertTrue(current().getPlayerState(Player.PLAYER_1).isReady());
+        } finally {
+            cleanup.cleanupRoom(otherRoom).block(TIMEOUT);
+        }
+    }
+
+    private void assertTryAgain(Throwable error) {
+        assertEquals(WebSocketErrorCode.TRY_AGAIN,
+                ((WebSocketBusinessException) error).getWebsocketErrorCode());
     }
 
     private GameState createReadyRoom() {
