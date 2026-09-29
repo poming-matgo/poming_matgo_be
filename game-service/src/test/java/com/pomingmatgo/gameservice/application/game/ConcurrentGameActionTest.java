@@ -172,7 +172,7 @@ class ConcurrentGameActionTest {
     }
 
     @Test
-    @DisplayName("동시 READY로 둘 다 준비돼도 게임 시작은 한 번만 발화한다 (방 단위 락)")
+    @DisplayName("동시 READY의 락 경합 요청을 재시도해도 게임 시작은 한 번만 발화한다")
     void concurrentReadyStartsGameExactlyOnce() throws Exception {
         roomId = 930_004L;
         GameState state = GameState.createEmptyRoom(roomId).join(101L).join(202L);
@@ -185,12 +185,17 @@ class ConcurrentGameActionTest {
         CountDownLatch start = new CountDownLatch(1);
         CountDownLatch done = new CountDownLatch(2);
         ConcurrentLinkedQueue<Throwable> failures = new ConcurrentLinkedQueue<>();
+        ConcurrentLinkedQueue<Player> retryPlayers = new ConcurrentLinkedQueue<>();
         try {
             for (Player player : List.of(Player.PLAYER_1, Player.PLAYER_2)) {
                 pool.submit(() -> {
                     try {
                         start.await();
                         wsRoomHandler.handleRoomEvent(readyEvent, state, player).block();
+                    } catch (WebSocketBusinessException e) {
+                        if (e.getWebsocketErrorCode() == com.pomingmatgo.gameservice.global.exception.WebSocketErrorCode.TRY_AGAIN) {
+                            retryPlayers.add(player);
+                        } else failures.add(e);
                     } catch (InterruptedException e) {
                         Thread.currentThread().interrupt();
                     } catch (Throwable t) {
@@ -206,7 +211,10 @@ class ConcurrentGameActionTest {
             pool.shutdownNow();
         }
 
-        assertTrue(failures.isEmpty(), "READY는 직렬화될 뿐 실패하면 안 된다: " + failures);
+        assertTrue(failures.isEmpty(), "READY 경합은 TRY_AGAIN만 허용한다: " + failures);
+        for (Player player : retryPlayers) {
+            wsRoomHandler.handleRoomEvent(readyEvent, state, player).block();
+        }
         GameState after = gameStateRepository.findById(roomId).block();
         assertEquals(GamePhase.DETERMINING_STARTING_PLAYER, after.getPhase());
         assertEquals(5, leadingPlayerRepository.getAllCards(roomId).block().size(),

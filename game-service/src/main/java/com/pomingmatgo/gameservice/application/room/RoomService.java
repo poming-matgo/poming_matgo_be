@@ -1,5 +1,7 @@
 package com.pomingmatgo.gameservice.application.room;
 
+import com.pomingmatgo.gameservice.application.game.GameActionAcceptance;
+
 import com.pomingmatgo.gameservice.domain.GamePhase;
 import com.pomingmatgo.gameservice.domain.GameState;
 import com.pomingmatgo.gameservice.domain.Player;
@@ -98,7 +100,8 @@ public class RoomService {
                         ? Mono.just(state)
                         : Mono.error(new WebSocketBusinessException(WebSocketErrorCode.INVALID_GAME_PHASE)))
                 .map(state -> state.withPlayerReady(player, isReady))
-                .flatMap(state -> gameStateRepository.save(state).thenReturn(state));
+                .flatMap(state -> GameActionAcceptance.beforeMutation(() ->
+                        gameStateRepository.save(state).thenReturn(state)));
     }
 
 

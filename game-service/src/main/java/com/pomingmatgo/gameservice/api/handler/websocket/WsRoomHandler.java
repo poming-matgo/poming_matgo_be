@@ -1,17 +1,12 @@
 package com.pomingmatgo.gameservice.api.handler.websocket;
 
 import com.pomingmatgo.gameservice.api.handler.event.RequestEvent;
-import com.pomingmatgo.gameservice.domain.GamePhase;
+import com.pomingmatgo.gameservice.application.room.RoomReadyService;
 import com.pomingmatgo.gameservice.domain.GameState;
 import com.pomingmatgo.gameservice.domain.Player;
 import com.pomingmatgo.gameservice.domain.messaging.ResponseEvent;
-import com.pomingmatgo.gameservice.application.pregame.PreGameService;
-import com.pomingmatgo.gameservice.application.room.RoomService;
 import com.pomingmatgo.gameservice.infrastructure.messaging.MessageSender;
 import com.pomingmatgo.gameservice.global.WebSocketResDto;
-import com.pomingmatgo.gameservice.global.exception.WebSocketBusinessException;
-import com.pomingmatgo.gameservice.global.exception.WebSocketErrorCode;
-import com.pomingmatgo.gameservice.infrastructure.lock.RoomLockManager;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
@@ -24,9 +19,7 @@ import static com.pomingmatgo.gameservice.domain.Player.PLAYER_NOTHING;
 @Slf4j
 public class WsRoomHandler {
     private final MessageSender messageSender;
-    private final RoomService roomService;
-    private final PreGameService preGameService;
-    private final RoomLockManager roomLockManager;
+    private final RoomReadyService readyService;
 
 
     public Mono<Void> handleRoomEvent(RequestEvent<?> event, GameState gameState, Player player) {
@@ -39,42 +32,17 @@ public class WsRoomHandler {
 
     private Mono<Void> handleReadyEvent(GameState gameState, Player player) {
         long roomId = gameState.getRoomId();
-
-        return roomLockManager.withLock(roomId,
-                roomService.readyFresh(roomId, player, true)
-                        .flatMap(freshState ->
-                                messageSender.sendMessageToAllUser(
-                                                roomId,
-                                                WebSocketResDto.of(player, ResponseEvent.READY, "Ready 했습니다.")
-                                        )
-                                        .then(checkAndProceedIfAllReady(freshState))
-                        ),
-                () -> new WebSocketBusinessException(WebSocketErrorCode.TOO_MANY_REQUESTS)
-        );
+        return readyService.readyAndPrepare(roomId, player, true)
+                .flatMap(started -> messageSender.sendMessageToAllUser(roomId,
+                                WebSocketResDto.of(player, ResponseEvent.READY, "Ready 했습니다."))
+                        .then(Mono.defer(() -> started ? handleAllReadyEvent(roomId) : Mono.empty())));
     }
 
     private Mono<Void> handleUnreadyEvent(GameState gameState, Player player) {
         long roomId = gameState.getRoomId();
-
-        return roomLockManager.withLock(roomId,
-                roomService.readyFresh(roomId, player, false)
-                        .then(messageSender.sendMessageToAllUser(
-                                roomId,
-                                WebSocketResDto.of(player, ResponseEvent.UNREADY, "Ready 취소 했습니다.")
-                        )),
-                () -> new WebSocketBusinessException(WebSocketErrorCode.TOO_MANY_REQUESTS)
-        );
-    }
-
-    private Mono<Void> checkAndProceedIfAllReady(GameState updatedGameState) {
-        return Mono.just(updatedGameState)
-                .filter(GameState::allPlayersReady)
-                // 시작 전(NONE)에만 발화 — 시작됨 여부의 진실 원천은 phase 하나다
-                .filter(gs -> gs.getPhase() == GamePhase.NONE)
-                .flatMap(gs -> roomService.startGame(gs))
-                .flatMap(state -> preGameService.pickFiveCardsAndSave(state.getRoomId())
-                        .then(handleAllReadyEvent(state.getRoomId()))
-                );
+        return readyService.readyAndPrepare(roomId, player, false)
+                .flatMap(ignored -> messageSender.sendMessageToAllUser(roomId,
+                        WebSocketResDto.of(player, ResponseEvent.UNREADY, "Ready 취소 했습니다.")));
     }
 
     private Mono<Void> handleAllReadyEvent(long roomId) {
