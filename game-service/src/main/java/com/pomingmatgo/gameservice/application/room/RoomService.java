@@ -29,7 +29,7 @@ public class RoomService {
     private final RoomLockManager roomLockManager;
     private final RoomCleanupService roomCleanupService;
 
-    // Leave 이관 전까지 게임 락 → 방 락 순서를 유지한다.
+    // 방 상태 변경 경로의 통합 검증 전까지 게임 락 → 방 락 순서를 유지한다.
     @GameLock
     public Mono<Void> joinRoom(long userId, long roomId) {
         return roomLockManager.withLock(roomId,
@@ -45,8 +45,8 @@ public class RoomService {
         );
     }
 
+    @GameLock
     public Mono<Void> leaveRoom(long userId, long roomId) {
-        // 단일 GameState 공유 수정이라 방 단위 락으로 직렬화한다 (lost update 방지)
         return roomLockManager.withLock(roomId,
                 gameStateRepository.findById(roomId)
                         .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.NOT_EXISTED_ROOM)))
@@ -59,7 +59,7 @@ public class RoomService {
                             Player player = gameState.getPlayerType(userId);
 
                             GameState newState = gameState.updatePlayerState(player, new PlayerState());
-                            return gameStateRepository.save(newState);
+                            return GameActionAcceptance.beforeMutation(() -> gameStateRepository.save(newState));
                         })
                         .then(),
                 () -> new BusinessException(ErrorCode.SYSTEM_ERROR)

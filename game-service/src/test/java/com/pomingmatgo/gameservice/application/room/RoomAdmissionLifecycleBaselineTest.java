@@ -38,7 +38,7 @@ import static org.awaitility.Awaitility.await;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
 
-@DisplayName("Ready와 Join 실행 소유권 및 정리 경합")
+@DisplayName("Ready·Join·Leave 실행 소유권 및 정리 경합")
 class RoomAdmissionLifecycleBaselineTest {
     private static final long ROOM_ID = 940_048L;
     private static final Duration TIMEOUT = Duration.ofSeconds(3);
@@ -360,6 +360,8 @@ class RoomAdmissionLifecycleBaselineTest {
                                 .expectErrorSatisfies(this::assertTryAgain).verify(TIMEOUT);
                         StepVerifier.create(readyService.readyAndPrepare(ROOM_ID, Player.PLAYER_1, true))
                                 .expectErrorSatisfies(this::assertTryAgain).verify(TIMEOUT);
+                        StepVerifier.create(rooms.leaveRoom(101L, ROOM_ID))
+                                .expectErrorSatisfies(this::assertTryAgain).verify(TIMEOUT);
                         doCallRealMethod().when(states).save(argThat(state -> state.getRoomId() == otherRoom));
                         rooms.joinRoom(404L, otherRoom).block(TIMEOUT);
                         assertTrue(states.findById(otherRoom).block(TIMEOUT).hasUser(404L));
@@ -375,6 +377,142 @@ class RoomAdmissionLifecycleBaselineTest {
     private void assertTryAgain(Throwable error) {
         assertEquals(WebSocketErrorCode.TRY_AGAIN,
                 ((WebSocketBusinessException) error).getWebsocketErrorCode());
+    }
+
+    @Test
+    @DisplayName("Ready 저장 중 Leave는 거부되고 시작 완료 뒤에는 진행 중 오류를 반환한다")
+    void leaveCannotOverwriteReady() {
+        GameState initial = createReadyRoom();
+        pauseReadySave(0);
+        StepVerifier.create(ready(initial)).then(this::awaitPaused)
+                .then(() -> StepVerifier.create(rooms.leaveRoom(101L, ROOM_ID))
+                        .expectErrorSatisfies(this::assertTryAgain).verify(TIMEOUT))
+                .then(() -> release.tryEmitEmpty()).verifyComplete();
+        StepVerifier.create(rooms.leaveRoom(101L, ROOM_ID))
+                .expectErrorSatisfies(error -> assertEquals(ErrorCode.GAME_IN_PROGRESS,
+                        ((BusinessException) error).getErrorCode())).verify(TIMEOUT);
+        assertTrue(current().hasUser(101L));
+        assertTrue(current().allPlayersReady());
+        assertEquals(GamePhase.DETERMINING_STARTING_PLAYER, current().getPhase());
+    }
+
+    @Test
+    @DisplayName("Leave 수락 후 저장 중 취소해도 퇴장을 완료하고 방은 유지한다")
+    void acceptedLeaveSurvivesCancellation() {
+        createJoinRoom();
+        pauseJoinSave();
+        StepVerifier.create(rooms.leaveRoom(101L, ROOM_ID))
+                .then(this::awaitPaused).thenCancel().verify(TIMEOUT);
+        assertEquals(1, release.currentSubscriberCount());
+        assertTrue(current().hasUser(101L));
+        release.tryEmitEmpty();
+        await().atMost(TIMEOUT).untilAsserted(() -> {
+            assertNotNull(current());
+            assertFalse(current().hasUser(101L));
+        });
+        rooms.joinRoom(303L, ROOM_ID).block(TIMEOUT);
+        assertTrue(current().hasUser(303L));
+    }
+
+    @Test
+    @DisplayName("Leave 저장 중 Join·Ready·Leave는 TRY_AGAIN이고 다른 방은 독립 실행한다")
+    void leaveSerializesWithAdmission() {
+        createJoinRoom();
+        pauseJoinSave();
+        long otherRoom = ROOM_ID + 1;
+        states.create(GameState.createEmptyRoom(otherRoom).join(404L)).block(TIMEOUT);
+        try {
+            StepVerifier.create(rooms.leaveRoom(101L, ROOM_ID)).then(this::awaitPaused)
+                    .then(() -> {
+                        StepVerifier.create(rooms.joinRoom(202L, ROOM_ID))
+                                .expectErrorSatisfies(this::assertTryAgain).verify(TIMEOUT);
+                        StepVerifier.create(readyService.readyAndPrepare(ROOM_ID, Player.PLAYER_1, true))
+                                .expectErrorSatisfies(this::assertTryAgain).verify(TIMEOUT);
+                        StepVerifier.create(rooms.leaveRoom(101L, ROOM_ID))
+                                .expectErrorSatisfies(this::assertTryAgain).verify(TIMEOUT);
+                        doCallRealMethod().when(states).save(argThat(state -> state.getRoomId() == otherRoom));
+                        rooms.leaveRoom(404L, otherRoom).block(TIMEOUT);
+                        assertFalse(states.findById(otherRoom).block(TIMEOUT).hasUser(404L));
+                    }).then(() -> release.tryEmitEmpty()).verifyComplete();
+            rooms.joinRoom(202L, ROOM_ID).block(TIMEOUT);
+            assertFalse(current().hasUser(101L));
+            assertTrue(current().hasUser(202L));
+        } finally {
+            cleanup.cleanupRoom(otherRoom).block(TIMEOUT);
+        }
+    }
+
+    @ParameterizedTest(name = "같은 ID 재생성={0}")
+    @ValueSource(booleans = {false, true})
+    @DisplayName("전체 정리는 수락한 Leave 저장을 기다리고 재생성 방을 보존한다")
+    void cleanupWaitsForLeaveSave(boolean recreate) {
+        createJoinRoom();
+        pauseJoinSave();
+        StepVerifier.create(rooms.leaveRoom(101L, ROOM_ID)).then(this::awaitPaused)
+                .then(() -> StepVerifier.create(cleanup.cleanupRoom(ROOM_ID))
+                        .then(() -> {
+                            assertNotNull(current());
+                            StepVerifier.create(states.create(GameState.createEmptyRoom(ROOM_ID)))
+                                    .expectError().verify(TIMEOUT);
+                            release.tryEmitEmpty();
+                        }).verifyComplete())
+                .verifyComplete();
+        assertNull(current());
+        if (recreate) {
+            states.create(GameState.createEmptyRoom(ROOM_ID).join(303L)).block(TIMEOUT);
+            assertTrue(current().hasUser(303L));
+            assertFalse(current().hasUser(101L));
+        }
+    }
+
+    @Test
+    @DisplayName("Leave 조회 중 수락 전 취소는 저장하지 않고 락을 해제한다")
+    void cancellationBeforeLeaveAcceptanceDoesNotSave() {
+        createJoinRoom();
+        GameState initial = current();
+        doReturn(release.asMono().thenReturn(initial)).when(states).findById(ROOM_ID);
+        StepVerifier.create(rooms.leaveRoom(101L, ROOM_ID))
+                .then(this::awaitPaused).thenCancel().verify(TIMEOUT);
+        assertEquals(0, release.currentSubscriberCount());
+        doCallRealMethod().when(states).findById(ROOM_ID);
+        verify(states, never()).save(any());
+        assertTrue(current().hasUser(101L));
+        rooms.leaveRoom(101L, ROOM_ID).block(TIMEOUT);
+        assertFalse(current().hasUser(101L));
+    }
+
+    @Test
+    @DisplayName("Leave 수락 후 저장 오류는 방 자동 정리로 연결된다")
+    void acceptedLeaveFailureCleansRoom() {
+        createJoinRoom();
+        pauseJoinSave();
+        StepVerifier.create(rooms.leaveRoom(101L, ROOM_ID)).then(this::awaitPaused)
+                .then(() -> release.tryEmitError(new IllegalStateException("leave save failed")))
+                .expectError(IllegalStateException.class).verify(TIMEOUT);
+        await().atMost(TIMEOUT).untilAsserted(() -> assertNull(current()));
+        states.create(GameState.createEmptyRoom(ROOM_ID)).block(TIMEOUT);
+    }
+
+    @Test
+    @DisplayName("Leave는 구독 시 최신 phase를 검사하고 잘못된 요청은 방을 보존한다")
+    void leaveValidatesFreshStateAndPreservesRoom() {
+        StepVerifier.create(rooms.leaveRoom(101L, ROOM_ID))
+                .expectErrorSatisfies(error -> assertEquals(ErrorCode.NOT_EXISTED_ROOM,
+                        ((BusinessException) error).getErrorCode())).verify(TIMEOUT);
+        GameState initial = createReadyRoom();
+        rooms.leaveRoom(303L, ROOM_ID).block(TIMEOUT);
+        verify(states, never()).save(any());
+        Mono<Void> delayedLeave = rooms.leaveRoom(101L, ROOM_ID);
+        ready(initial).block(TIMEOUT);
+        clearInvocations(states);
+        StepVerifier.create(delayedLeave)
+                .expectErrorSatisfies(error -> assertEquals(ErrorCode.GAME_IN_PROGRESS,
+                        ((BusinessException) error).getErrorCode())).verify(TIMEOUT);
+        rooms.leaveRoom(303L, ROOM_ID).block(TIMEOUT);
+        assertTrue(current().hasUser(101L));
+        assertTrue(current().hasUser(202L));
+        assertEquals(GamePhase.DETERMINING_STARTING_PLAYER, current().getPhase());
+        verify(states, never()).save(any());
     }
 
     private GameState createReadyRoom() {

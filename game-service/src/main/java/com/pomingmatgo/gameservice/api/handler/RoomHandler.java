@@ -51,6 +51,9 @@ public class RoomHandler {
     public Mono<ServerResponse> leaveRoom(ServerRequest request) {
         return request.bodyToMono(LeaveRoomRequest.class)
                 .flatMap(req -> roomService.leaveRoom(req.getUserId(), req.getRoomId())
+                        .onErrorMap(WebSocketBusinessException.class, error ->
+                                error.getWebsocketErrorCode() == WebSocketErrorCode.TRY_AGAIN
+                                        ? new BusinessException(ErrorCode.TRY_AGAIN) : error)
                         .thenReturn(req))
                 .flatMap(req -> ServerResponse.ok().bodyValue(
                         new ApiResponseDto<>(
