@@ -239,7 +239,9 @@ class RoomCleanupFailureTest {
             assertEquals(0, executionCount());
             assertTrue(completed.contains("gameLock"));
             assertTrue(appender.list.stream().anyMatch(event ->
-                    event.getFormattedMessage().equals("Room (17) cleanup failed")
+                    event.getFormattedMessage().equals(notificationFailure
+                            ? "Room (17) termination notification failed; continuing cleanup"
+                            : "Room (17) cleanup failed")
                             && event.getThrowableProxy() != null
                             && event.getThrowableProxy().getMessage().equals("detached failure")));
         } finally {

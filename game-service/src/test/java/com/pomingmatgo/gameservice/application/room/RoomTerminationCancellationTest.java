@@ -151,7 +151,7 @@ class RoomTerminationCancellationTest {
                     Mono<Void> result = terminate(true);
                     if (!cancel) return result;
                     result.subscribe().dispose();
-                    return cleanup.cleanupRoom(ROOM_ID).onErrorComplete(java.util.concurrent.TimeoutException.class);
+                    return cleanup.cleanupRoom(ROOM_ID);
                 })
                 .then(this::assertBeforeDataCleanup)
                 .thenAwait(Duration.ofSeconds(4))

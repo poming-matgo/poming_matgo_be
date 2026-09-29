@@ -180,22 +180,52 @@ class GameActionFailureCleanupTest {
         }
     }
 
-    @Test
-    void notificationTimeoutPreservesDataAndSessionFailures() {
+    @ParameterizedTest(name = "안내 timeout={0}")
+    @ValueSource(booleans = {false, true})
+    void notificationFailureAllowsReuseOnlyAfterRequiredCleanup(boolean timeout) {
+        Sinks.Empty<Void> notification = Sinks.empty();
+        Sinks.Empty<Void> pendingSession = Sinks.empty();
+        when(sessions.removeRoom(ROOM_ID)).thenReturn(pendingSession.asMono());
+
+        StepVerifier.withVirtualTime(() -> cleanup.cleanupRoom(ROOM_ID, notification.asMono()))
+                .then(() -> {
+                    assertBlocked();
+                    verify(state, never()).cleanup(ROOM_ID);
+                    if (!timeout) notification.tryEmitError(new IllegalStateException("send failed"));
+                })
+                .thenAwait(Duration.ofSeconds(5))
+                .then(() -> {
+                    assertEquals(0, notification.currentSubscriberCount());
+                    assertNull(state.findById(ROOM_ID).block(TIMEOUT));
+                    assertEquals(1, pendingSession.currentSubscriberCount());
+                    assertBlocked();
+                    pendingSession.tryEmitEmpty();
+                })
+                .expectComplete().verify(TIMEOUT);
+        verify(state).cleanup(ROOM_ID);
+        verify(sessions).removeRoom(ROOM_ID);
+        assertReusable();
+    }
+
+    @ParameterizedTest(name = "안내 timeout={0}")
+    @ValueSource(booleans = {false, true})
+    void notificationFailurePreservesDataAndSessionFailures(boolean timeout) {
         Sinks.Empty<Void> notification = Sinks.empty();
         var sessionFailure = new IllegalStateException("session cleanup failed");
         when(leader.cleanup(ROOM_ID)).thenReturn(Mono.error(failure));
         when(sessions.removeRoom(ROOM_ID)).thenReturn(Mono.error(sessionFailure));
 
         StepVerifier.withVirtualTime(() -> cleanup.cleanupRoom(ROOM_ID, notification.asMono()))
+                .then(() -> {
+                    if (!timeout) notification.tryEmitError(new IllegalStateException("send failed"));
+                })
                 .thenAwait(Duration.ofSeconds(5))
                 .expectErrorSatisfies(error -> {
                     var errors = Exceptions.unwrapMultipleExcludingTracebacks(error).stream()
                             .flatMap(cause -> Exceptions.unwrapMultipleExcludingTracebacks(cause).stream()).toList();
-                    assertEquals(3, errors.size());
+                    assertEquals(2, errors.size());
                     assertTrue(errors.contains(failure));
                     assertTrue(errors.contains(sessionFailure));
-                    assertEquals(1, errors.stream().filter(TimeoutException.class::isInstance).count());
                 }).verify(TIMEOUT);
         assertEquals(0, notification.currentSubscriberCount());
         verify(sessions).removeRoom(ROOM_ID);

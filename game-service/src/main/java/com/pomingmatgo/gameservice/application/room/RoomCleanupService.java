@@ -47,7 +47,7 @@ public class RoomCleanupService {
         return cleanupRoom(roomId, Mono.empty());
     }
 
-    /** 최초 요청의 종료 안내를 최대 5초 기다린 뒤 정리하며, 중복 요청은 기존 실행을 관찰한다. */
+    /** 종료 안내는 최대 5초 기다리고 실패를 기록하며, 결과는 필수 정리의 성공 여부를 나타낸다. */
     public Mono<Void> cleanupRoom(long roomId, Mono<Void> notification) {
         return Mono.defer(() -> startCleanup(roomId, notification));
     }
@@ -74,9 +74,13 @@ public class RoomCleanupService {
     }
 
     private Mono<Void> cleanup(long roomId, Mono<Void> notification) {
-        // 안내·데이터 정리 오류 뒤에도 다음 단계를 시도하고, 각 단계의 오류를 보존한다.
+        // 안내 실패는 방 재사용을 막지 않는다. 데이터·세션 정리 오류는 gate에 전달한다.
         return Flux.concatDelayError(
-                Mono.defer(() -> notification).timeout(TERMINATION_NOTIFICATION_TIMEOUT),
+                Mono.defer(() -> notification).timeout(TERMINATION_NOTIFICATION_TIMEOUT)
+                        .onErrorResume(error -> {
+                            log.warn("Room ({}) termination notification failed; continuing cleanup", roomId, error);
+                            return Mono.empty();
+                        }),
                 Mono.defer(() -> deleteRoomData(roomId)),
                 Mono.defer(() -> sessionManager.removeRoom(roomId))
         ).then().doOnError(error -> log.error("Room ({}) cleanup failed", roomId, error));
