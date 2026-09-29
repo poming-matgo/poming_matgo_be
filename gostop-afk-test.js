@@ -7,8 +7,10 @@ import http from 'k6/http';
 import { check, sleep } from 'k6';
 import { WebSocket } from 'k6/websockets';
 import { Counter } from 'k6/metrics';
+import { createRoomRun } from './loadtest/room-run.js';
 
 export const options = {
+    thresholds: { checks: ['rate==1'] },
     scenarios: {
         afk_game: {
             executor: 'per-vu-iterations',
@@ -29,41 +31,44 @@ const goStopChoiceCounter = new Counter('afk_go_stop_choices');
 const turnCounter = new Counter('afk_turn_announcements');
 const threePpeokCounter = new Counter('afk_three_ppeok_wins');
 
-function connectPlayer(userId, playerType, roomId, result) {
+function connectPlayer(userId, playerType, roomId, result, run) {
     return new Promise((resolve) => {
         const ws = new WebSocket(BASE_WS_URL);
         const logPrefix = `[Room:${roomId} | ${playerType}]`;
         let watchdog = null;
-        let done = false;
+        const player = run.addPlayer(ws, resolve);
 
-        function finish() {
-            if (done) return;
-            done = true;
-            if (watchdog) clearTimeout(watchdog);
-            try { ws.close(); } catch (e) { /* already closed */ }
-            resolve();
+        function sendReq(payload) {
+            if (player.stopped) return;
+            try { ws.send(JSON.stringify(payload)); }
+            catch (err) { run.fail(`송신 실패: ${err.message}`); }
         }
 
         function resetWatchdog() {
-            if (watchdog) clearTimeout(watchdog);
-            watchdog = setTimeout(() => {
+            player.cancel(watchdog);
+            watchdog = player.schedule(() => {
                 console.error(`${logPrefix} 🚨 ${STALL_LIMIT_MS / 1000}초간 진행 메시지 없음 — 게임 정지(stall)로 판단`);
                 result.stalled = true;
-                finish();
+                run.fail('진행 시간 초과');
             }, STALL_LIMIT_MS);
         }
 
+        resetWatchdog();
+
         ws.onopen = () => {
+            if (player.stopped) { player.finish(); return; }
             resetWatchdog();
-            ws.send(JSON.stringify({ eventType: { type: 'JOIN_ROOM', subType: 'CONNECT' }, data: { userId: userId, roomId: roomId } }));
+            sendReq({ eventType: { type: 'JOIN_ROOM', subType: 'CONNECT' }, data: { userId: userId, roomId: roomId } });
         };
 
         ws.onmessage = (e) => {
+            if (player.stopped) return;
             let res;
-            try { res = JSON.parse(e.data); } catch (err) { return; }
+            try { res = JSON.parse(e.data); } catch (err) { run.fail('잘못된 JSON 응답'); return; }
 
             if (res.errorCode) {
                 console.error(`${logPrefix} ❌ 서버 에러: ${res.errorCode} ${res.errorMessage || ''}`);
+                run.fail(`서버 오류: ${res.errorCode}`);
                 return;
             }
 
@@ -74,12 +79,12 @@ function connectPlayer(userId, playerType, roomId, result) {
 
             switch (status) {
                 case 'CONNECT':
-                    ws.send(JSON.stringify({ eventType: { type: 'ROOM', subType: 'READY' } }));
+                    sendReq({ eventType: { type: 'ROOM', subType: 'READY' } });
                     break;
 
                 case 'START': {
                     const cardIdx = playerType === 'PLAYER_1' ? '1' : '2';
-                    ws.send(JSON.stringify({ eventType: { type: 'PREGAME', subType: 'LEADER_SELECTION' }, data: { cardIndex: cardIdx } }));
+                    sendReq({ eventType: { type: 'PREGAME', subType: 'LEADER_SELECTION' }, data: { cardIndex: cardIdx } });
                     break;
                 }
 
@@ -125,13 +130,13 @@ function connectPlayer(userId, playerType, roomId, result) {
                 case 'GAME_OVER':
                     console.log(`${logPrefix} 🏁 GAME_OVER 수신 — 완주`);
                     result.gameOver = true;
-                    finish();
+                    player.finish();
                     break;
             }
         };
 
-        ws.onerror = () => finish();
-        ws.onclose = () => finish();
+        ws.onerror = () => { if (!player.stopped) run.fail('WebSocket 오류'); };
+        ws.onclose = () => { if (!player.stopped) run.fail('완주 전 연결 종료'); };
     });
 }
 
@@ -150,14 +155,20 @@ export default async function () {
     const r1 = { gameOver: false, stalled: false, floorChoices: 0, goStopChoices: 0, turns: 0, threePpeokWinner: null };
     const r2 = { gameOver: false, stalled: false, floorChoices: 0, goStopChoices: 0, turns: 0, threePpeokWinner: null };
 
+    const run = createRoomRun((reason) => {
+        console.error(`[Room:${roomId}] AFK 실행 실패: ${reason}`);
+    });
+
     await Promise.all([
-        connectPlayer(1, 'PLAYER_1', roomId, r1),
-        connectPlayer(2, 'PLAYER_2', roomId, r2),
+        connectPlayer(1, 'PLAYER_1', roomId, r1, run),
+        connectPlayer(2, 'PLAYER_2', roomId, r2, run),
     ]);
 
     check(null, {
-        'AFK 게임이 정지(stall) 없이 완주': () => (r1.gameOver || r2.gameOver) && !r1.stalled && !r2.stalled,
+        'AFK 게임이 정지(stall) 없이 완주': () => r1.gameOver && r2.gameOver && !run.failed && !r1.stalled && !r2.stalled,
     });
+
+    if (run.failed) return;
 
     const totalChoices = r1.floorChoices + r2.floorChoices;
     const ppeokWinner = r1.threePpeokWinner || r2.threePpeokWinner;
