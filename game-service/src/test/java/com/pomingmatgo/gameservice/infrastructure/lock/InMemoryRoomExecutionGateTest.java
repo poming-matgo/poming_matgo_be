@@ -3,6 +3,8 @@ package com.pomingmatgo.gameservice.infrastructure.lock;
 import com.pomingmatgo.gameservice.global.exception.BusinessException;
 import com.pomingmatgo.gameservice.global.exception.WebSocketBusinessException;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import reactor.core.publisher.Mono;
 import reactor.core.publisher.Sinks;
 import reactor.test.StepVerifier;
@@ -74,26 +76,33 @@ class InMemoryRoomExecutionGateTest {
         assertEmpty();
     }
 
-    @Test
-    void overlappingCleanupsKeepCreationBlockedUntilBothFinish() {
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void duplicateCleanupIsRejectedWithoutChangingOwnersResult(boolean failed) {
         Sinks.Empty<Void> first = Sinks.empty();
-        Sinks.Empty<Void> second = Sinks.empty();
-        var observer = gate.withCleanup(1, () -> first.asMono()).subscribe();
-        try {
-            StepVerifier.create(gate.withCleanup(1, () -> second.asMono()))
-                    .then(() -> {
-                        first.tryEmitEmpty();
-                        assertBlocked();
-                        gate.discardIdle(1);
-                        assertBlocked();
-                        second.tryEmitEmpty();
-                    })
-                    .expectComplete().verify(TIMEOUT);
-            assertEmpty();
-            assertEquals("created", gate.create(1, () -> "created"));
-        } finally {
-            observer.dispose();
+        AtomicInteger duplicateDeletions = new AtomicInteger();
+        var failure = new IllegalStateException("owner cleanup failed");
+        var verification = StepVerifier.create(gate.withCleanup(1, first::asMono))
+                .then(() -> {
+                    StepVerifier.create(gate.withCleanup(1,
+                                    () -> Mono.fromRunnable(duplicateDeletions::incrementAndGet)))
+                            .expectErrorMessage("Room cleanup already active: 1").verify(TIMEOUT);
+                    assertEquals(0, duplicateDeletions.get());
+                    assertEquals(1, first.currentSubscriberCount());
+                    gate.discardIdle(1);
+                    assertBlocked();
+                    if (failed) first.tryEmitError(failure);
+                    else first.tryEmitEmpty();
+                });
+        if (failed) {
+            verification.expectErrorSatisfies(error -> assertSame(failure, error)).verify(TIMEOUT);
+            assertBlocked();
+            StepVerifier.create(gate.withCleanup(1, Mono::empty)).verifyComplete();
+        } else {
+            verification.expectComplete().verify(TIMEOUT);
         }
+        assertEmpty();
+        assertEquals("created", gate.create(1, () -> "created"));
     }
 
     @Test

@@ -23,14 +23,14 @@ public class InMemoryRoomExecutionGate {
 
     public synchronized Entry acquire(long roomId) {
         Entry entry = rooms.computeIfAbsent(roomId, ignored -> new Entry());
-        if (entry.active || entry.cleanups > 0 || entry.failed) throw new WebSocketBusinessException(TRY_AGAIN);
+        if (entry.active || entry.cleaning || entry.failed) throw new WebSocketBusinessException(TRY_AGAIN);
         entry.active = true;
         entry.drained = Sinks.empty();
         return entry;
     }
 
     public synchronized void accept(Entry entry) {
-        if (!entry.active || entry.cleanups > 0 || entry.failed) throw new WebSocketBusinessException(TRY_AGAIN);
+        if (!entry.active || entry.cleaning || entry.failed) throw new WebSocketBusinessException(TRY_AGAIN);
     }
 
     public synchronized void fail(Entry entry) {
@@ -64,7 +64,7 @@ public class InMemoryRoomExecutionGate {
             if (permit.entry == entry && entry.active && !entry.failed && entry.restartPermit == permit) return creation.get();
             throw new BusinessException(ErrorCode.ALREADY_EXISTED_ROOM);
         }
-        if (entry != null && (entry.active || entry.cleanups > 0 || entry.failed)) {
+        if (entry != null && (entry.active || entry.cleaning || entry.failed)) {
             throw new BusinessException(ErrorCode.ALREADY_EXISTED_ROOM);
         }
         return creation.get();
@@ -89,29 +89,31 @@ public class InMemoryRoomExecutionGate {
 
     private synchronized CleanupLease beginCleanup(long roomId) {
         Entry entry = rooms.computeIfAbsent(roomId, ignored -> new Entry());
-        entry.cleanups++;
+        // 전체 정리의 중복 요청은 RoomCleanupService에서 병합한다.
+        if (entry.cleaning) throw new IllegalStateException("Room cleanup already active: " + roomId);
+        entry.cleaning = true;
         return new CleanupLease(entry, entry.active ? entry.drained.asMono() : Mono.empty());
     }
 
     private Mono<Void> finishCleanup(long roomId, Entry entry, boolean completed) {
         return Mono.fromRunnable(() -> {
             synchronized (this) {
-                // 겹친 정리가 남아 있으면 차단을 유지한다. 서로 다른 정리 범위의 실패를 합산하지는 않는다.
-                if (completed && entry.cleanups == 1) entry.failed = false;
-                if (--entry.cleanups == 0 && !entry.active && !entry.failed) rooms.remove(roomId, entry);
+                if (completed) entry.failed = false;
+                entry.cleaning = false;
+                if (!entry.active && !entry.failed) rooms.remove(roomId, entry);
             }
         });
     }
 
     public synchronized void discardIdle(long roomId) {
         Entry entry = rooms.get(roomId);
-        if (entry != null && !entry.active && entry.cleanups == 0 && !entry.failed) rooms.remove(roomId, entry);
+        if (entry != null && !entry.active && !entry.cleaning && !entry.failed) rooms.remove(roomId, entry);
     }
 
     public static final class Entry {
         private boolean active;
         private boolean failed;
-        private int cleanups;
+        private boolean cleaning;
         private RestartPermit restartPermit;
         private Sinks.Empty<Void> drained = Sinks.empty();
     }
