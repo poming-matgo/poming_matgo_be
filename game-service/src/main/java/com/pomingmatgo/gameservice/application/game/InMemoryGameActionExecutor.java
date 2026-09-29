@@ -1,7 +1,7 @@
 package com.pomingmatgo.gameservice.application.game;
 
 import com.pomingmatgo.gameservice.domain.event.GameActionFailedEvent;
-import com.pomingmatgo.gameservice.infrastructure.lock.GameLockCleaner;
+import com.pomingmatgo.gameservice.infrastructure.lock.RoomLifecycleCoordinator;
 import com.pomingmatgo.gameservice.infrastructure.lock.InMemoryRoomExecutionGate;
 import jakarta.annotation.PreDestroy;
 import lombok.RequiredArgsConstructor;
@@ -27,7 +27,7 @@ import java.util.function.Supplier;
 @Slf4j
 @Component
 @RequiredArgsConstructor
-public class InMemoryGameActionExecutor implements GameLockCleaner {
+public class InMemoryGameActionExecutor implements RoomLifecycleCoordinator {
     private static final Duration EXECUTION_TIMEOUT = Duration.ofSeconds(30);
 
     private final InMemoryRoomExecutionGate executionGate;
@@ -188,11 +188,6 @@ public class InMemoryGameActionExecutor implements GameLockCleaner {
             remove();
             result.error(new CancellationException("Game action stopped: " + roomId));
         }
-    }
-
-    @Override
-    public Mono<Void> cleanup(long roomId) {
-        return Mono.fromRunnable(() -> executionGate.discardIdle(roomId));
     }
 
     @Override

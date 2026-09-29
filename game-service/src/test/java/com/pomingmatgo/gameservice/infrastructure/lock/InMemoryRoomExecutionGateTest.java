@@ -28,7 +28,6 @@ class InMemoryRoomExecutionGateTest {
         var active = gate.acquire(1);
         gate.fail(active);
         gate.release(active);
-        gate.discardIdle(1);
         assertBlocked();
         StepVerifier.create(gate.withCleanup(1, () -> Mono.error(new IllegalStateException("cleanup failed"))))
                 .expectErrorMessage("cleanup failed").verify(TIMEOUT);
@@ -53,7 +52,7 @@ class InMemoryRoomExecutionGateTest {
                     assertBlocked();
                     var other = gate.acquire(2);
                     gate.release(other);
-                    gate.discardIdle(2);
+                    StepVerifier.create(gate.withCleanup(2, Mono::empty)).verifyComplete();
                     gate.release(active);
                 })
                 .expectComplete().verify(TIMEOUT);
@@ -69,7 +68,6 @@ class InMemoryRoomExecutionGateTest {
                 .then(this::assertBlocked)
                 .thenCancel().verify(TIMEOUT);
         assertEquals(0, deletions.get());
-        gate.discardIdle(1);
         assertThrows(WebSocketBusinessException.class, () -> gate.acquire(1));
         gate.release(active);
         StepVerifier.create(gate.withCleanup(1, Mono::empty)).verifyComplete();
@@ -89,7 +87,6 @@ class InMemoryRoomExecutionGateTest {
                             .expectErrorMessage("Room cleanup already active: 1").verify(TIMEOUT);
                     assertEquals(0, duplicateDeletions.get());
                     assertEquals(1, first.currentSubscriberCount());
-                    gate.discardIdle(1);
                     assertBlocked();
                     if (failed) first.tryEmitError(failure);
                     else first.tryEmitEmpty();
@@ -110,7 +107,6 @@ class InMemoryRoomExecutionGateTest {
         var failure = new IllegalStateException("cleanup failed");
         StepVerifier.create(gate.withCleanup(1, () -> { throw failure; }))
                 .expectErrorSatisfies(error -> assertSame(failure, error)).verify(TIMEOUT);
-        gate.discardIdle(1);
         assertBlocked();
         StepVerifier.create(gate.withCleanup(1, Mono::empty)).verifyComplete();
         assertEmpty();

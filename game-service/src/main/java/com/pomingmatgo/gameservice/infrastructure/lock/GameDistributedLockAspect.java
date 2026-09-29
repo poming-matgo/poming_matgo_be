@@ -1,7 +1,6 @@
 package com.pomingmatgo.gameservice.infrastructure.lock;
 
 import com.pomingmatgo.gameservice.global.exception.WebSocketBusinessException;
-import com.pomingmatgo.gameservice.infrastructure.lock.GameLockCleaner;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.aspectj.lang.ProceedingJoinPoint;
@@ -24,7 +23,7 @@ import static com.pomingmatgo.gameservice.global.exception.WebSocketErrorCode.TR
 @Aspect
 @Component
 @RequiredArgsConstructor
-public class GameDistributedLockAspect implements GameLockCleaner {
+public class GameDistributedLockAspect implements RoomLifecycleCoordinator {
 
     private final RedissonReactiveClient redissonClient;
 
@@ -61,11 +60,6 @@ public class GameDistributedLockAspect implements GameLockCleaner {
                             l -> releaseLock(l, executionId)
                     );
                 });
-    }
-
-    @Override
-    public Mono<Void> cleanup(long roomId) {
-        return Mono.empty();
     }
 
     private Mono<Void> releaseLock(RLockReactive lock, long executionId) {

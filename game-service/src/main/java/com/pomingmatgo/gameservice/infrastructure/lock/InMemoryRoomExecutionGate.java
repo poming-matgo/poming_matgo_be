@@ -105,11 +105,6 @@ public class InMemoryRoomExecutionGate {
         });
     }
 
-    public synchronized void discardIdle(long roomId) {
-        Entry entry = rooms.get(roomId);
-        if (entry != null && !entry.active && !entry.cleaning && !entry.failed) rooms.remove(roomId, entry);
-    }
-
     public static final class Entry {
         private boolean active;
         private boolean failed;

@@ -11,7 +11,7 @@ import com.pomingmatgo.gameservice.domain.GamePhase;
 import com.pomingmatgo.gameservice.domain.GameState;
 import com.pomingmatgo.gameservice.domain.Player;
 import com.pomingmatgo.gameservice.infrastructure.messaging.MessageSender;
-import com.pomingmatgo.gameservice.infrastructure.lock.GameLockCleaner;
+import com.pomingmatgo.gameservice.infrastructure.lock.RoomLifecycleCoordinator;
 import com.pomingmatgo.gameservice.application.connection.GameConnectionService;
 import com.pomingmatgo.gameservice.infrastructure.session.SessionManager;
 import org.junit.jupiter.api.BeforeEach;
@@ -40,10 +40,10 @@ class RoomTerminationFailureTest {
     private final InstalledCardRepository installed = mock(InstalledCardRepository.class);
     private final AcquiredCardRepository acquired = mock(AcquiredCardRepository.class);
     private final LeadingPlayerRepository leader = mock(LeadingPlayerRepository.class);
-    private final GameLockCleaner gameLock = mock(GameLockCleaner.class, CALLS_REAL_METHODS);
+    private final RoomLifecycleCoordinator roomLifecycle = mock(RoomLifecycleCoordinator.class, CALLS_REAL_METHODS);
     private final SessionManager sessions = spy(new SessionManager());
     private final RoomCleanupService cleanup = new RoomCleanupService(
-            state, installed, acquired, leader, gameLock,
+            state, installed, acquired, leader, roomLifecycle,
             mock(ApplicationEventPublisher.class), sessions);
     private final WebSocketSession first = mock(WebSocketSession.class);
     private final WebSocketSession second = mock(WebSocketSession.class);
@@ -55,7 +55,6 @@ class RoomTerminationFailureTest {
         when(installed.cleanup(ROOM_ID)).thenReturn(Mono.empty());
         when(acquired.cleanup(ROOM_ID)).thenReturn(Mono.empty());
         when(leader.cleanup(ROOM_ID)).thenReturn(Mono.empty());
-        when(gameLock.cleanup(ROOM_ID)).thenReturn(Mono.empty());
         when(first.getId()).thenReturn("first");
         when(second.getId()).thenReturn("second");
         sessions.addPlayer(ROOM_ID, Player.PLAYER_1, 101L, first).block(TIMEOUT);

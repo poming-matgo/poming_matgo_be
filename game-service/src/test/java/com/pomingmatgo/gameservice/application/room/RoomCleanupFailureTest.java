@@ -8,7 +8,7 @@ import com.pomingmatgo.gameservice.domain.repository.AcquiredCardRepository;
 import com.pomingmatgo.gameservice.domain.repository.GameStateRepository;
 import com.pomingmatgo.gameservice.domain.repository.InstalledCardRepository;
 import com.pomingmatgo.gameservice.domain.repository.LeadingPlayerRepository;
-import com.pomingmatgo.gameservice.infrastructure.lock.GameLockCleaner;
+import com.pomingmatgo.gameservice.infrastructure.lock.RoomLifecycleCoordinator;
 import com.pomingmatgo.gameservice.infrastructure.session.SessionManager;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -41,11 +41,11 @@ class RoomCleanupFailureTest {
     private final InstalledCardRepository installed = mock(InstalledCardRepository.class);
     private final AcquiredCardRepository acquired = mock(AcquiredCardRepository.class);
     private final LeadingPlayerRepository leader = mock(LeadingPlayerRepository.class);
-    private final GameLockCleaner gameLock = mock(GameLockCleaner.class, CALLS_REAL_METHODS);
+    private final RoomLifecycleCoordinator roomLifecycle = mock(RoomLifecycleCoordinator.class, CALLS_REAL_METHODS);
     private final ApplicationEventPublisher events = mock(ApplicationEventPublisher.class);
     private final List<String> completed = new ArrayList<>();
     private final RoomCleanupService cleanup = new RoomCleanupService(
-            state, installed, acquired, leader, gameLock, events, new SessionManager());
+            state, installed, acquired, leader, roomLifecycle, events, new SessionManager());
 
     @BeforeEach
     void setUp() {
@@ -53,7 +53,6 @@ class RoomCleanupFailureTest {
         when(installed.cleanup(ROOM_ID)).thenReturn(done("installed"));
         when(acquired.cleanup(ROOM_ID)).thenReturn(done("acquired"));
         when(leader.cleanup(ROOM_ID)).thenReturn(done("leader"));
-        when(gameLock.cleanup(ROOM_ID)).thenReturn(done("gameLock"));
         doAnswer(invocation -> {
             completed.add("event");
             return null;
@@ -62,11 +61,11 @@ class RoomCleanupFailureTest {
 
     @Test
     void successfulCleanupIsLazyAndCompletesAllResources() {
-        clearInvocations(state, installed, acquired, leader, gameLock, events);
+        clearInvocations(state, installed, acquired, leader, roomLifecycle, events);
         Mono<Void> result = cleanup.cleanupRoom(ROOM_ID);
-        verifyNoInteractions(state, installed, acquired, leader, gameLock, events);
+        verifyNoInteractions(state, installed, acquired, leader, roomLifecycle, events);
         StepVerifier.create(result).expectComplete().verify(TIMEOUT);
-        assertEquals(List.of("event", "state", "installed", "acquired", "leader", "gameLock"), completed);
+        assertEquals(List.of("event", "state", "installed", "acquired", "leader"), completed);
     }
 
     @Test
@@ -75,7 +74,7 @@ class RoomCleanupFailureTest {
         when(state.cleanup(ROOM_ID)).thenReturn(Mono.error(failure));
         StepVerifier.create(cleanup.cleanupRoom(ROOM_ID))
                 .expectErrorSatisfies(error -> assertSame(failure, error)).verify(TIMEOUT);
-        assertEquals(List.of("event", "installed", "acquired", "leader", "gameLock"), completed);
+        assertEquals(List.of("event", "installed", "acquired", "leader"), completed);
     }
 
     @Test
@@ -84,20 +83,20 @@ class RoomCleanupFailureTest {
         when(state.cleanup(ROOM_ID)).thenThrow(failure);
         StepVerifier.create(cleanup.cleanupRoom(ROOM_ID))
                 .expectErrorSatisfies(error -> assertSame(failure, error)).verify(TIMEOUT);
-        assertEquals(List.of("event", "installed", "acquired", "leader", "gameLock"), completed);
+        assertEquals(List.of("event", "installed", "acquired", "leader"), completed);
     }
 
     @Test
     void multipleFailuresArePreserved() {
         RuntimeException first = new IllegalStateException("state cleanup failed");
-        RuntimeException second = new IllegalStateException("lock cleanup failed");
+        RuntimeException second = new IllegalStateException("leader cleanup failed");
         when(state.cleanup(ROOM_ID)).thenReturn(Mono.error(first));
-        when(gameLock.cleanup(ROOM_ID)).thenReturn(Mono.error(second));
+        when(leader.cleanup(ROOM_ID)).thenReturn(Mono.error(second));
         StepVerifier.create(cleanup.cleanupRoom(ROOM_ID))
                 .expectErrorSatisfies(error -> assertEquals(
                         List.of(first, second), Exceptions.unwrapMultipleExcludingTracebacks(error)))
                 .verify(TIMEOUT);
-        assertEquals(List.of("event", "installed", "acquired", "leader"), completed);
+        assertEquals(List.of("event", "installed", "acquired"), completed);
     }
 
     @Test
@@ -175,7 +174,7 @@ class RoomCleanupFailureTest {
                 .then(() -> assertEquals(Sinks.EmitResult.OK, gate.tryEmitError(failure)))
                 .expectErrorSatisfies(error -> assertSame(failure, error)).verify(TIMEOUT);
         assertEquals(0, executionCount());
-        assertTrue(completed.contains("gameLock"));
+        assertTrue(completed.contains("leader"));
     }
 
     @Test
@@ -216,7 +215,7 @@ class RoomCleanupFailureTest {
         StepVerifier.create(cleanup.cleanupRoom(ROOM_ID))
                 .expectErrorSatisfies(error -> assertSame(failure, error)).verify(TIMEOUT);
         assertEquals(0, executionCount());
-        assertTrue(completed.contains("gameLock"));
+        assertTrue(completed.contains("leader"));
     }
 
     private int executionCount() {
@@ -237,7 +236,7 @@ class RoomCleanupFailureTest {
                     .subscribe().dispose();
             gate.tryEmitError(new IllegalStateException("detached failure"));
             assertEquals(0, executionCount());
-            assertTrue(completed.contains("gameLock"));
+            assertTrue(completed.contains("leader"));
             assertTrue(appender.list.stream().anyMatch(event ->
                     event.getFormattedMessage().equals(notificationFailure
                             ? "Room (17) termination notification failed; continuing cleanup"

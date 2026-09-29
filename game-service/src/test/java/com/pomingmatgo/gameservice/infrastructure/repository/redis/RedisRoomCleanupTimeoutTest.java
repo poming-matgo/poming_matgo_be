@@ -2,7 +2,7 @@ package com.pomingmatgo.gameservice.infrastructure.repository.redis;
 
 import com.pomingmatgo.gameservice.application.room.RoomCleanupService;
 import com.pomingmatgo.gameservice.domain.GameState;
-import com.pomingmatgo.gameservice.infrastructure.lock.GameLockCleaner;
+import com.pomingmatgo.gameservice.infrastructure.lock.RoomLifecycleCoordinator;
 import com.pomingmatgo.gameservice.infrastructure.scheduler.RoomTimerLifecycle;
 import com.pomingmatgo.gameservice.infrastructure.session.SessionManager;
 import org.junit.jupiter.api.Test;
@@ -37,17 +37,16 @@ class RedisRoomCleanupTimeoutTest {
     private final List<ReactiveRedisOperations<String, ?>> operations =
             List.of(stateOps, installedOps, acquiredOps, leaderOps);
     private final SessionManager sessions = mock(SessionManager.class);
-    private final GameLockCleaner lock = mock(GameLockCleaner.class, CALLS_REAL_METHODS);
+    private final RoomLifecycleCoordinator roomLifecycle = mock(RoomLifecycleCoordinator.class, CALLS_REAL_METHODS);
     private final RoomCleanupService cleanup = new RoomCleanupService(
             new RedisGameStateRepository(stateOps, new RoomTimerLifecycle()),
             new RedisInstalledCardRepository(installedOps),
             new RedisAcquiredCardRepository(acquiredOps),
-            new RedisLeadingPlayerRepository(leaderOps), lock,
+            new RedisLeadingPlayerRepository(leaderOps), roomLifecycle,
             mock(ApplicationEventPublisher.class), sessions);
 
     private void successfulDeletes() {
         operations.forEach(ops -> when(ops.delete(any(String[].class))).thenReturn(Mono.just(1L)));
-        when(lock.cleanup(ROOM_ID)).thenReturn(Mono.empty());
         when(sessions.removeRoom(ROOM_ID)).thenReturn(Mono.empty());
     }
 
@@ -56,7 +55,6 @@ class RedisRoomCleanupTimeoutTest {
         successfulDeletes();
         StepVerifier.create(cleanup.cleanupRoom(ROOM_ID)).expectComplete().verify(VERIFY_TIMEOUT);
         operations.forEach(ops -> verify(ops).delete(any(String[].class)));
-        verify(lock).cleanup(ROOM_ID);
         verify(sessions).removeRoom(ROOM_ID);
     }
 
@@ -87,7 +85,6 @@ class RedisRoomCleanupTimeoutTest {
 
         assertTrue(cancelled.get());
         operations.forEach(ops -> verify(ops).delete(any(String[].class)));
-        verify(lock).cleanup(ROOM_ID);
         verify(sessions).removeRoom(ROOM_ID);
     }
 }

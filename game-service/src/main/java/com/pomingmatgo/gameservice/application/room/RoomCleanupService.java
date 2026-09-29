@@ -7,7 +7,7 @@ import com.pomingmatgo.gameservice.domain.repository.AcquiredCardRepository;
 import com.pomingmatgo.gameservice.domain.repository.GameStateRepository;
 import com.pomingmatgo.gameservice.domain.repository.InstalledCardRepository;
 import com.pomingmatgo.gameservice.domain.repository.LeadingPlayerRepository;
-import com.pomingmatgo.gameservice.infrastructure.lock.GameLockCleaner;
+import com.pomingmatgo.gameservice.infrastructure.lock.RoomLifecycleCoordinator;
 import com.pomingmatgo.gameservice.infrastructure.session.SessionManager;
 import jakarta.annotation.PreDestroy;
 import lombok.RequiredArgsConstructor;
@@ -36,7 +36,7 @@ public class RoomCleanupService {
     private final InstalledCardRepository installedCardRepository;
     private final AcquiredCardRepository acquiredCardRepository;
     private final LeadingPlayerRepository leadingPlayerRepository;
-    private final GameLockCleaner gameLockCleaner;
+    private final RoomLifecycleCoordinator roomLifecycle;
     private final ApplicationEventPublisher eventPublisher;
     private final SessionManager sessionManager;
     private final Map<Long, CleanupExecution> executions = new HashMap<>();
@@ -68,7 +68,7 @@ public class RoomCleanupService {
             executions.put(roomId, execution);
         }
         // 호출자는 결과만 관찰한다. 실제 정리 구독은 방별로 하나만 소유한다.
-        Mono.defer(() -> gameLockCleaner.withCleanup(roomId, () -> cleanup(roomId, notification)))
+        Mono.defer(() -> roomLifecycle.withCleanup(roomId, () -> cleanup(roomId, notification)))
                 .subscribe(execution);
         return execution.result.asMono();
     }
@@ -131,7 +131,7 @@ public class RoomCleanupService {
 
     public Mono<Void> restartRoom(long roomId) {
         // withCleanup은 현재 실행의 해제를 기다리므로 재시작 소유 구간에서 중첩 호출하지 않는다.
-        return Mono.defer(() -> gameLockCleaner.withRestart(roomId, () -> deleteRoomData(roomId)
+        return Mono.defer(() -> roomLifecycle.withRestart(roomId, () -> deleteRoomData(roomId)
                 .then(Mono.defer(() -> gameStateRepository.create(GameState.createEmptyRoom(roomId))))
                 .then()));
     }
@@ -146,8 +146,7 @@ public class RoomCleanupService {
                 Mono.defer(() -> gameStateRepository.cleanup(roomId)),
                 Mono.defer(() -> installedCardRepository.cleanup(roomId)),
                 Mono.defer(() -> acquiredCardRepository.cleanup(roomId)),
-                Mono.defer(() -> leadingPlayerRepository.cleanup(roomId)),
-                Mono.defer(() -> gameLockCleaner.cleanup(roomId))
+                Mono.defer(() -> leadingPlayerRepository.cleanup(roomId))
         ).doOnError(error -> log.error("Room ({}) data cleanup failed", roomId, error));
     }
 }

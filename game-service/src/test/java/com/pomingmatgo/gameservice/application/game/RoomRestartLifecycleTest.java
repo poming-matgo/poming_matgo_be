@@ -215,7 +215,7 @@ class RoomRestartLifecycleTest {
         assertThrows(BusinessException.class, () -> gate.create(ROOM_ID, () -> ROOM_ID));
         var otherRoom = gate.acquire(ROOM_ID + 1);
         gate.release(otherRoom);
-        gate.discardIdle(ROOM_ID + 1);
+        StepVerifier.create(gate.withCleanup(ROOM_ID + 1, Mono::empty)).verifyComplete();
     }
 
     private void assertRecreated() {
