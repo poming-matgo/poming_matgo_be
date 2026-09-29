@@ -16,7 +16,6 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
-import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.test.util.ReflectionTestUtils;
@@ -181,80 +180,31 @@ class GameActionFailureCleanupTest {
         }
     }
 
-    @ParameterizedTest(name = "자동 정리={0}, 세션 timeout={1}")
-    @CsvSource({"false,false", "false,true", "true,false", "true,true"})
-    void cleanupTimeoutCancelsPendingStepAndBlocksUntilSuccessfulRetry(boolean automatic, boolean sessionTimeout) {
-        Sinks.Empty<Void> pending = Sinks.empty();
-        if (sessionTimeout) when(sessions.removeRoom(ROOM_ID)).thenReturn(pending.asMono());
-        else when(acquired.cleanup(ROOM_ID)).thenReturn(pending.asMono());
-
-        StepVerifier.withVirtualTime(() -> {
-                    if (automatic) {
-                        StepVerifier.create(accepted(Mono.error(failure)))
-                                .expectErrorMatches(error -> error == failure).verify(TIMEOUT);
-                    }
-                    // 먼저 관찰하던 연결이 취소돼도 같은 관리 실행의 timeout이 동작해야 한다.
-                    StepVerifier.create(cleanup.cleanupRoom(ROOM_ID)).thenCancel().verify(TIMEOUT);
-                    return cleanup.cleanupRoom(ROOM_ID);
-                })
-                .thenAwait(Duration.ofSeconds(29))
-                .then(() -> {
-                    assertEquals(1, pending.currentSubscriberCount());
-                    assertBlocked();
-                    StepVerifier.create(executor.execute(22, () -> Mono.just("other")))
-                            .expectNext("other").verifyComplete();
-                })
-                .thenAwait(Duration.ofSeconds(1))
-                .expectError(TimeoutException.class).verify(TIMEOUT);
-
-        assertEquals(0, pending.currentSubscriberCount());
-        assertTrue(((Map<?, ?>) ReflectionTestUtils.getField(cleanup, "executions")).isEmpty());
-        verify(acquired).cleanup(ROOM_ID);
-        verify(sessions).removeRoom(ROOM_ID);
-        assertBlocked();
-        when(acquired.cleanup(ROOM_ID)).thenReturn(Mono.empty());
-        when(sessions.removeRoom(ROOM_ID)).thenReturn(Mono.empty());
-        cleanup.cleanupRoom(ROOM_ID).block(TIMEOUT);
-        assertReusable();
-    }
-
     @Test
-    void consecutiveCleanupTimeoutsPreserveEarlierErrorsAndReleaseEveryPendingSubscription() {
+    void notificationTimeoutPreservesDataAndSessionFailures() {
         Sinks.Empty<Void> notification = Sinks.empty();
-        Sinks.Empty<Void> data = Sinks.empty();
-        Sinks.Empty<Void> session = Sinks.empty();
-        when(acquired.cleanup(ROOM_ID)).thenReturn(data.asMono());
+        var sessionFailure = new IllegalStateException("session cleanup failed");
         when(leader.cleanup(ROOM_ID)).thenReturn(Mono.error(failure));
-        when(sessions.removeRoom(ROOM_ID)).thenReturn(session.asMono());
+        when(sessions.removeRoom(ROOM_ID)).thenReturn(Mono.error(sessionFailure));
 
         StepVerifier.withVirtualTime(() -> cleanup.cleanupRoom(ROOM_ID, notification.asMono()))
                 .thenAwait(Duration.ofSeconds(5))
-                .then(() -> {
-                    assertEquals(0, notification.currentSubscriberCount());
-                    assertEquals(1, data.currentSubscriberCount());
-                    verify(sessions, never()).removeRoom(ROOM_ID);
-                })
-                .thenAwait(Duration.ofSeconds(30))
-                .then(() -> {
-                    assertEquals(0, data.currentSubscriberCount());
-                    assertEquals(1, session.currentSubscriberCount());
-                    assertBlocked();
-                })
-                .thenAwait(Duration.ofSeconds(30))
                 .expectErrorSatisfies(error -> {
                     var errors = Exceptions.unwrapMultipleExcludingTracebacks(error).stream()
                             .flatMap(cause -> Exceptions.unwrapMultipleExcludingTracebacks(cause).stream()).toList();
-                    assertEquals(4, errors.size());
+                    assertEquals(3, errors.size());
                     assertTrue(errors.contains(failure));
-                    assertEquals(3, errors.stream().filter(TimeoutException.class::isInstance).count());
+                    assertTrue(errors.contains(sessionFailure));
+                    assertEquals(1, errors.stream().filter(TimeoutException.class::isInstance).count());
                 }).verify(TIMEOUT);
-        assertEquals(0, session.currentSubscriberCount());
+        assertEquals(0, notification.currentSubscriberCount());
+        verify(sessions).removeRoom(ROOM_ID);
         assertTrue(((Map<?, ?>) ReflectionTestUtils.getField(cleanup, "executions")).isEmpty());
         assertBlocked();
     }
 
     @Test
-    void cleanupStepDeadlineStartsAfterActiveExecutionReleasesGate() {
+    void cleanupWaitsForActiveExecutionBeforeDeletingData() {
         var active = gate.acquire(ROOM_ID);
         Sinks.Empty<Void> data = Sinks.empty();
         when(acquired.cleanup(ROOM_ID)).thenReturn(data.asMono());
@@ -268,7 +218,6 @@ class GameActionFailureCleanupTest {
             assertBlocked();
             gate.release(active);
             assertEquals(1, data.currentSubscriberCount());
-            clock.advanceTimeBy(Duration.ofSeconds(29));
             assertFalse(completed.get());
             assertNull(error.get());
             assertEquals(Sinks.EmitResult.OK, data.tryEmitEmpty());

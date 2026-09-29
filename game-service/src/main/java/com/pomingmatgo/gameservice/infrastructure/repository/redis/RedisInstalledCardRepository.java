@@ -12,6 +12,7 @@ import org.springframework.stereotype.Repository;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 
+import java.time.Duration;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.List;
@@ -23,6 +24,8 @@ import static com.pomingmatgo.gameservice.global.exception.WebSocketErrorCode.SY
 @Profile("redis")
 @Repository
 public class RedisInstalledCardRepository implements InstalledCardRepository {
+    private static final Duration CLEANUP_TIMEOUT = Duration.ofSeconds(30);
+
     private final ReactiveRedisOperations<String, String> redisOps;
 
     public RedisInstalledCardRepository(@Qualifier("cardRedisTemplate") ReactiveRedisOperations<String, String> redisOps) {
@@ -171,6 +174,6 @@ public class RedisInstalledCardRepository implements InstalledCardRepository {
         for (int i = 0; i < 12; i++) {
             keys[3 + i] = generateRevealedCardKey(roomId, i + 1);
         }
-        return redisOps.delete(keys).then();
+        return redisOps.delete(keys).then().timeout(CLEANUP_TIMEOUT);
     }
 }

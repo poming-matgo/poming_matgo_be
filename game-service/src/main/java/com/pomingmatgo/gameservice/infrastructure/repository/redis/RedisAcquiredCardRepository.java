@@ -9,11 +9,13 @@ import org.springframework.data.redis.core.ReactiveRedisOperations;
 import org.springframework.stereotype.Repository;
 import reactor.core.publisher.Mono;
 
+import java.time.Duration;
 import java.util.List;
 
 @Profile("redis")
 @Repository
 public class RedisAcquiredCardRepository implements AcquiredCardRepository {
+    private static final Duration CLEANUP_TIMEOUT = Duration.ofSeconds(30);
 
     private static final String KEY_FORMAT = "game:%d:player:%d:hand";
 
@@ -51,6 +53,6 @@ public class RedisAcquiredCardRepository implements AcquiredCardRepository {
 
     @Override
     public Mono<Void> cleanup(long roomId) {
-        return redisOps.delete(generateKey(roomId, 1), generateKey(roomId, 2)).then();
+        return redisOps.delete(generateKey(roomId, 1), generateKey(roomId, 2)).then().timeout(CLEANUP_TIMEOUT);
     }
 }

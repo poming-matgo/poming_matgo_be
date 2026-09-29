@@ -12,11 +12,13 @@ import reactor.core.publisher.Mono;
 
 import org.springframework.context.annotation.Profile;
 
+import java.time.Duration;
 import java.util.List;
 
 @Profile("redis")
 @Repository
 public class RedisLeadingPlayerRepository implements LeadingPlayerRepository {
+    private static final Duration CLEANUP_TIMEOUT = Duration.ofSeconds(30);
 
     private final ReactiveRedisOperations<String, String> cardRedisOps;
 
@@ -92,6 +94,6 @@ public class RedisLeadingPlayerRepository implements LeadingPlayerRepository {
         String p1MonthKey = String.format(PLAYER1_MONTH_KEY_FORMAT, roomId);
         String p2MonthKey = String.format(PLAYER2_MONTH_KEY_FORMAT, roomId);
         String triggerKey = String.format(LEADER_TRIGGER_KEY_FORMAT, roomId);
-        return cardRedisOps.delete(select5Key, p1MonthKey, p2MonthKey, triggerKey).then();
+        return cardRedisOps.delete(select5Key, p1MonthKey, p2MonthKey, triggerKey).then().timeout(CLEANUP_TIMEOUT);
     }
 }

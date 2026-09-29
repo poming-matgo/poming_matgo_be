@@ -12,9 +12,13 @@ import org.springframework.context.annotation.Profile;
 import org.springframework.stereotype.Repository;
 import reactor.core.publisher.Mono;
 
+import java.time.Duration;
+
 @Profile("redis")
 @Repository
 public class RedisGameStateRepository implements GameStateRepository {
+    private static final Duration CLEANUP_TIMEOUT = Duration.ofSeconds(30);
+
     private final RoomTimerLifecycle timerLifecycle;
     private final ReactiveRedisOperations<String, GameState> redisOps;
 
@@ -65,7 +69,7 @@ public class RedisGameStateRepository implements GameStateRepository {
     public Mono<Void> cleanup(long roomId) {
         return Mono.defer(() -> {
             timerLifecycle.close(roomId);
-            return redisOps.delete(generateKey(roomId)).then();
+            return redisOps.delete(generateKey(roomId)).then().timeout(CLEANUP_TIMEOUT);
         });
     }
 }
