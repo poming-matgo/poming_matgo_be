@@ -235,6 +235,7 @@ class GameActionFailureCleanupTest {
 
     @Test
     void cleanupWaitsForActiveExecutionBeforeDeletingData() {
+        // 직접 획득한 gate의 대기 계약이다. 운영 executor의 30초 제한을 재현하지 않는다.
         var active = gate.acquire(ROOM_ID);
         Sinks.Empty<Void> data = Sinks.empty();
         when(acquired.cleanup(ROOM_ID)).thenReturn(data.asMono());
@@ -255,6 +256,67 @@ class GameActionFailureCleanupTest {
             assertNull(error.get());
             assertReusable();
         } finally {
+            cleanup.shutdown();
+            VirtualTimeScheduler.reset();
+        }
+    }
+
+    @ParameterizedTest(name = "정리 대기 중 실행 수락={0}")
+    @ValueSource(booleans = {false, true})
+    void cleanupUsesRemainingExecutionDeadlineThenNotificationDeadline(boolean accepted) {
+        VirtualTimeScheduler clock = VirtualTimeScheduler.getOrSet();
+        Sinks.One<Object> action = Sinks.one();
+        Sinks.Empty<Void> notification = Sinks.empty();
+        AtomicReference<Throwable> actionError = new AtomicReference<>();
+        try {
+            var caller = (accepted ? accepted(action.asMono())
+                    : executor.execute(ROOM_ID, action::asMono))
+                    .subscribe(ignored -> fail("Pending action must not succeed"), actionError::set);
+            assertEquals(1, action.currentSubscriberCount());
+            if (accepted) caller.dispose();
+            clock.advanceTimeBy(Duration.ofSeconds(10));
+
+            StepVerifier.create(cleanup.cleanupRoom(ROOM_ID, notification.asMono()))
+                    .thenCancel().verify(TIMEOUT);
+            StepVerifier.create(cleanup.cleanupRoom(ROOM_ID,
+                            Mono.error(new AssertionError("Duplicate cleanup must keep first notification"))))
+                    .then(() -> {
+                        clock.advanceTimeBy(Duration.ofSeconds(19));
+                        assertEquals(1, action.currentSubscriberCount());
+                        assertEquals(0, notification.currentSubscriberCount());
+                        verify(state, never()).cleanup(ROOM_ID);
+                        assertBlocked();
+                        clock.advanceTimeBy(Duration.ofSeconds(1));
+                        assertEquals(0, action.currentSubscriberCount());
+                        assertEquals(1, notification.currentSubscriberCount());
+                        if (accepted) assertNull(actionError.get());
+                        else assertInstanceOf(TimeoutException.class, actionError.get());
+                        verify(events, times(accepted ? 1 : 0)).publishEvent(any(GameActionFailedEvent.class));
+                        clock.advanceTimeBy(Duration.ofSeconds(4));
+                        verify(state, never()).cleanup(ROOM_ID);
+                        assertBlocked();
+                        clock.advanceTimeBy(Duration.ofSeconds(1));
+                    })
+                    .expectComplete().verify(TIMEOUT);
+
+            assertEquals(0, notification.currentSubscriberCount());
+            assertNull(state.findById(ROOM_ID).block(TIMEOUT));
+            verify(state).cleanup(ROOM_ID);
+            verify(cards).cleanup(ROOM_ID);
+            verify(acquired).cleanup(ROOM_ID);
+            verify(leader).cleanup(ROOM_ID);
+            verify(sessions).removeRoom(ROOM_ID);
+            verify(events).publishEvent(new RoomCleanedUpEvent(ROOM_ID));
+            assertTrue(((Set<?>) ReflectionTestUtils.getField(executor, "executions")).isEmpty());
+            assertTrue(((Map<?, ?>) ReflectionTestUtils.getField(cleanup, "executions")).isEmpty());
+            assertTrue(((Map<?, ?>) ReflectionTestUtils.getField(gate, "rooms")).isEmpty());
+            state.create(GameState.createEmptyRoom(ROOM_ID)).block(TIMEOUT);
+            clock.advanceTimeBy(Duration.ofMinutes(1));
+            assertNotNull(state.findById(ROOM_ID).block(TIMEOUT));
+            verify(state).cleanup(ROOM_ID);
+            assertReusable();
+        } finally {
+            executor.shutdown();
             cleanup.shutdown();
             VirtualTimeScheduler.reset();
         }
