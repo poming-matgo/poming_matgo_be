@@ -5,6 +5,7 @@ import com.pomingmatgo.gameservice.global.WebSocketResDto;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.pomingmatgo.gameservice.global.metrics.ThroughputRecorder;
 import com.pomingmatgo.gameservice.infrastructure.session.SessionManager;
+import com.pomingmatgo.gameservice.infrastructure.session.SnapshotDelivery;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.stereotype.Component;
@@ -13,13 +14,13 @@ import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 import reactor.util.context.Context;
 
-import java.util.function.Predicate;
+import java.util.function.Function;
 import java.util.function.UnaryOperator;
 
 @Component
 @Slf4j
 public class MessageSender {
-    private record Recipients(Predicate<WebSocketSession> allows) {}
+    private record Recipients(Function<WebSocketSession, Mono<Boolean>> allows) {}
     private final ObjectMapper objectMapper;
     private final SessionManager sessionManager;
     // metrics.throughput.enabled=false면 bean이 없어 null — hot path라 기동 시 1회만 조회해 둔다
@@ -47,10 +48,24 @@ public class MessageSender {
         // 미구독 호출은 집계하지 않으며, 연결 상태도 실제 송신 구독 시점에 확인한다.
         return Mono.deferContextual(context -> {
             Recipients recipients = context.getOrDefault(Recipients.class, null);
-            if (session == null || !session.isOpen()
-                    || (recipients != null && !recipients.allows().test(session))) {
+            Mono<Boolean> permission = recipients == null ? Mono.just(true) : recipients.allows().apply(session);
+            return permission.flatMap(allowed -> sendPayloadResult(session, payload, allowed)).then();
+        });
+    }
+
+    public <T> Mono<Void> sendSnapshotToSession(WebSocketSession session, WebSocketResDto<T> response,
+                                               SnapshotDelivery delivery) {
+        return sendPayloadResult(session, response, true)
+                .doOnNext(delivery::complete)
+                .flatMap(sent -> sent ? Mono.<Void>empty()
+                        : Mono.error(new IllegalStateException("Reconnect snapshot send failed")));
+    }
+
+    private Mono<Boolean> sendPayloadResult(WebSocketSession session, Object payload, boolean allowed) {
+        return Mono.defer(() -> {
+            if (!allowed || session == null || !session.isOpen()) {
                 if (throughputRecorder != null) throughputRecorder.recordSkipped();
-                return Mono.empty();
+                return Mono.just(false);
             }
 
             return Mono.fromCallable(() -> objectMapper.writeValueAsString(payload))
@@ -65,11 +80,12 @@ public class MessageSender {
                 .doOnCancel(() -> {
                     if (throughputRecorder != null) throughputRecorder.recordCancelled();
                 })
+                .thenReturn(true)
                 // 전송 실패는 게임 진행을 막지 않는다 — 세션 사망은 disconnect 처리가 별도로 감지·수습
                 .onErrorResume(e -> {
                     if (throughputRecorder != null) throughputRecorder.recordFailed();
                     log.debug("WS 메시지 전송 실패 — 세션 [{}] 스킵", session.getId(), e);
-                    return Mono.empty();
+                    return Mono.just(false);
                 });
         });
     }

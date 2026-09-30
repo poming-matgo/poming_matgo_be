@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.pomingmatgo.gameservice.domain.Player;
 import com.pomingmatgo.gameservice.domain.card.Card;
 import com.pomingmatgo.gameservice.infrastructure.session.SessionManager;
+import com.pomingmatgo.gameservice.infrastructure.session.SnapshotDelivery;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
@@ -13,6 +14,7 @@ import org.springframework.core.io.buffer.DefaultDataBufferFactory;
 import org.springframework.web.reactive.socket.WebSocketMessage;
 import org.springframework.web.reactive.socket.WebSocketSession;
 import reactor.core.publisher.Mono;
+import reactor.test.StepVerifier;
 
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
@@ -28,6 +30,41 @@ class MessageRecipientsTest {
     private final MessageSender sender = new MessageSender(new ObjectMapper(), sessions,
             new StaticListableBeanFactory().getBeanProvider(ThroughputRecorder.class));
     private final GameMessageSender gameSender = new GameMessageSender(sender, sessions);
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void pendingSnapshotWaitEndsWhenRegistrationIsRemoved(boolean removeRoom) {
+        WebSocketSession original = session("pending");
+        SnapshotDelivery delivery = new SnapshotDelivery();
+        sessions.addPlayer(ROOM_ID, Player.PLAYER_1, 1L, original, delivery).block(TIMEOUT);
+        delivery.captured();
+        var recipients = sender.captureRecipients(ROOM_ID);
+        StepVerifier.create(sender.sendPayload(original, "old-action").contextWrite(recipients))
+                .then(() -> {
+                    verify(original, never()).send(any());
+                    if (removeRoom) sessions.removeRoom(ROOM_ID).block(TIMEOUT);
+                    else sessions.addPlayer(ROOM_ID, Player.PLAYER_1, 1L, original).block(TIMEOUT);
+                })
+                .verifyComplete();
+        delivery.complete(true);
+        sender.sendPayload(original, "late-action").contextWrite(recipients).block(TIMEOUT);
+        verify(original, never()).send(any());
+        sessions.shutdown();
+    }
+
+    @Test
+    void sameSocketReregistrationDoesNotRestoreOldRecipients() {
+        WebSocketSession original = session("same-socket");
+        sessions.addPlayer(ROOM_ID, Player.PLAYER_1, 1L, original).block(TIMEOUT);
+        var recipients = sender.captureRecipients(ROOM_ID);
+        sessions.deletePlayer(ROOM_ID, 1, original);
+        sessions.addPlayer(ROOM_ID, Player.PLAYER_1, 1L, original).block(TIMEOUT);
+        sender.sendPayload(original, "old-action").contextWrite(recipients).block(TIMEOUT);
+        verify(original, never()).send(any());
+        sender.sendPayload(original, "new-action").contextWrite(sender.captureRecipients(ROOM_ID)).block(TIMEOUT);
+        verify(original).send(any());
+        sessions.shutdown();
+    }
 
     @Test
     void targetedAndBroadcastMessagesShareRecipientsWithoutLeakingIntoLaterActions() {

@@ -15,6 +15,7 @@ import com.pomingmatgo.gameservice.domain.score.PayoutCalculator;
 import com.pomingmatgo.gameservice.global.exception.WebSocketBusinessException;
 import com.pomingmatgo.gameservice.infrastructure.scheduler.TurnScheduler;
 import com.pomingmatgo.gameservice.infrastructure.lock.GameLock;
+import com.pomingmatgo.gameservice.infrastructure.session.SnapshotDelivery;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import reactor.core.publisher.Mono;
@@ -25,7 +26,7 @@ import java.util.stream.Collectors;
 import static com.pomingmatgo.gameservice.global.exception.WebSocketErrorCode.NOT_EXISTED_ROOM;
 
 // 상태는 fresh 조회 — 이탈 중 자동플레이가 게임을 진행시켰을 수 있고, 방이 teardown됐다면 재접속 자체를 거절한다.
-// 조회만 게임 락으로 보호한다. 락 해제 후 송신과 다른 안내의 적용 순서는 별도 계약이다.
+// 조회와 해당 등록의 조회 경계를 락 안에서 확정하고, 송신 및 후속 안내 대기는 락 밖에서 수행한다.
 @Service
 @RequiredArgsConstructor
 public class ReconnectService {
@@ -37,7 +38,7 @@ public class ReconnectService {
     private final PayoutCalculator payoutCalculator;
 
     @GameLock
-    public Mono<ReconnectStateRes> buildSnapshot(long roomId, Player me) {
+    public Mono<ReconnectStateRes> buildSnapshot(long roomId, Player me, SnapshotDelivery delivery) {
         Player opponent = me.opponent();
 
         return gameStateRepository.findById(roomId)
@@ -49,7 +50,8 @@ public class ReconnectService {
                         acquiredCardRepository.getAllCards(roomId, me.getNumber()),
                         acquiredCardRepository.getAllCards(roomId, opponent.getNumber())
                 ).map(t -> assemble(gameState, me, opponent,
-                        t.getT1(), t.getT2().size(), t.getT3(), t.getT4(), t.getT5())));
+                        t.getT1(), t.getT2().size(), t.getT3(), t.getT4(), t.getT5())))
+                .doOnNext(snapshot -> delivery.captured());
     }
 
     private ReconnectStateRes assemble(GameState gameState, Player me, Player opponent,

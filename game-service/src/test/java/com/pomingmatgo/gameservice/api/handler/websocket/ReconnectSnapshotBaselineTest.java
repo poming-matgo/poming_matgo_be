@@ -46,7 +46,7 @@ import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 
-// 조회 일관성과 액션 완료 이후 새 수신자 제외는 정상 보장, 늦은 스냅샷은 미해결 기준선이다.
+// 실제 액션·CONNECT 경로와 제어 송신으로 조회 경계 및 스냅샷 이후 안내 순서를 검증한다.
 @SpringBootTest(properties = "spring.autoconfigure.exclude="
         + "org.redisson.spring.starter.RedissonAutoConfigurationV2,"
         + "org.springframework.boot.autoconfigure.data.redis.RedisAutoConfiguration,"
@@ -156,7 +156,7 @@ class ReconnectSnapshotBaselineTest {
 
     @ParameterizedTest
     @ValueSource(booleans = {false, true})
-    void reconnectCanStillPublishAnOldSnapshotAfterAnIndependentAction(boolean autoplay)
+    void independentActionWaitsForSnapshotDeliveryOutsideGameLock(boolean autoplay)
             throws Exception {
         TestSession reconnecting = newSession("reconnecting", true);
         var connect = reconnectWorker.submit(() -> reconnecting.emit(connectJson(USER_2)));
@@ -168,7 +168,9 @@ class ReconnectSnapshotBaselineTest {
         } else {
             opponent.emit("{\"eventType\":{\"subType\":\"NORMAL_SUBMIT\"},\"data\":{\"cardIndex\":0}}");
         }
-        await(() -> reconnecting.count("ANNOUNCE_TURN_INFORMATION") == 1);
+        await(() -> opponent.count("SUBMIT_CARD") == 1);
+        assertEquals(0, reconnecting.count("ANNOUNCE_TURN_INFORMATION"));
+        assertEquals(0, reconnecting.count("SUBMIT_CARD"));
         assertEquals(0, reconnecting.count("RECONNECT_STATE"));
         assertEquals(2, states.findById(ROOM_ID).block(TIMEOUT).getCurrentTurn());
         assertEquals(9, cards.getPlayerCards(ROOM_ID, Player.PLAYER_1).block(TIMEOUT).size());
@@ -176,6 +178,7 @@ class ReconnectSnapshotBaselineTest {
 
         resume.countDown();
         connect.get(TIMEOUT.toMillis(), TimeUnit.MILLISECONDS);
+        await(() -> reconnecting.count("ANNOUNCE_TURN_INFORMATION") == 1);
         JsonNode snapshot = reconnecting.data("RECONNECT_STATE");
         assertEquals(1, snapshot.path("currentTurn").asInt());
         assertEquals("PLAYER_1", snapshot.path("currentPlayer").asText());
@@ -185,7 +188,9 @@ class ReconnectSnapshotBaselineTest {
         assertFalse(snapshot.path("floorCards").has("7"));
         assertEquals("PLAYER_2", reconnecting.data("ANNOUNCE_TURN_INFORMATION").path("curPlayer").asText());
         assertEquals(2, reconnecting.data("ANNOUNCE_TURN_INFORMATION").path("turn").asInt());
-        assertEquals("RECONNECT_STATE", reconnecting.outbox().getLast().path("status").asText());
+        List<String> order = reconnecting.outbox().stream().map(node -> node.path("status").asText()).toList();
+        assertTrue(order.indexOf("RECONNECT_STATE") < order.indexOf("SUBMIT_CARD"));
+        assertTrue(order.indexOf("RECONNECT_STATE") < order.indexOf("ANNOUNCE_TURN_INFORMATION"));
         assertEquals(1, reconnecting.count("SUBMIT_CARD"));
         assertEquals(1, reconnecting.count("CARD_REVEALED"));
         assertEquals(1, reconnecting.count("RECONNECT_STATE"));
@@ -193,6 +198,65 @@ class ReconnectSnapshotBaselineTest {
         assertSame(opponent.session(), sessions.getSession(ROOM_ID, 1));
         assertSame(reconnecting.session(), sessions.getSession(ROOM_ID, 2));
         assertFalse(reconnecting.subscription().isDisposed());
+    }
+
+    @Test
+    void actionBeforeSnapshotReadIsIncludedOnlyInSnapshot() throws Exception {
+        TestSession reconnecting = newSession("registered-before-read", false);
+        Sinks.Empty<Void> reconnectNotice = Sinks.empty();
+        doAnswer(invocation -> Flux.from(invocation.<Publisher<WebSocketMessage>>getArgument(0))
+                .concatMap(message -> Mono.fromCallable(() -> mapper.readTree(message.getPayloadAsText())))
+                .concatMap(node -> {
+                    reconnecting.outbox().add(node);
+                    return "RECONNECT".equals(node.path("status").asText())
+                            ? reconnectNotice.asMono() : Mono.empty();
+                }).then()).when(reconnecting.session()).send(any());
+        reconnecting.emit(connectJson(USER_2));
+        assertSame(reconnecting.session(), sessions.getSession(ROOM_ID, 2));
+        assertEquals(0, reconnecting.count("RECONNECT_STATE"));
+        opponent.emit("{\"eventType\":{\"subType\":\"NORMAL_SUBMIT\"},\"data\":{\"cardIndex\":4}}");
+        await(() -> opponent.count("ANNOUNCE_TURN_INFORMATION") == 1);
+        assertEquals(0, reconnecting.count("SUBMIT_CARD"));
+        assertEquals(0, reconnecting.count("ACQUIRED_CARD"));
+        assertEquals(Sinks.EmitResult.OK, reconnectNotice.tryEmitEmpty());
+        assertEquals(2, reconnecting.data("RECONNECT_STATE").path("currentTurn").asInt());
+        assertEquals(mapper.valueToTree(List.of(Card.MAY_1)),
+                reconnecting.data("RECONNECT_STATE").path("opponentAcquiredCards").path(Card.MAY_1.getType().name()));
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void unfinishedSnapshotSendReleasesWaitingActionOnFailureOrDisconnect(boolean cancel) throws Exception {
+        TestSession reconnecting = newSession("unfinished-send", false);
+        Sinks.Empty<Void> snapshotSend = Sinks.empty();
+        doAnswer(invocation -> Flux.from(invocation.<Publisher<WebSocketMessage>>getArgument(0))
+                .concatMap(message -> Mono.fromCallable(() -> mapper.readTree(message.getPayloadAsText())))
+                .concatMap(node -> {
+                    if ("RECONNECT_STATE".equals(node.path("status").asText())) return snapshotSend.asMono();
+                    reconnecting.outbox().add(node);
+                    return Mono.empty();
+                }).then()).when(reconnecting.session()).send(any());
+        reconnecting.emit(connectJson(USER_2));
+        submit();
+        assertEquals(2, states.findById(ROOM_ID).block(TIMEOUT).getCurrentTurn());
+        assertEquals(0, reconnecting.count("SUBMIT_CARD"));
+        if (cancel) reconnecting.subscription().dispose();
+        else assertEquals(Sinks.EmitResult.OK, snapshotSend.tryEmitError(new IllegalStateException("send failed")));
+        await(() -> sessions.getSession(ROOM_ID, 2) == null);
+        await(() -> opponent.count("ANNOUNCE_TURN_INFORMATION") == 1);
+        assertEquals(0, reconnecting.count("SUBMIT_CARD"));
+        assertEquals(0, reconnecting.count("ANNOUNCE_TURN_INFORMATION"));
+        if (!cancel) {
+            assertEquals("SYSTEM_ERROR", reconnecting.outbox().getLast().path("errorCode").asText());
+            // 동일 소켓 재등록은 새 조회 경계를 사용한다.
+            doAnswer(invocation -> Flux.from(invocation.<Publisher<WebSocketMessage>>getArgument(0))
+                    .doOnNext(message -> {
+                        try { reconnecting.outbox().add(mapper.readTree(message.getPayloadAsText())); }
+                        catch (Exception error) { throw new IllegalStateException(error); }
+                    }).then()).when(reconnecting.session()).send(any());
+            reconnecting.emit(connectJson(USER_2));
+            assertEquals(2, reconnecting.data("RECONNECT_STATE").path("currentTurn").asInt());
+        }
     }
 
     @ParameterizedTest

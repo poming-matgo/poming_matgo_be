@@ -1,6 +1,7 @@
 package com.pomingmatgo.gameservice.application.connection;
 
 import com.pomingmatgo.gameservice.infrastructure.session.SessionManager;
+import com.pomingmatgo.gameservice.infrastructure.session.SnapshotDelivery;
 
 import com.pomingmatgo.gameservice.domain.GamePhase;
 import com.pomingmatgo.gameservice.domain.GameState;
@@ -46,28 +47,33 @@ public class GameConnectionService {
         return gameService.findGameState(roomId)
                 .switchIfEmpty(Mono.error(new WebSocketBusinessException(NOT_EXISTED_ROOM)))
                 .flatMap(gameState -> Mono.fromCallable(() -> gameState.getPlayerType(userId))
-                        .flatMap(player -> sessionManager.addPlayer(roomId, player, userId, session)
-                                // 행동 대기 phase의 CONNECT는 진행 중인 게임으로의 재접속
-                                .then(gameState.getPhase().isPlayerActionPhase()
-                                        ? handleReconnect(roomId, player, session)
-                                        : messageSender.sendMessageToAllUser(
-                                                roomId, WebSocketResDto.of(player, ResponseEvent.CONNECT, "접속했습니다.")))));
+                        .flatMap(player -> {
+                            if (gameState.getPhase().isPlayerActionPhase()) {
+                                SnapshotDelivery delivery = new SnapshotDelivery();
+                                return sessionManager.addPlayer(roomId, player, userId, session, delivery)
+                                        .then(handleReconnect(roomId, player, session, delivery))
+                                        .doFinally(ignored -> delivery.complete(false));
+                            }
+                            return sessionManager.addPlayer(roomId, player, userId, session)
+                                    .then(messageSender.sendMessageToAllUser(roomId,
+                                            WebSocketResDto.of(player, ResponseEvent.CONNECT, "접속했습니다.")));
+                        }));
     }
 
-    private Mono<Void> handleReconnect(long roomId, Player player, WebSocketSession session) {
+    private Mono<Void> handleReconnect(long roomId, Player player, WebSocketSession session, SnapshotDelivery delivery) {
         return messageSender.sendMessageToAllUser(
                         roomId, WebSocketResDto.of(player, ResponseEvent.RECONNECT, "재접속했습니다."))
-                .then(reconnectService.buildSnapshot(roomId, player))
-                // 조회 실패 뒤 CONNECT가 ALREADY_JOIN으로 막히지 않도록 기존 identity·방 보존 정책으로 해제한다.
-                .onErrorResume(error -> disconnect(session).then(Mono.error(error)))
+                .then(reconnectService.buildSnapshot(roomId, player, delivery))
                 .flatMap(snapshot -> {
                     // 조회 락 해제 중 정리되거나 교체된 연결에는 스냅샷 송신을 시작하지 않는다.
                     if (sessionManager.getSession(roomId, player.getNumber()) != session) {
                         return Mono.empty();
                     }
-                    return messageSender.sendMessageToSession(
-                            session, WebSocketResDto.of(player, ResponseEvent.RECONNECT_STATE, "재접속 상태 동기화", snapshot));
-                });
+                    return messageSender.sendSnapshotToSession(session,
+                            WebSocketResDto.of(player, ResponseEvent.RECONNECT_STATE, "재접속 상태 동기화", snapshot), delivery);
+                })
+                // 조회·송신 실패 뒤 같은 연결이 CONNECT를 다시 요청할 수 있도록 매핑을 해제한다.
+                .onErrorResume(error -> disconnect(session).then(Mono.error(error)));
     }
 
     public Mono<Void> disconnect(WebSocketSession session) {

@@ -15,7 +15,7 @@ import java.time.Duration;
 import java.util.Collection;
 import java.util.List;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.function.Predicate;
+import java.util.function.Function;
 
 @Component
 @Slf4j
@@ -28,11 +28,21 @@ public class SessionManager {
     public record PlayerContext(long roomId, long userId, int playerNum) {}
 
     public Mono<Void> addPlayer(long roomId, Player player, long userId, WebSocketSession session) {
+        return Mono.defer(() -> {
+            SnapshotDelivery ready = new SnapshotDelivery();
+            ready.captured();
+            ready.complete(true);
+            return addPlayer(roomId, player, userId, session, ready);
+        });
+    }
+
+    public Mono<Void> addPlayer(long roomId, Player player, long userId, WebSocketSession session,
+                                SnapshotDelivery snapshot) {
         return Mono.fromRunnable(() -> {
             RoomSessionData roomData = roomSessions.computeIfAbsent(roomId, k -> new RoomSessionData());
             // 동시에 재접속해도 후속 요청이 이전 세션의 매핑을 제거할 수 있도록, 세션 교체 전에 매핑을 등록한다.
             sessionToRoomMap.put(session.getId(), roomId);
-            WebSocketSession old = roomData.replacePlayer(player, userId, session);
+            WebSocketSession old = roomData.replacePlayer(player, userId, session, snapshot);
 
             // 이전 세션의 disconnect가 새 연결에 영향을 주지 않도록, 매핑을 먼저 제거한 뒤 연결을 닫는다.
             if (old != null && !old.getId().equals(session.getId())) {
@@ -109,6 +119,7 @@ public class SessionManager {
             if (removed == null) return;
             // 개별 disconnect 처리 없이 방이 삭제돼도 세션→방 매핑이 남지 않도록 함께 제거한다.
             removed.activeSessions().forEach(session -> sessionToRoomMap.remove(session.getId()));
+            removed.registrations().forEach(registration -> registration.snapshot().complete(false));
         });
     }
 
@@ -120,13 +131,16 @@ public class SessionManager {
         return roomSessionData.activeSessions();
     }
 
-    /** 캡처한 방 세션 컨테이너와 연결이 유지되는 수신자만 허용한다. 송신과 원자적이지는 않다. */
-    public Predicate<WebSocketSession> captureRecipients(long roomId) {
+    /** 조회 경계 이후 액션만 스냅샷 송신을 기다린다. 대기 뒤 등록 identity를 다시 확인한다. */
+    public Function<WebSocketSession, Mono<Boolean>> captureRecipients(long roomId) {
         RoomSessionData captured = roomSessions.get(roomId);
-        List<WebSocketSession> recipients = captured == null ? List.of() : captured.activeSessions();
-        return session -> captured != null && roomSessions.get(roomId) == captured
-                && recipients.stream().anyMatch(candidate -> candidate == session)
-                && captured.activeSessions().stream().anyMatch(candidate -> candidate == session);
+        record Recipient(RoomSessionData.Registration registration, Mono<Boolean> permission) {}
+        List<Recipient> recipients = captured == null ? List.of() : captured.registrations().stream()
+                .map(registration -> new Recipient(registration, registration.snapshot().capturePermission())).toList();
+        return session -> recipients.stream().filter(recipient -> recipient.registration().session() == session)
+                .findFirst().map(recipient -> recipient.permission().map(allowed -> allowed
+                        && roomSessions.get(roomId) == captured && captured.isCurrent(recipient.registration())))
+                .orElseGet(() -> Mono.just(false));
     }
 
 }
