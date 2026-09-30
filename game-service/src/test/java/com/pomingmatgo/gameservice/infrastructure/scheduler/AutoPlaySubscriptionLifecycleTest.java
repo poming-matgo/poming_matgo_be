@@ -119,6 +119,74 @@ class AutoPlaySubscriptionLifecycleTest {
     }
 
     @Test
+    void userRequestStartingAfterFirstCheckReleasesFlagThenRearmsTimer() {
+        Sinks.Empty<Void> released = Sinks.empty();
+        when(inFlight.isSet(anyString())).thenReturn(Mono.just(false), Mono.just(true));
+        when(inFlight.deleteFlag(anyString(), anyString())).thenReturn(released.asMono());
+        stubAction(Mono.empty());
+        schedule(ROOM_ID);
+        Disposable original = timerTask(ROOM_ID);
+        fire();
+
+        verifyNoInteractions(turnFlow);
+        verify(inFlight).deleteFlag(eq(InFlightManager.autoplayKey(ROOM_ID, 1)), anyString());
+        assertEquals(1, running().size());
+        assertSame(original, timerTask(ROOM_ID), "플래그 해제가 끝난 뒤 재예약한다");
+        assertEquals(Sinks.EmitResult.OK, released.tryEmitEmpty());
+        assertEquals(0, running().size());
+        assertNotSame(original, timerTask(ROOM_ID));
+        assertFalse(timerTask(ROOM_ID).isDisposed());
+
+        when(inFlight.isSet(anyString())).thenReturn(Mono.just(false));
+        clock.advanceTimeBy(Duration.ofSeconds(1));
+        verify(turnFlow).processNormalSubmit(eq(ROOM_ID), eq(Player.PLAYER_1), eq(0),
+                eq(GameActionSource.AUTOPLAY), any(TurnScheduler.class));
+        verify(inFlight, times(2)).deleteFlag(eq(InFlightManager.autoplayKey(ROOM_ID, 1)), anyString());
+        assertEquals(0, running().size());
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void lateSecondUserCheckPreservesReplacementTimer(boolean recreate) {
+        Sinks.One<Boolean> busy = Sinks.one();
+        when(inFlight.isSet(anyString())).thenReturn(Mono.just(false), busy.asMono());
+        schedule(ROOM_ID);
+        fire();
+        if (recreate) {
+            scheduler.onRoomCleanedUp(new RoomCleanedUpEvent(ROOM_ID));
+            lifecycle.open(ROOM_ID);
+        }
+        schedule(ROOM_ID);
+        Disposable replacement = timerTask(ROOM_ID);
+
+        assertEquals(Sinks.EmitResult.OK, busy.tryEmitValue(true));
+
+        assertSame(replacement, timerTask(ROOM_ID));
+        assertFalse(replacement.isDisposed());
+        assertEquals(0, running().size());
+        verify(inFlight).deleteFlag(eq(InFlightManager.autoplayKey(ROOM_ID, 1)), anyString());
+        verifyNoInteractions(turnFlow);
+    }
+
+    @Test
+    void lateSecondUserCheckCannotRearmCleanedRoom() {
+        Sinks.One<Boolean> busy = Sinks.one();
+        when(inFlight.isSet(anyString())).thenReturn(Mono.just(false), busy.asMono());
+        schedule(ROOM_ID);
+        fire();
+        scheduler.onRoomCleanedUp(new RoomCleanedUpEvent(ROOM_ID));
+
+        assertEquals(Sinks.EmitResult.OK, busy.tryEmitValue(true));
+
+        assertTrue(timers().isEmpty());
+        assertEquals(0, running().size());
+        verify(inFlight).deleteFlag(eq(InFlightManager.autoplayKey(ROOM_ID, 1)), anyString());
+        clearInvocations(gameService, inFlight);
+        clock.advanceTimeBy(Duration.ofSeconds(3));
+        verifyNoInteractions(gameService, inFlight, turnFlow);
+    }
+
+    @Test
     void lateBusyUserCheckDoesNotReplaceNewTimerForTheSameStep() {
         Sinks.One<Boolean> busy = Sinks.one();
         when(inFlight.isSet(anyString())).thenReturn(busy.asMono());

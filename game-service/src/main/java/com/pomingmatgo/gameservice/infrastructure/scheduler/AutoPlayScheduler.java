@@ -226,7 +226,8 @@ public class AutoPlayScheduler implements TurnScheduler {
                     Mono<Void> mainProcess = Mono.defer(() -> inFlightManager.isSet(normalFlagKey)
                             .flatMap(normalInProgress -> {
                                 // 앞선 확인 이후 사용자 요청이 시작됐을 수 있으므로 게임 실행 직전에 다시 확인한다.
-                                if (normalInProgress) return Mono.<Void>empty();
+                                // 소유 플래그 해제 후 바깥 경합 처리에서 현재 타이머를 재예약한다.
+                                if (normalInProgress) return Mono.error(new WebSocketBusinessException(WebSocketErrorCode.TRY_AGAIN));
                                 return gameService.findGameState(roomId)
                                         .flatMap(gameState -> {
                                             if (!step.matches(gameState)) {
