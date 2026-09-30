@@ -39,6 +39,7 @@ public class AutoPlayScheduler implements TurnScheduler {
     // 응답이 없는 플레이어는 승리를 확정하도록 GO 대신 STOP을 선택한다.
     private static final boolean AUTO_GO_STOP_IS_GO = false;
     private static final long MIN_DELAY_MILLIS = 100;
+    private static final Duration EXECUTION_TIMEOUT = Duration.ofSeconds(30);
 
     private final RoomTimerLifecycle timerLifecycle;
     private final InFlightManager inFlightManager;
@@ -133,7 +134,10 @@ public class AutoPlayScheduler implements TurnScheduler {
         // 구독 전에 등록해 즉시 완료된 구독이 남거나 서버 종료 시 회수에서 빠지는 일을 막는다.
         if (runningAutoPlays.add(execution)) {
             Scheduled fired = scheduled.get(roomId);
-            Mono.defer(() -> attemptAutoPlay(roomId, step, currentPlayer, boundScheduler, fired)).subscribe(execution);
+            // 송신까지 기다리는 구독만 제한한다. 수락한 in-memory 액션은 executor가 별도로 완료한다.
+            Mono.defer(() -> attemptAutoPlay(roomId, step, currentPlayer, boundScheduler, fired))
+                    .timeout(EXECUTION_TIMEOUT)
+                    .subscribe(execution);
         }
     }
 

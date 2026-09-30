@@ -158,6 +158,44 @@ class TurnFlowSendLifecycleTest {
     }
 
     @Test
+    @DisplayName("자동플레이 송신 제한은 완료된 END 재시작과 연결을 보존한다")
+    void autoplaySendTimeoutPreservesCompletedRestart() {
+        slow.observedStatus = "SUBMIT_CARD";
+        GameState initial = gameStateRepository.findById(ROOM_ID).block(TIMEOUT);
+        gameStateRepository.save(initial.toBuilder().round(10).currentTurn(2).leadingPlayer(2).build()).block(TIMEOUT);
+        GameState[] restarted = new GameState[1];
+        StepVerifier.withVirtualTime(() -> {
+                    autoPlayScheduler.scheduleAutoPlay(ROOM_ID, 10, 2, Player.PLAYER_1,
+                            System.nanoTime(), GamePhase.IN_PROGRESS);
+                    return Mono.delay(Duration.ofSeconds(31));
+                })
+                .thenAwait(Duration.ofMillis(100))
+                .then(() -> {
+                    assertEquals(1, slow.turnStarted.get());
+                    assertEquals(0, slow.turnCancelled.get());
+                    restarted[0] = gameStateRepository.findById(ROOM_ID).block(TIMEOUT);
+                    assertEquals(GamePhase.NONE, restarted[0].getPhase());
+                    assertEquals(1, runningAutoPlays().size());
+                })
+                .thenAwait(Duration.ofSeconds(30))
+                .then(() -> {
+                    assertEquals(1, slow.turnCancelled.get());
+                    assertEquals(0, slow.turnCompleted.get());
+                    assertEquals(0, runningAutoPlays().size());
+                    assertSame(restarted[0], gameStateRepository.findById(ROOM_ID).block(TIMEOUT));
+                    assertSame(slow.session, sessionManager.getSession(ROOM_ID, 1));
+                    assertSame(opponent.session, sessionManager.getSession(ROOM_ID, 2));
+                })
+                .thenAwait(Duration.ofMillis(900))
+                .expectNext(0L)
+                .expectComplete().verify(TIMEOUT);
+    }
+
+    private Disposable.Composite runningAutoPlays() {
+        return (Disposable.Composite) ReflectionTestUtils.getField(autoPlayScheduler, "runningAutoPlays");
+    }
+
+    @Test
     @DisplayName("송신 대기 중 방 데이터와 세션 매핑은 정리되지만 기존 송신 구독은 별도 취소가 필요하다")
     void cleanupDoesNotOwnPendingSendSubscription() {
         StepVerifier.create(submit(ROOM_ID))

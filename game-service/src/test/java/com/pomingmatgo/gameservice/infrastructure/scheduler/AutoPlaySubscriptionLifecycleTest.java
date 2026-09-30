@@ -1,6 +1,9 @@
 package com.pomingmatgo.gameservice.infrastructure.scheduler;
 
 import com.pomingmatgo.gameservice.application.game.GameActionSource;
+import com.pomingmatgo.gameservice.application.game.GameActionAcceptance;
+import com.pomingmatgo.gameservice.application.game.InMemoryGameActionExecutor;
+import com.pomingmatgo.gameservice.infrastructure.lock.InMemoryRoomExecutionGate;
 import ch.qos.logback.classic.Logger;
 import ch.qos.logback.classic.spi.ILoggingEvent;
 import ch.qos.logback.core.read.ListAppender;
@@ -80,6 +83,61 @@ class AutoPlaySubscriptionLifecycleTest {
         assertEquals(Sinks.EmitResult.OK, completion.tryEmitEmpty());
         assertEquals(0, running().size());
         verify(inFlight).deleteFlag(eq(InFlightManager.autoplayKey(ROOM_ID, 1)), anyString());
+    }
+
+    @Test
+    void executionTimeoutReleasesFlagAndPreservesNextTimer() {
+        AtomicBoolean cancelled = new AtomicBoolean();
+        stubAction(Mono.<Void>never().doOnCancel(() -> cancelled.set(true)));
+        schedule(ROOM_ID);
+        fire();
+        scheduler.scheduleAutoPlay(ROOM_ID, 1, 2, Player.PLAYER_2,
+                System.nanoTime() + Duration.ofMinutes(1).toNanos(), GamePhase.IN_PROGRESS);
+        Disposable next = timerTask(ROOM_ID);
+
+        clock.advanceTimeBy(Duration.ofSeconds(29));
+        assertFalse(cancelled.get());
+        assertEquals(1, running().size());
+        clock.advanceTimeBy(Duration.ofSeconds(1));
+
+        assertTrue(cancelled.get());
+        assertEquals(0, running().size());
+        verify(inFlight).deleteFlag(eq(InFlightManager.autoplayKey(ROOM_ID, 1)), anyString());
+        assertSame(next, timerTask(ROOM_ID));
+        assertFalse(next.isDisposed());
+        verify(turnFlow, times(1)).processNormalSubmit(eq(ROOM_ID), eq(Player.PLAYER_1), eq(0),
+                eq(GameActionSource.AUTOPLAY), any(TurnScheduler.class));
+    }
+
+    @Test
+    void executionTimeoutDoesNotCancelAcceptedInMemoryMutation() {
+        InMemoryGameActionExecutor executor = new InMemoryGameActionExecutor(
+                new InMemoryRoomExecutionGate(), event -> fail("정상 완료한 수락 실행은 실패 정리를 요청하지 않는다"));
+        Sinks.One<Object> completion = Sinks.one();
+        AtomicBoolean mutationCancelled = new AtomicBoolean();
+        AtomicBoolean mutationCompleted = new AtomicBoolean();
+        // 실행기 수락이 스케줄러 제한보다 늦은 경우의 내부 취소 계약을 검증한다.
+        stubAction(Mono.delay(Duration.ofSeconds(1)).then(executor.execute(ROOM_ID,
+                () -> GameActionAcceptance.beforeMutation(() -> completion.asMono()
+                        .doOnCancel(() -> mutationCancelled.set(true))
+                        .doOnSuccess(value -> mutationCompleted.set(true))))).then());
+        try {
+            schedule(ROOM_ID);
+            fire();
+            clock.advanceTimeBy(Duration.ofSeconds(1));
+            assertEquals(1, completion.currentSubscriberCount());
+            clock.advanceTimeBy(Duration.ofSeconds(29));
+
+            assertEquals(0, running().size());
+            assertFalse(mutationCancelled.get());
+            assertEquals(1, completion.currentSubscriberCount());
+            verify(inFlight).deleteFlag(eq(InFlightManager.autoplayKey(ROOM_ID, 1)), anyString());
+            assertEquals(Sinks.EmitResult.OK, completion.tryEmitValue("saved"));
+            assertTrue(mutationCompleted.get());
+            assertEquals("next", executor.execute(ROOM_ID, () -> Mono.just("next")).block());
+        } finally {
+            executor.shutdown();
+        }
     }
 
     @Test
