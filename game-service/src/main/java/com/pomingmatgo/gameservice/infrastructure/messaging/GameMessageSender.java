@@ -21,10 +21,12 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
 import org.springframework.web.reactive.socket.WebSocketSession;
 import reactor.core.publisher.Mono;
+import reactor.util.context.Context;
 
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
+import java.util.function.UnaryOperator;
 
 import static com.pomingmatgo.gameservice.domain.Player.PLAYER_1;
 import static com.pomingmatgo.gameservice.domain.Player.PLAYER_2;
@@ -36,8 +38,9 @@ public class GameMessageSender {
     private final MessageSender messageSender;
     private final SessionManager sessionManager;
 
-
-
+    public UnaryOperator<Context> captureRecipients(long roomId) {
+        return messageSender.captureRecipients(roomId);
+    }
     public Mono<Void> sendLeaderSelectionMessage(long roomId, Player player, int cardIndex) {
         return messageSender.sendMessageToAllUser(
                 roomId,

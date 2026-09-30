@@ -15,6 +15,7 @@ import java.time.Duration;
 import java.util.Collection;
 import java.util.List;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.function.Predicate;
 
 @Component
 @Slf4j
@@ -117,6 +118,15 @@ public class SessionManager {
         if (roomSessionData == null) return List.of();
 
         return roomSessionData.activeSessions();
+    }
+
+    /** 캡처한 방 세션 컨테이너와 연결이 유지되는 수신자만 허용한다. 송신과 원자적이지는 않다. */
+    public Predicate<WebSocketSession> captureRecipients(long roomId) {
+        RoomSessionData captured = roomSessions.get(roomId);
+        List<WebSocketSession> recipients = captured == null ? List.of() : captured.activeSessions();
+        return session -> captured != null && roomSessions.get(roomId) == captured
+                && recipients.stream().anyMatch(candidate -> candidate == session)
+                && captured.activeSessions().stream().anyMatch(candidate -> candidate == session);
     }
 
 }

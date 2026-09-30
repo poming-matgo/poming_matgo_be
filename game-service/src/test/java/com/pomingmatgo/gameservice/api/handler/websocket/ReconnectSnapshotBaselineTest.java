@@ -46,7 +46,7 @@ import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 
-// 조회 일관성은 정상 보장으로 검증하고, 늦은 스냅샷·이전 액션 안내는 미해결 기준선으로 유지한다.
+// 조회 일관성과 액션 완료 이후 새 수신자 제외는 정상 보장, 늦은 스냅샷은 미해결 기준선이다.
 @SpringBootTest(properties = "spring.autoconfigure.exclude="
         + "org.redisson.spring.starter.RedissonAutoConfigurationV2,"
         + "org.springframework.boot.autoconfigure.data.redis.RedisAutoConfiguration,"
@@ -226,8 +226,11 @@ class ReconnectSnapshotBaselineTest {
         }
     }
 
-    @Test
-    void completedActionCanBroadcastAlreadySnapshottedCardsToANewSession() throws Exception {
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void completedActionDoesNotBroadcastAlreadySnapshottedCardsToANewSession(boolean replacing) throws Exception {
+        TestSession previous = replacing ? newSession("before-action", false) : null;
+        if (previous != null) previous.emit(connectJson(USER_2));
         Sinks.Empty<Void> sendCompleted = Sinks.empty();
         AtomicBoolean waitingForSend = new AtomicBoolean();
         // 세션 대역에서 SUBMIT_CARD 송신 완료만 보류한다. 상태 저장과 새 연결의 CONNECT는 지연하지 않는다.
@@ -261,16 +264,13 @@ class ReconnectSnapshotBaselineTest {
             assertEquals(0, reconnecting.count("SUBMIT_CARD"));
 
             assertEquals(Sinks.EmitResult.OK, sendCompleted.tryEmitEmpty());
-            await(() -> reconnecting.count("ANNOUNCE_TURN_INFORMATION") == 1);
-            // 후속 broadcast는 구독 때 수신자를 찾으므로 이미 결과를 받은 새 연결에도 도착한다.
-            assertEquals(snapshot.path("opponentAcquiredCards"), reconnecting.data("ACQUIRED_CARD"));
-            assertEquals(1, reconnecting.count("ACQUIRED_CARD"));
+            await(() -> opponent.count("ANNOUNCE_TURN_INFORMATION") == 1);
+            assertEquals(1, opponent.count("ACQUIRED_CARD"), "기존 상대는 액션의 후속 안내를 모두 받는다");
+            assertEquals(0, reconnecting.count("ACQUIRED_CARD"));
             assertEquals(0, reconnecting.count("SUBMIT_CARD"));
             assertEquals(0, reconnecting.count("CARD_REVEALED"));
-            assertEquals(2, reconnecting.data("ANNOUNCE_TURN_INFORMATION").path("turn").asInt());
-            List<String> statuses = reconnecting.outbox().stream()
-                    .map(node -> node.path("status").asText()).toList();
-            assertTrue(statuses.indexOf("RECONNECT_STATE") < statuses.indexOf("ACQUIRED_CARD"));
+            assertEquals(0, reconnecting.count("ANNOUNCE_TURN_INFORMATION"));
+            if (previous != null) assertEquals(0, previous.count("ACQUIRED_CARD"));
             assertEquals(2, states.findById(ROOM_ID).block(TIMEOUT).getCurrentTurn());
 
             reconnecting.emit(connectJson(USER_2));

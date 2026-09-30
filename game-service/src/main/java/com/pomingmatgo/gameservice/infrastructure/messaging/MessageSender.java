@@ -11,10 +11,15 @@ import org.springframework.stereotype.Component;
 import org.springframework.web.reactive.socket.WebSocketSession;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
+import reactor.util.context.Context;
+
+import java.util.function.Predicate;
+import java.util.function.UnaryOperator;
 
 @Component
 @Slf4j
 public class MessageSender {
+    private record Recipients(Predicate<WebSocketSession> allows) {}
     private final ObjectMapper objectMapper;
     private final SessionManager sessionManager;
     // metrics.throughput.enabled=false면 bean이 없어 null — hot path라 기동 시 1회만 조회해 둔다
@@ -32,10 +37,18 @@ public class MessageSender {
         return sendPayload(session, response);
     }
 
+    /** 게임 락 안에서 캡처하고, 해당 액션의 락 밖 안내 전체에 적용한다. */
+    public UnaryOperator<Context> captureRecipients(long roomId) {
+        Recipients recipients = new Recipients(sessionManager.captureRecipients(roomId));
+        return context -> context.put(Recipients.class, recipients);
+    }
+
     public Mono<Void> sendPayload(WebSocketSession session, Object payload) {
         // 미구독 호출은 집계하지 않으며, 연결 상태도 실제 송신 구독 시점에 확인한다.
-        return Mono.defer(() -> {
-            if (session == null || !session.isOpen()) {
+        return Mono.deferContextual(context -> {
+            Recipients recipients = context.getOrDefault(Recipients.class, null);
+            if (session == null || !session.isOpen()
+                    || (recipients != null && !recipients.allows().test(session))) {
                 if (throughputRecorder != null) throughputRecorder.recordSkipped();
                 return Mono.empty();
             }

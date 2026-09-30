@@ -23,6 +23,8 @@ import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Primary;
 import reactor.core.publisher.Mono;
+import reactor.util.context.Context;
+import java.util.function.UnaryOperator;
 
 import java.util.List;
 import java.util.concurrent.TimeUnit;
@@ -45,7 +47,9 @@ class AutoPlayGoStopChoiceTest {
         @Bean
         @Primary
         GameMessageSender noopGameMessageSender() {
-            return Mockito.mock(GameMessageSender.class, invocation -> Mono.empty());
+            return Mockito.mock(GameMessageSender.class, invocation ->
+                    invocation.getMethod().getReturnType() == UnaryOperator.class
+                            ? UnaryOperator.<Context>identity() : Mono.empty());
         }
     }
 
