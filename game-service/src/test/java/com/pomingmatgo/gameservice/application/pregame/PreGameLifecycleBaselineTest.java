@@ -455,7 +455,7 @@ class PreGameLifecycleBaselineTest {
         try {
             awaitSend();
             for (Mono<?> competing : List.of(rooms.joinRoom(101L, ROOM_ID), rooms.leaveRoom(101L, ROOM_ID),
-                    ready.readyAndPrepare(ROOM_ID, Player.PLAYER_1, false), selectSecondPlayer())) {
+                    ready.readyAndPrepare(ROOM_ID, Player.PLAYER_1, false, () -> {}), selectSecondPlayer())) {
                 StepVerifier.create(competing)
                         .expectErrorSatisfies(error -> assertEquals(WebSocketErrorCode.TRY_AGAIN,
                                 assertInstanceOf(WebSocketBusinessException.class, error).getWebsocketErrorCode()))

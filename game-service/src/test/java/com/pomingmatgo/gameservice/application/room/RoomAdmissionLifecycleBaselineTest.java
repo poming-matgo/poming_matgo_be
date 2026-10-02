@@ -62,13 +62,17 @@ class RoomAdmissionLifecycleBaselineTest {
 
     @BeforeEach
     void setUp() {
+        sessions.addRoom(ROOM_ID).block(TIMEOUT);
         AspectJProxyFactory roomProxy = new AspectJProxyFactory(new RoomService(states, sessions, cleanup));
         roomProxy.addAspect(new InMemoryGameLockAspect(executor));
         rooms = roomProxy.getProxy();
         AspectJProxyFactory proxy = new AspectJProxyFactory(new RoomReadyService(rooms, preGame));
         proxy.addAspect(new InMemoryGameLockAspect(executor));
         readyService = proxy.getProxy();
-        handler = new WsRoomHandler(sender, readyService);
+        doReturn((java.util.function.UnaryOperator<reactor.util.context.Context>) context -> context)
+                .when(sender).captureRecipients(ROOM_ID);
+        clearInvocations(sender);
+        handler = new WsRoomHandler(sender, readyService, sessions);
     }
     private final Sinks.Empty<Void> release = Sinks.empty();
 
@@ -101,6 +105,7 @@ class RoomAdmissionLifecycleBaselineTest {
         StepVerifier.create(ready(initial)).then(this::awaitPaused).thenCancel().verify(TIMEOUT);
 
         assertEquals(0, release.currentSubscriberCount());
+        assertNotificationsReleased();
         assertTrue(current().allPlayersReady());
         assertEquals(GamePhase.DETERMINING_STARTING_PLAYER, current().getPhase());
         assertEquals(5, leaders.getAllCards(ROOM_ID).block(TIMEOUT).size());
@@ -139,7 +144,8 @@ class RoomAdmissionLifecycleBaselineTest {
             assertEquals(GamePhase.DETERMINING_STARTING_PLAYER, current().getPhase());
             assertEquals(5, leaders.getAllCards(ROOM_ID).block(TIMEOUT).size());
         });
-        verifyNoInteractions(sender);
+        verify(sender, never()).sendMessageToAllUser(anyLong(), any());
+        assertNotificationsReleased();
     }
 
     @ParameterizedTest(name = "저장 경계={0}")
@@ -189,7 +195,7 @@ class RoomAdmissionLifecycleBaselineTest {
                 .expectError(IllegalStateException.class).verify(TIMEOUT);
         await().atMost(TIMEOUT).untilAsserted(() -> assertNull(current()));
         assertEquals(List.of(), leaders.getAllCards(ROOM_ID).block(TIMEOUT));
-        verifyNoInteractions(sender);
+        verify(sender, never()).sendMessageToAllUser(anyLong(), any());
         states.create(GameState.createEmptyRoom(ROOM_ID)).block(TIMEOUT);
     }
 
@@ -197,14 +203,91 @@ class RoomAdmissionLifecycleBaselineTest {
     @DisplayName("UNREADY도 필수 저장 뒤 안내하며 잘못된 phase는 방을 정리하지 않는다")
     void unreadyAndInvalidPhase() {
         GameState initial = createReadyRoom();
-        readyService.readyAndPrepare(ROOM_ID, Player.PLAYER_1, false).block(TIMEOUT);
+        readyService.readyAndPrepare(ROOM_ID, Player.PLAYER_1, false, () -> {}).block(TIMEOUT);
         assertFalse(current().allPlayersReady());
-        readyService.readyAndPrepare(ROOM_ID, Player.PLAYER_1, true).block(TIMEOUT);
+        readyService.readyAndPrepare(ROOM_ID, Player.PLAYER_1, true, () -> {}).block(TIMEOUT);
         ready(initial).block(TIMEOUT);
         StepVerifier.create(ready(initial)).expectError(
                 com.pomingmatgo.gameservice.global.exception.WebSocketBusinessException.class).verify(TIMEOUT);
         assertNotNull(current());
         assertEquals(5, leaders.getAllCards(ROOM_ID).block(TIMEOUT).size());
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    @DisplayName("READY/START와 UNREADY는 저장을 완료한 뒤 앞 안내 전체를 기다린다")
+    void preparedNotificationsWaitOutsideGameLock(boolean ready) {
+        GameState initial = createReadyRoom();
+        var head = sessions.reserveNotifications(ROOM_ID);
+        RequestEvent<Void> event = new RequestEvent<>();
+        event.setSubCategory(ready ? SubCategory.READY : SubCategory.UNREADY);
+        StepVerifier.create(handler.handleRoomEvent(event, initial, ready ? Player.PLAYER_2 : Player.PLAYER_1))
+                .then(() -> {
+                    assertEquals(ready ? GamePhase.DETERMINING_STARTING_PLAYER : GamePhase.NONE, current().getPhase());
+                    assertEquals(ready, current().getPlayerState(Player.PLAYER_1).isReady());
+                    verify(sender, never()).sendMessageToAllUser(anyLong(), any());
+                    // 송신 대기 동안에도 같은 방 게임 락을 다시 획득할 수 있다.
+                    rooms.joinRoom(101L, ROOM_ID).onErrorResume(error -> {
+                        assertFalse(error instanceof WebSocketBusinessException ws
+                                && ws.getWebsocketErrorCode() == WebSocketErrorCode.TRY_AGAIN);
+                        return Mono.empty();
+                    }).block(TIMEOUT);
+                    head.dispose();
+                }).verifyComplete();
+        verify(sender, times(ready ? 2 : 1)).sendMessageToAllUser(eq(ROOM_ID), any());
+        assertNotificationsReleased();
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    @DisplayName("대기 중 READY 취소와 전체 정리는 송신 없이 예약을 회수한다")
+    void waitingReadyCancellationOrCleanupReleasesReservation(boolean cleanRoom) {
+        GameState initial = createReadyRoom();
+        var head = sessions.reserveNotifications(ROOM_ID);
+        if (cleanRoom) {
+            StepVerifier.create(ready(initial))
+                    .then(() -> await().atMost(TIMEOUT).until(() -> current().allPlayersReady()))
+                    .then(() -> cleanup.cleanupRoom(ROOM_ID).block(TIMEOUT))
+                    .verifyComplete();
+            assertNull(current());
+            sessions.addRoom(ROOM_ID).block(TIMEOUT);
+        } else {
+            StepVerifier.create(ready(initial))
+                    .then(() -> await().atMost(TIMEOUT).until(() -> current().allPlayersReady()))
+                    .thenCancel().verify(TIMEOUT);
+            assertTrue(current().allPlayersReady());
+        }
+        verify(sender, never()).sendMessageToAllUser(anyLong(), any());
+        head.dispose();
+        assertNotificationsReleased();
+    }
+
+    @Test
+    @DisplayName("START 송신까지 같은 예약을 유지하고 오류 때 다음 안내를 연다")
+    void startSendFailureReleasesWholeReadyReservation() {
+        GameState initial = createReadyRoom();
+        when(sender.sendMessageToAllUser(eq(ROOM_ID), any()))
+                .thenReturn(Mono.empty(), release.asMono());
+        StepVerifier.create(ready(initial)).then(this::awaitPaused)
+                .then(() -> {
+                    var next = sessions.reserveNotifications(ROOM_ID);
+                    StepVerifier.create(next.ready())
+                            .then(() -> release.tryEmitError(new IllegalStateException("send failed")))
+                            .expectNext(true).verifyComplete();
+                    next.dispose();
+                }).expectError(IllegalStateException.class).verify(TIMEOUT);
+        assertTrue(current().allPlayersReady());
+        assertNotificationsReleased();
+    }
+
+    private void assertNotificationsReleased() {
+        var next = sessions.reserveNotifications(ROOM_ID);
+        assertNotNull(next);
+        try {
+            StepVerifier.create(next.ready()).expectNext(true).expectComplete().verify(TIMEOUT);
+        } finally {
+            next.dispose();
+        }
     }
 
     private void pauseReadySave(int boundary) {
@@ -230,7 +313,7 @@ class RoomAdmissionLifecycleBaselineTest {
         GameState initial = GameState.createEmptyRoom(ROOM_ID).join(101L).join(202L);
         states.create(initial).block(TIMEOUT);
         pauseReadySave(0);
-        StepVerifier.create(readyService.readyAndPrepare(ROOM_ID, Player.PLAYER_1, true))
+        StepVerifier.create(readyService.readyAndPrepare(ROOM_ID, Player.PLAYER_1, true, () -> {}))
                 .then(this::awaitPaused)
                 .then(() -> StepVerifier.create(ready(initial))
                         .expectErrorSatisfies(error -> assertEquals(
@@ -354,7 +437,7 @@ class RoomAdmissionLifecycleBaselineTest {
                     .then(() -> {
                         StepVerifier.create(rooms.joinRoom(303L, ROOM_ID))
                                 .expectErrorSatisfies(this::assertTryAgain).verify(TIMEOUT);
-                        StepVerifier.create(readyService.readyAndPrepare(ROOM_ID, Player.PLAYER_1, true))
+                        StepVerifier.create(readyService.readyAndPrepare(ROOM_ID, Player.PLAYER_1, true, () -> {}))
                                 .expectErrorSatisfies(this::assertTryAgain).verify(TIMEOUT);
                         StepVerifier.create(rooms.leaveRoom(101L, ROOM_ID))
                                 .expectErrorSatisfies(this::assertTryAgain).verify(TIMEOUT);
@@ -363,7 +446,7 @@ class RoomAdmissionLifecycleBaselineTest {
                         assertTrue(states.findById(otherRoom).block(TIMEOUT).hasUser(404L));
                     })
                     .then(() -> release.tryEmitEmpty()).verifyComplete();
-            readyService.readyAndPrepare(ROOM_ID, Player.PLAYER_1, true).block(TIMEOUT);
+            readyService.readyAndPrepare(ROOM_ID, Player.PLAYER_1, true, () -> {}).block(TIMEOUT);
             assertTrue(current().getPlayerState(Player.PLAYER_1).isReady());
         } finally {
             cleanup.cleanupRoom(otherRoom).block(TIMEOUT);
@@ -422,7 +505,7 @@ class RoomAdmissionLifecycleBaselineTest {
                     .then(() -> {
                         StepVerifier.create(rooms.joinRoom(202L, ROOM_ID))
                                 .expectErrorSatisfies(this::assertTryAgain).verify(TIMEOUT);
-                        StepVerifier.create(readyService.readyAndPrepare(ROOM_ID, Player.PLAYER_1, true))
+                        StepVerifier.create(readyService.readyAndPrepare(ROOM_ID, Player.PLAYER_1, true, () -> {}))
                                 .expectErrorSatisfies(this::assertTryAgain).verify(TIMEOUT);
                         StepVerifier.create(rooms.leaveRoom(101L, ROOM_ID))
                                 .expectErrorSatisfies(this::assertTryAgain).verify(TIMEOUT);

@@ -15,12 +15,13 @@ public class RoomReadyService {
 
     // 준비 저장과 시작 phase 전이를 같은 게임 락 안에서 완료하고 안내는 락 밖에서 보낸다.
     @GameLock
-    public Mono<Boolean> readyAndPrepare(long roomId, Player player, boolean ready) {
+    public Mono<Boolean> readyAndPrepare(long roomId, Player player, boolean ready, Runnable onPrepared) {
         return rooms.readyFresh(roomId, player, ready)
                 .flatMap(state -> ready && state.allPlayersReady()
                         ? rooms.startGame(state)
                                 .flatMap(started -> Mono.defer(() -> preGame.pickFiveCardsAndSave(roomId)))
                                 .thenReturn(true)
-                        : Mono.just(false));
+                        : Mono.just(false))
+                .doOnNext(started -> onPrepared.run());
     }
 }

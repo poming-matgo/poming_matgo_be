@@ -546,7 +546,7 @@ class ReconnectSnapshotBaselineTest {
 
     @ParameterizedTest
     @ValueSource(booleans = {false, true})
-    void baselineReadyCanOvertakePreviousGameOverButStartWaitsForBothPlayers(boolean delayGameOver)
+    void readyWaitsForPreviousGameOverAndStartWaitsForBothPlayers(boolean delayGameOver)
             throws Exception {
         TestSession playing = newSession("ready-after-game-over", false);
         playing.emit(connectJson(USER_2));
@@ -572,7 +572,11 @@ class ReconnectSnapshotBaselineTest {
             // REST가 사용하는 프록시를 통해 같은 슬롯 순서로 재참여한다. 저장소·phase를 직접 변경하지 않는다.
             rooms.joinRoom(USER_1, ROOM_ID).block(TIMEOUT);
             opponent.emit("{\"eventType\":{\"subType\":\"READY\"}}");
-            await(() -> playing.count("READY") == 1);
+            await(() -> states.findById(ROOM_ID).block(TIMEOUT).getPlayerState(Player.PLAYER_1).isReady());
+            if (delayGameOver) {
+                assertEquals(0, playing.count("READY"));
+                assertEquals(0, opponent.count("READY"));
+            }
             GameState oneReady = states.findById(ROOM_ID).block(TIMEOUT);
             assertEquals(GamePhase.NONE, oneReady.getPhase());
             assertTrue(oneReady.getPlayerState(Player.PLAYER_1).isReady());
@@ -582,13 +586,12 @@ class ReconnectSnapshotBaselineTest {
             assertEquals(0, opponent.count("START"));
 
             assertEquals(Sinks.EmitResult.OK, gameOverSend.tryEmitEmpty());
-            await(() -> playing.count("GAME_OVER") == 1);
+            await(() -> playing.count("GAME_OVER") == 1 && playing.count("READY") == 1);
             rooms.joinRoom(USER_2, ROOM_ID).block(TIMEOUT);
             playing.emit("{\"eventType\":{\"subType\":\"READY\"}}");
             await(() -> playing.count("START") == 1 && opponent.count("START") == 1);
             assertEquals(GamePhase.DETERMINING_STARTING_PLAYER, states.findById(ROOM_ID).block(TIMEOUT).getPhase());
-            assertEquals(List.of(delayGameOver ? "READY" : "GAME_OVER", delayGameOver ? "GAME_OVER" : "READY",
-                            "READY", "START"),
+            assertEquals(List.of("GAME_OVER", "READY", "READY", "START"),
                     playing.outbox().stream().map(node -> node.path("status").asText())
                             .filter(status -> List.of("GAME_OVER", "READY", "START").contains(status)).toList());
             for (TestSession client : List.of(opponent, playing)) {
