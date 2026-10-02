@@ -3,6 +3,7 @@ package com.pomingmatgo.gameservice.api.handler.websocket;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.pomingmatgo.gameservice.application.room.RoomCleanupService;
+import com.pomingmatgo.gameservice.application.room.RoomService;
 import com.pomingmatgo.gameservice.domain.GamePhase;
 import com.pomingmatgo.gameservice.domain.GameState;
 import com.pomingmatgo.gameservice.domain.Player;
@@ -62,6 +63,7 @@ class ReconnectSnapshotBaselineTest {
     @Autowired GameStateRepository states;
     @Autowired SessionManager sessions;
     @Autowired RoomCleanupService cleanup;
+    @Autowired RoomService rooms;
     @SpyBean AutoPlayScheduler autoPlay;
     @Autowired ObjectMapper mapper;
     @SpyBean InMemoryInstalledCardRepository cards;
@@ -501,22 +503,7 @@ class ReconnectSnapshotBaselineTest {
     void sessionPreservingRestartCompletesWhileGameOverWaitsForSnapshot() throws Exception {
         TestSession playing = newSession("playing-before-restart", false);
         playing.emit(connectJson(USER_2));
-        // 종료 직전 상태를 주입하지 않고 고정 덱의 실제 WS 제출로 세 번째 뻑 직전에 도달한다.
-        GameState state = states.findById(ROOM_ID).block(TIMEOUT);
-        for (int actions = 0; actions < 60
-                && state.getPlayerState(state.getCurrentPlayer()).getPpeokCount() < 2; actions++) {
-            assertTrue(state.getPhase().isPlayerActionPhase());
-            TestSession actor = state.getCurrentPlayer() == Player.PLAYER_1 ? opponent : playing;
-            String action = state.getPhase() == GamePhase.AWAITING_FLOOR_CARD_CHOICE
-                    ? "FLOOR_SELECT" : "NORMAL_SUBMIT";
-            actor.emit("{\"eventType\":{\"subType\":\"" + action + "\"},\"data\":{\"cardIndex\":0}}");
-            GameState before = state;
-            await(() -> states.findById(ROOM_ID).block(TIMEOUT) != before);
-            state = states.findById(ROOM_ID).block(TIMEOUT);
-            assertTrue(actor.outbox().stream().noneMatch(node -> node.has("errorCode")));
-        }
-        assertEquals(2, state.getPlayerState(state.getCurrentPlayer()).getPpeokCount());
-        assertEquals(GamePhase.IN_PROGRESS, state.getPhase());
+        GameState state = playUntilThirdPpeokIsNext(playing);
         playing.drop();
         await(() -> sessions.getSession(ROOM_ID, 2) == null);
 
@@ -555,6 +542,85 @@ class ReconnectSnapshotBaselineTest {
         } finally {
             resume.countDown();
         }
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void baselineReadyCanOvertakePreviousGameOverButStartWaitsForBothPlayers(boolean delayGameOver)
+            throws Exception {
+        TestSession playing = newSession("ready-after-game-over", false);
+        playing.emit(connectJson(USER_2));
+        GameState finalTurn = playUntilThirdPpeokIsNext(playing);
+        Sinks.Empty<Void> gameOverSend = Sinks.empty();
+        // 자동플레이 송신과 양쪽 WS 수신은 독립적이다. 두 클라이언트 모두 자신의 종료 안내 후 재준비한다.
+        doAnswer(invocation -> Flux.from(invocation.<Publisher<WebSocketMessage>>getArgument(0))
+                .concatMap(message -> Mono.fromCallable(() -> mapper.readTree(message.getPayloadAsText())))
+                .concatMap(node -> {
+                    Mono<Void> wait = delayGameOver && "GAME_OVER".equals(node.path("status").asText())
+                            ? gameOverSend.asMono() : Mono.empty();
+                    return wait.then(Mono.fromRunnable(() -> playing.outbox().add(node)));
+                }).then()).when(playing.session()).send(any());
+        try {
+            autoPlay.scheduleAutoPlay(ROOM_ID, finalTurn.getRound(), finalTurn.getCurrentTurn(),
+                    finalTurn.getCurrentPlayer(), System.nanoTime(), finalTurn.getPhase());
+            await(() -> opponent.count("GAME_OVER") == 1
+                    && (delayGameOver ? gameOverSend.currentSubscriberCount() == 1 : playing.count("GAME_OVER") == 1));
+            assertEquals(GamePhase.NONE, states.findById(ROOM_ID).block(TIMEOUT).getPhase());
+            assertTrue(cards.getPlayerCards(ROOM_ID, Player.PLAYER_1).block(TIMEOUT).isEmpty());
+            assertTrue(cards.getPlayerCards(ROOM_ID, Player.PLAYER_2).block(TIMEOUT).isEmpty());
+
+            // REST가 사용하는 프록시를 통해 같은 슬롯 순서로 재참여한다. 저장소·phase를 직접 변경하지 않는다.
+            rooms.joinRoom(USER_1, ROOM_ID).block(TIMEOUT);
+            opponent.emit("{\"eventType\":{\"subType\":\"READY\"}}");
+            await(() -> playing.count("READY") == 1);
+            GameState oneReady = states.findById(ROOM_ID).block(TIMEOUT);
+            assertEquals(GamePhase.NONE, oneReady.getPhase());
+            assertTrue(oneReady.getPlayerState(Player.PLAYER_1).isReady());
+            assertFalse(oneReady.getPlayerState(Player.PLAYER_2).isReady());
+            assertEquals(delayGameOver ? 0 : 1, playing.count("GAME_OVER"));
+            assertEquals(0, playing.count("START"));
+            assertEquals(0, opponent.count("START"));
+
+            assertEquals(Sinks.EmitResult.OK, gameOverSend.tryEmitEmpty());
+            await(() -> playing.count("GAME_OVER") == 1);
+            rooms.joinRoom(USER_2, ROOM_ID).block(TIMEOUT);
+            playing.emit("{\"eventType\":{\"subType\":\"READY\"}}");
+            await(() -> playing.count("START") == 1 && opponent.count("START") == 1);
+            assertEquals(GamePhase.DETERMINING_STARTING_PLAYER, states.findById(ROOM_ID).block(TIMEOUT).getPhase());
+            assertEquals(List.of(delayGameOver ? "READY" : "GAME_OVER", delayGameOver ? "GAME_OVER" : "READY",
+                            "READY", "START"),
+                    playing.outbox().stream().map(node -> node.path("status").asText())
+                            .filter(status -> List.of("GAME_OVER", "READY", "START").contains(status)).toList());
+            for (TestSession client : List.of(opponent, playing)) {
+                assertEquals(1, client.count("GAME_OVER"));
+                assertEquals(2, client.count("READY"));
+                assertTrue(client.outbox().stream().noneMatch(node -> node.has("errorCode")));
+            }
+            assertSame(opponent.session(), sessions.getSession(ROOM_ID, 1));
+            assertSame(playing.session(), sessions.getSession(ROOM_ID, 2));
+        } finally {
+            gameOverSend.tryEmitEmpty();
+        }
+    }
+
+    private GameState playUntilThirdPpeokIsNext(TestSession playing) throws Exception {
+        // 종료 직전 상태를 주입하지 않고 고정 덱의 실제 WS 제출로 세 번째 뻑 직전에 도달한다.
+        GameState state = states.findById(ROOM_ID).block(TIMEOUT);
+        for (int actions = 0; actions < 60
+                && state.getPlayerState(state.getCurrentPlayer()).getPpeokCount() < 2; actions++) {
+            assertTrue(state.getPhase().isPlayerActionPhase());
+            TestSession actor = state.getCurrentPlayer() == Player.PLAYER_1 ? opponent : playing;
+            String action = state.getPhase() == GamePhase.AWAITING_FLOOR_CARD_CHOICE
+                    ? "FLOOR_SELECT" : "NORMAL_SUBMIT";
+            actor.emit("{\"eventType\":{\"subType\":\"" + action + "\"},\"data\":{\"cardIndex\":0}}");
+            GameState before = state;
+            await(() -> states.findById(ROOM_ID).block(TIMEOUT) != before);
+            state = states.findById(ROOM_ID).block(TIMEOUT);
+            assertTrue(actor.outbox().stream().noneMatch(node -> node.has("errorCode")));
+        }
+        assertEquals(2, state.getPlayerState(state.getCurrentPlayer()).getPpeokCount());
+        assertEquals(GamePhase.IN_PROGRESS, state.getPhase());
+        return state;
     }
 
     @Test
