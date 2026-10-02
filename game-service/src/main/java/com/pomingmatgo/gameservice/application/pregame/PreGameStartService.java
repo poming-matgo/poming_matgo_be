@@ -30,7 +30,7 @@ public class PreGameStartService {
 
     // 선택 검증 뒤 첫 저장 전 수락한다. 트리거·분배·첫 턴 또는 무승부 재시작까지 같은 gate를 유지한다.
     @GameLock
-    public Mono<PreparedStart> selectAndPrepare(long roomId, Player player, int cardIndex) {
+    public Mono<PreparedStart> selectAndPrepare(long roomId, Player player, int cardIndex, Runnable onPrepared) {
         return states.findById(roomId)
                 .filter(state -> state.getPhase() == GamePhase.DETERMINING_STARTING_PLAYER)
                 .switchIfEmpty(Mono.error(new WebSocketBusinessException(INVALID_GAME_PHASE)))
@@ -41,7 +41,9 @@ public class PreGameStartService {
                                         : Mono.just(false))
                                 .flatMap(ready -> ready
                                         ? prepareGameStart(state, timerLifecycle.bind(roomId, turnScheduler))
-                                        : Mono.empty()))));
+                                        : Mono.empty()))))
+                // 첫 선택의 빈 결과도 저장 완료이며, 오류·취소 신호에서는 예약하지 않는다.
+                .doOnSuccess(start -> onPrepared.run());
     }
 
     private Mono<PreparedStart> prepareGameStart(GameState gameState, TurnScheduler scheduler) {

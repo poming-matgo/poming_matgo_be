@@ -74,9 +74,12 @@ class PreGameLifecycleBaselineTest {
     void setUp() {
         AspectJProxyFactory proxy = new AspectJProxyFactory(new PreGameStartService(states, preGame, turns, lifecycle, scheduler));
         proxy.addAspect(new InMemoryGameLockAspect(executor));
-        flow = new PreGameFlowService(proxy.getProxy(), sender, turns);
+        flow = new PreGameFlowService(proxy.getProxy(), sender, turns, sessions);
+        doReturn(java.util.function.UnaryOperator.identity()).when(sender).captureRecipients(ROOM_ID);
+        clearInvocations(sender);
         when(acquired.cleanup(ROOM_ID)).thenReturn(Mono.empty());
         states.create(initial).block(TIMEOUT);
+        sessions.addRoom(ROOM_ID).block(TIMEOUT);
         leaders.saveSelectedCard(List.of(Card.JAN_1, Card.FEB_1), ROOM_ID).block(TIMEOUT);
         preGame.selectLeaderCard(ROOM_ID, Player.PLAYER_1, 0).block(TIMEOUT);
         doAnswer(invocation -> preGame.distributeCards(ROOM_ID, DECK)).when(preGame).distributeCards(ROOM_ID);
@@ -124,6 +127,7 @@ class PreGameLifecycleBaselineTest {
     void normalSelectionStartsFirstTurn() {
         StepVerifier.create(selectSecondPlayer()).expectComplete().verify(TIMEOUT);
         assertStarted();
+        assertNotificationsReleased();
         assertDealt();
         verify(scheduler).scheduleAutoPlay(eq(ROOM_ID), eq(1), eq(1), eq(Player.PLAYER_2),
                 anyLong(), eq(GamePhase.IN_PROGRESS));
@@ -154,6 +158,7 @@ class PreGameLifecycleBaselineTest {
         verify(scheduler).scheduleAutoPlay(eq(ROOM_ID), eq(1), eq(1), eq(Player.PLAYER_2),
                 anyLong(), eq(GamePhase.IN_PROGRESS));
         verify(sender, never()).sendTurnInfo(any(), anyLong());
+        assertNotificationsReleased();
     }
 
     @ParameterizedTest(name = "같은 ID 재생성={0}")
@@ -218,10 +223,11 @@ class PreGameLifecycleBaselineTest {
         assertEquals(1, sendRelease.currentSubscriberCount());
         sendRelease.tryEmitEmpty();
         assertStarted();
+        assertNotificationsReleased();
         assertDealt();
         verify(scheduler).scheduleAutoPlay(eq(ROOM_ID), eq(1), eq(1), eq(Player.PLAYER_2),
                 anyLong(), eq(GamePhase.IN_PROGRESS));
-        verifyNoInteractions(sender);
+        verify(sender, never()).sendLeaderSelectionMessage(anyLong(), any(), anyInt());
     }
 
     @Test
@@ -283,8 +289,9 @@ class PreGameLifecycleBaselineTest {
         assertEquals(1, sendRelease.currentSubscriberCount());
         sendRelease.tryEmitEmpty();
         assertStarted();
+        assertNotificationsReleased();
         assertDealt();
-        verifyNoInteractions(sender);
+        verify(sender, never()).sendLeaderSelectionMessage(anyLong(), any(), anyInt());
     }
 
     @Test
@@ -301,7 +308,7 @@ class PreGameLifecycleBaselineTest {
         cleaning.join();
         assertNull(states.findById(ROOM_ID).block(TIMEOUT));
         assertEquals(List.of(), cards.getPlayerCards(ROOM_ID, Player.PLAYER_1).block(TIMEOUT));
-        verifyNoInteractions(sender);
+        verify(sender, never()).sendLeaderSelectionMessage(anyLong(), any(), anyInt());
     }
 
     @Test
@@ -385,7 +392,8 @@ class PreGameLifecycleBaselineTest {
             verifyNoInteractions(scheduler);
         }
         verify(preGame).checkAllSelected(ROOM_ID);
-        verifyNoInteractions(sender);
+        assertNotificationsReleased();
+        verify(sender, never()).sendLeaderSelectionMessage(anyLong(), any(), anyInt());
     }
 
     @Test
@@ -405,7 +413,7 @@ class PreGameLifecycleBaselineTest {
         assertEquals(0, leaders.getPlayerSelectedCard(ROOM_ID).block(TIMEOUT).getPlayer2Month());
         assertEquals(List.of(), cards.getPlayerCards(ROOM_ID, Player.PLAYER_1).block(TIMEOUT));
         verify(preGame).distributeCards(ROOM_ID);
-        verifyNoInteractions(sender);
+        verify(sender, never()).sendLeaderSelectionMessage(anyLong(), any(), anyInt());
     }
 
     @Test
@@ -501,10 +509,55 @@ class PreGameLifecycleBaselineTest {
         when(sender.sendLeaderSelectionMessage(anyLong(), any(), anyInt())).thenReturn(Mono.error(failure));
         StepVerifier.create(selectSecondPlayer()).expectErrorMatches(error -> error == failure).verify(TIMEOUT);
         assertStarted();
+        assertNotificationsReleased();
         assertDealt();
         verify(scheduler).scheduleAutoPlay(eq(ROOM_ID), eq(1), eq(1), eq(Player.PLAYER_2),
                 anyLong(), eq(GamePhase.IN_PROGRESS));
         verify(sender, never()).sendLeaderSelectionResult(anyLong(), any());
+        assertNotificationsReleased();
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"cancel", "cleanup"})
+    @DisplayName("기존 안내 예약 뒤 대기하는 준비 시작의 취소·정리는 송신 없이 예약을 회수한다")
+    void waitingStartReleasesReservation(String termination) {
+        // 예약 수명 내부 계약: 앞 안내가 열린 상태를 고정하고 실제 선택 프록시를 실행한다.
+        var previous = sessions.reserveNotifications(ROOM_ID);
+        var selecting = selectSecondPlayer().toFuture();
+        try {
+            assertStarted();
+            assertFalse(selecting.isDone());
+            verify(sender, never()).sendLeaderSelectionMessage(anyLong(), any(), anyInt());
+            if ("cancel".equals(termination)) {
+                selecting.cancel(false);
+                var following = sessions.reserveNotifications(ROOM_ID);
+                var permitted = following.ready().toFuture();
+                assertFalse(permitted.isDone(), "중간 취소가 앞 안내를 건너뛰면 안 된다");
+                previous.dispose();
+                assertTrue(permitted.join());
+                following.dispose();
+                assertNotificationsReleased();
+            } else {
+                cleanup.cleanupRoom(ROOM_ID).block(TIMEOUT);
+                assertTrue(selecting.isDone());
+                selecting.join();
+                assertNull(states.findById(ROOM_ID).block(TIMEOUT));
+            }
+            verify(sender, never()).sendLeaderSelectionMessage(anyLong(), any(), anyInt());
+        } finally {
+            selecting.cancel(false);
+            previous.dispose();
+        }
+    }
+
+    private void assertNotificationsReleased() {
+        var next = sessions.reserveNotifications(ROOM_ID);
+        assertNotNull(next);
+        try {
+            assertTrue(next.ready().block(TIMEOUT), "종료된 준비 안내의 예약이 남으면 안 된다");
+        } finally {
+            next.dispose();
+        }
     }
 
     private Mono<Void> selectSecondPlayer() {

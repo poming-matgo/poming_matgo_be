@@ -31,8 +31,13 @@ import reactor.test.StepVerifier;
 
 import java.time.Duration;
 import java.util.List;
+import java.util.concurrent.TimeUnit;
+import java.util.function.UnaryOperator;
+import com.pomingmatgo.gameservice.infrastructure.session.SessionManager;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
@@ -65,6 +70,7 @@ class PreGameFloorDrawTest {
         }
     }
 
+    @Autowired SessionManager sessions;
     @Autowired PreGameFlowService preGameFlowService;
     @Autowired PreGameService preGameService;
     @Autowired GameMessageSender gameMessageSender;
@@ -76,6 +82,7 @@ class PreGameFloorDrawTest {
     @BeforeEach
     void resetMocks() {
         Mockito.reset(preGameService);
+        Mockito.doReturn(UnaryOperator.identity()).when(gameMessageSender).captureRecipients(anyLong());
         Mockito.clearInvocations(gameMessageSender);
     }
 
@@ -93,7 +100,25 @@ class PreGameFloorDrawTest {
                 Card.FEB_1, Card.MAR_1, Card.APR_1, Card.MAY_1));
         gameStateRepository.create(pendingStartState()).block();
 
-        preGameFlowService.processLeaderSelection(pendingStartState(), Player.PLAYER_1, 0).block();
+        sessions.addRoom(roomId).block();
+        var previous = sessions.reserveNotifications(roomId);
+        var selecting = preGameFlowService.processLeaderSelection(pendingStartState(), Player.PLAYER_1, 0).toFuture();
+        try {
+            assertEquals(GamePhase.NONE, gameStateRepository.findById(roomId).block().getPhase());
+            assertFalse(selecting.isDone(), "재시작도 이전 안내 예약을 보존한다");
+            Mockito.verify(gameMessageSender, never()).sendLeaderSelectionMessage(anyLong(), any(), anyInt());
+            previous.dispose();
+            selecting.orTimeout(3, TimeUnit.SECONDS).join();
+            var next = sessions.reserveNotifications(roomId);
+            try {
+                assertTrue(next.ready().block(Duration.ofSeconds(3)));
+            } finally {
+                next.dispose();
+            }
+        } finally {
+            selecting.cancel(false);
+            previous.dispose();
+        }
 
         Mockito.verify(gameMessageSender).sendGameOverMessage(any(), eq(Player.PLAYER_NOTHING), any());
         Mockito.verify(preGameService, never()).setFirstTurn(any());

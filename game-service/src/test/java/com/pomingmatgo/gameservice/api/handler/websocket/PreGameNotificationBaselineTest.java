@@ -16,6 +16,7 @@ import com.pomingmatgo.gameservice.infrastructure.scheduler.AutoPlayScheduler;
 import com.pomingmatgo.gameservice.infrastructure.session.SessionManager;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.junit.jupiter.params.provider.CsvSource;
@@ -45,7 +46,7 @@ import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 
-// 실제 WS 준비·선택과 자동플레이의 제어 송신 기준선이다. 역전 기대값은 해결 보장이 아니다.
+// 실제 WS 준비·선택과 자동플레이의 제어 송신 순서 검증이다. 실제 TCP 수신·적용 보장은 별도다.
 @SpringBootTest(properties = "spring.autoconfigure.exclude="
         + "org.redisson.spring.starter.RedissonAutoConfigurationV2,"
         + "org.springframework.boot.autoconfigure.data.redis.RedisAutoConfiguration,"
@@ -115,7 +116,7 @@ class PreGameNotificationBaselineTest {
 
     @ParameterizedTest
     @ValueSource(booleans = {false, true})
-    void secondSelectionCanAnnounceResultBeforeFirstSelectionDelivery(boolean delayed) throws Exception {
+    void secondSelectionWaitsForFirstSelectionDelivery(boolean delayed) throws Exception {
         holdSend(first, "LEADER_SELECTION", delayed);
         select(first, 0);
         if (delayed) assertEquals(1, releaseSend.currentSubscriberCount());
@@ -124,15 +125,13 @@ class PreGameNotificationBaselineTest {
 
         // 양쪽 START 이후 독립 연결의 선택이다. 첫 연결의 수신 concatMap을 우회하지 않는다.
         select(second, 1);
-        await(() -> first.count("LEADER_SELECTION_RESULT") == 1);
+        if (delayed) assertEquals(0, first.count("LEADER_SELECTION_RESULT"));
         assertEquals(GamePhase.IN_PROGRESS, states.findById(ROOM_ID).block(TIMEOUT).getPhase());
-        assertEquals(delayed ? 1 : 2, first.count("LEADER_SELECTION"));
+        assertEquals(delayed ? 0 : 2, first.count("LEADER_SELECTION"));
         assertEquals(10, cards.getPlayerCards(ROOM_ID, Player.PLAYER_1).block(TIMEOUT).size());
         releaseSend.tryEmitEmpty();
-        await(() -> first.count("LEADER_SELECTION") == 2);
-        assertEquals(delayed
-                        ? List.of("PLAYER_2", "RESULT", "PLAYER_1")
-                        : List.of("PLAYER_1", "PLAYER_2", "RESULT"),
+        await(() -> first.count("LEADER_SELECTION_RESULT") == 1);
+        assertEquals(List.of("PLAYER_1", "PLAYER_2", "RESULT"),
                 first.outbox().stream().filter(node -> List.of("LEADER_SELECTION", "LEADER_SELECTION_RESULT")
                                 .contains(node.path("status").asText()))
                         .map(node -> "LEADER_SELECTION_RESULT".equals(node.path("status").asText())
@@ -143,7 +142,7 @@ class PreGameNotificationBaselineTest {
     @ParameterizedTest
     @CsvSource({"DISTRIBUTE_CARD,false", "DISTRIBUTE_CARD,true",
             "ANNOUNCE_TURN_INFORMATION,false", "ANNOUNCE_TURN_INFORMATION,true"})
-    void firstAutoplayCanOvertakeStartNotifications(String heldStatus, boolean delayed) throws Exception {
+    void firstAutoplayProgressesButNotificationsWaitForStart(String heldStatus, boolean delayed) throws Exception {
         select(first, 0);
         holdSend(first, heldStatus, delayed);
         select(second, 1);
@@ -157,20 +156,44 @@ class PreGameNotificationBaselineTest {
 
         // 실제 등록된 첫 턴 기한만 앞당긴다. 선택 송신 주체(PLAYER_2)와 자동플레이 주체는 다르다.
         autoPlay.scheduleAutoPlay(ROOM_ID, 1, 1, Player.PLAYER_1, System.nanoTime(), GamePhase.IN_PROGRESS);
-        await(() -> first.outbox().stream().anyMatch(node -> "ANNOUNCE_TURN_INFORMATION".equals(
-                node.path("status").asText()) && node.path("data").path("turn").asInt() == 2));
+        await(() -> states.findById(ROOM_ID).block(TIMEOUT).getCurrentTurn() == 2);
+        if (delayed) {
+            assertEquals(0, first.count("SUBMIT_CARD"));
+            assertEquals(0, first.count("ANNOUNCE_TURN_INFORMATION"));
+        }
         assertEquals(2, states.findById(ROOM_ID).block(TIMEOUT).getCurrentTurn());
         assertEquals(9, cards.getPlayerCards(ROOM_ID, Player.PLAYER_1).block(TIMEOUT).size());
         if (delayed && "DISTRIBUTE_CARD".equals(heldStatus)) assertEquals(0, first.count("DISTRIBUTE_CARD"));
         releaseSend.tryEmitEmpty();
         await(() -> first.count("ANNOUNCE_TURN_INFORMATION") == 2);
-        assertEquals(delayed ? List.of(2, 1) : List.of(1, 2), first.outbox().stream()
+        assertEquals(List.of(1, 2), first.outbox().stream()
                 .filter(node -> "ANNOUNCE_TURN_INFORMATION".equals(node.path("status").asText()))
                 .map(node -> node.path("data").path("turn").asInt()).toList());
         List<String> statuses = first.outbox().stream().map(node -> node.path("status").asText()).toList();
-        assertEquals(delayed && "DISTRIBUTE_CARD".equals(heldStatus),
-                statuses.indexOf("SUBMIT_CARD") < statuses.indexOf("DISTRIBUTE_CARD"));
+        assertTrue(statuses.indexOf("DISTRIBUTE_CARD") < statuses.indexOf("SUBMIT_CARD"));
         assertHealthy();
+    }
+
+    @Test
+    void reconnectDuringStartDeliveryReceivesSnapshotWithoutOldStartNotifications() throws Exception {
+        select(first, 0);
+        holdSend(first, "DISTRIBUTE_CARD", true);
+        select(second, 1);
+        assertEquals(1, releaseSend.currentSubscriberCount());
+        assertEquals(GamePhase.IN_PROGRESS, states.findById(ROOM_ID).block(TIMEOUT).getPhase());
+
+        TestSession replacement = newSession("replacement");
+        replacement.emit(connectJson(USER_1));
+        await(() -> replacement.count("RECONNECT_STATE") == 1);
+        releaseSend.tryEmitEmpty();
+        await(() -> second.count("ANNOUNCE_TURN_INFORMATION") == 1);
+
+        assertSame(replacement.session(), sessions.getSession(ROOM_ID, 1));
+        assertEquals(0, replacement.count("LEADER_SELECTION"));
+        assertEquals(0, replacement.count("LEADER_SELECTION_RESULT"));
+        assertEquals(0, replacement.count("DISTRIBUTE_CARD"));
+        assertEquals(0, replacement.count("ANNOUNCE_TURN_INFORMATION"));
+        assertTrue(replacement.outbox().stream().noneMatch(node -> node.has("errorCode")));
     }
 
     private void select(TestSession client, int index) {
