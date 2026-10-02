@@ -8,6 +8,7 @@ import java.util.List;
 
 // 슬롯의 비교·교체는 같은 monitor로 보호하고 대기자 통지는 monitor 밖에서 수행한다.
 public class RoomSessionData {
+    final ActionNotificationOrder notifications = new ActionNotificationOrder();
     private Registration player1;
     private Registration player2;
 

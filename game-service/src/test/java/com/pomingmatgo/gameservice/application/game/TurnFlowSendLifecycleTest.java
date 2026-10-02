@@ -37,6 +37,7 @@ import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -327,6 +328,102 @@ class TurnFlowSendLifecycleTest {
         roomCleanupService.cleanupRoom(ROOM_ID).block(TIMEOUT);
     }
 
+    @ParameterizedTest
+    @ValueSource(strings = {"complete", "error", "cancel"})
+    void previousNotificationTerminationReleasesWaitingAction(String termination) {
+        Disposable first = submit(ROOM_ID).subscribe();
+        AtomicInteger completed = new AtomicInteger();
+        Disposable second = turnFlowService.processNormalSubmit(ROOM_ID, Player.PLAYER_2, 0,
+                GameActionSource.AUTOPLAY, scheduler).subscribe(null, error -> fail(error), completed::incrementAndGet);
+        try {
+            assertEquals(2, gameStateRepository.findById(ROOM_ID).block(TIMEOUT).getRound());
+            assertEquals(1, slow.turnStarted.get());
+            assertEquals(1, opponent.turnStarted.get());
+            assertEquals(0, completed.get());
+            if (termination.equals("cancel")) first.dispose();
+            if (termination.equals("error")) slow.completion.tryEmitError(new IllegalStateException("send failed"));
+            else slow.completion.tryEmitEmpty();
+            assertEquals(1, completed.get());
+            assertEquals(2, opponent.turnCompleted.get());
+        } finally {
+            first.dispose();
+            second.dispose();
+        }
+    }
+
+    @Test
+    void cancellingQueuedActionDoesNotReleaseFollowingActionBeforeHead() {
+        installedCardRepository.savePlayerCards(List.of(Card.JAN_3, Card.MAY_2), ROOM_ID, Player.PLAYER_1).block(TIMEOUT);
+        installedCardRepository.savePlayerCards(List.of(Card.FEB_3, Card.JUN_2), ROOM_ID, Player.PLAYER_2).block(TIMEOUT);
+        installedCardRepository.saveHiddenCard(List.of(Card.MAR_1, Card.APR_1, Card.JUL_2, Card.AUG_2), ROOM_ID).block(TIMEOUT);
+        Disposable first = submit(ROOM_ID).subscribe();
+        Disposable second = turnFlowService.processNormalSubmit(ROOM_ID, Player.PLAYER_2, 0,
+                GameActionSource.AUTOPLAY, scheduler).subscribe();
+        second.dispose();
+        AtomicInteger completed = new AtomicInteger();
+        Disposable third = submit(ROOM_ID).subscribe(null, error -> fail(error), completed::incrementAndGet);
+        try {
+            assertEquals(2, gameStateRepository.findById(ROOM_ID).block(TIMEOUT).getCurrentTurn());
+            assertEquals(2, gameStateRepository.findById(ROOM_ID).block(TIMEOUT).getRound());
+            assertEquals(1, opponent.turnStarted.get());
+            assertEquals(0, completed.get());
+            slow.completion.tryEmitEmpty();
+            assertEquals(1, completed.get());
+            assertEquals(2, opponent.turnCompleted.get());
+        } finally {
+            first.dispose();
+            second.dispose();
+            third.dispose();
+        }
+    }
+
+    @Test
+    void cleanupReleasesWaitingNotificationAndRecreatedRoomHasIndependentOrder() {
+        Disposable first = submit(ROOM_ID).subscribe();
+        AtomicInteger completed = new AtomicInteger();
+        Disposable second = turnFlowService.processNormalSubmit(ROOM_ID, Player.PLAYER_2, 0,
+                GameActionSource.AUTOPLAY, scheduler).subscribe(null, error -> fail(error), completed::incrementAndGet);
+        try {
+            assertEquals(0, completed.get());
+            cleanupRoom();
+            assertEquals(1, completed.get());
+            assertEquals(1, opponent.turnStarted.get());
+            seedRoom(ROOM_ID);
+            sessionManager.addPlayer(ROOM_ID, Player.PLAYER_2, 2L, opponent.session).block(TIMEOUT);
+            submit(ROOM_ID).block(TIMEOUT);
+            assertEquals(2, opponent.turnCompleted.get());
+            slow.completion.tryEmitEmpty();
+            assertEquals(2, opponent.turnCompleted.get());
+        } finally {
+            first.dispose();
+            second.dispose();
+        }
+    }
+
+    @Test
+    void endRestartCompletesWhileItsNotificationWaitsForPreviousAction() {
+        GameState initial = gameStateRepository.findById(ROOM_ID).block(TIMEOUT);
+        gameStateRepository.save(initial.toBuilder().round(10).build()).block(TIMEOUT);
+        Disposable first = submit(ROOM_ID).subscribe();
+        AtomicInteger completed = new AtomicInteger();
+        Disposable second = turnFlowService.processNormalSubmit(ROOM_ID, Player.PLAYER_2, 0,
+                GameActionSource.AUTOPLAY, scheduler).subscribe(null, error -> fail(error), completed::incrementAndGet);
+        try {
+            assertEquals(GamePhase.NONE, gameStateRepository.findById(ROOM_ID).block(TIMEOUT).getPhase());
+            assertTrue(installedCardRepository.getPlayerCards(ROOM_ID, Player.PLAYER_1).block(TIMEOUT).isEmpty());
+            assertSame(slow.session, sessionManager.getSession(ROOM_ID, 1));
+            assertEquals(0, completed.get());
+            assertFalse(opponent.statuses.contains("GAME_OVER"));
+            slow.completion.tryEmitEmpty();
+            assertEquals(1, completed.get());
+            assertTrue(opponent.statuses.indexOf("ANNOUNCE_TURN_INFORMATION") < opponent.statuses.indexOf("GAME_OVER"));
+            assertEquals(1, opponent.statuses.stream().filter("GAME_OVER"::equals).count());
+        } finally {
+            first.dispose();
+            second.dispose();
+        }
+    }
+
     @ParameterizedTest(name = "자동플레이={0}")
     @ValueSource(booleans = {false, true})
     void endRestartCompletesBeforeBlockedSubmitNotification(boolean autoplay) {
@@ -436,6 +533,7 @@ class TurnFlowSendLifecycleTest {
 
     // 실제 직렬화/브로드캐스트는 유지하고 WebSocket send 완료만 제어한다.
     private static class SessionProbe {
+        final List<String> statuses = new CopyOnWriteArrayList<>();
         final WebSocketSession session = mock(WebSocketSession.class);
         final Sinks.Empty<Void> completion = Sinks.empty();
         final AtomicInteger turnStarted = new AtomicInteger();
@@ -454,6 +552,9 @@ class TurnFlowSendLifecycleTest {
             when(session.send(any())).thenAnswer(invocation -> {
                 Publisher<WebSocketMessage> messages = invocation.getArgument(0);
                 return Flux.from(messages).concatMap(message -> {
+                    String payload = message.getPayloadAsText();
+                    String status = payload.split("\"status\":\"")[1].split("\"")[0];
+                    statuses.add(status);
                     boolean turn = message.getPayloadAsText().contains("\"status\":\"" + observedStatus + "\"");
                     message.release();
                     if (!turn) return Mono.<Void>empty();

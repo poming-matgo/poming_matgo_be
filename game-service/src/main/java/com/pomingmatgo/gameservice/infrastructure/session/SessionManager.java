@@ -117,6 +117,7 @@ public class SessionManager {
         return Mono.fromRunnable(() -> {
             RoomSessionData removed = roomSessions.remove(roomId);
             if (removed == null) return;
+            removed.notifications.close();
             // 개별 disconnect 처리 없이 방이 삭제돼도 세션→방 매핑이 남지 않도록 함께 제거한다.
             removed.activeSessions().forEach(session -> sessionToRoomMap.remove(session.getId()));
             removed.registrations().forEach(registration -> registration.snapshot().complete(false));
@@ -129,6 +130,12 @@ public class SessionManager {
         if (roomSessionData == null) return List.of();
 
         return roomSessionData.activeSessions();
+    }
+
+    /** 게임 락 안에서 호출한다. 세션 컨테이너가 없으면 순서를 기다릴 수신자도 없다. */
+    public ActionNotificationOrder.Reservation reserveNotifications(long roomId) {
+        RoomSessionData data = roomSessions.get(roomId);
+        return data == null ? null : data.notifications.reserve();
     }
 
     /** 조회 경계 이후 액션만 스냅샷 송신을 기다린다. 대기 뒤 등록 identity를 다시 확인한다. */

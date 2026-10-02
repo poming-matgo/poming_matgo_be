@@ -60,7 +60,7 @@ class PreGameLifecycleBaselineTest {
     private final GameMessageSender sender = mock(GameMessageSender.class, invocation -> Mono.empty());
     private final TurnScheduler scheduler = mock(TurnScheduler.class);
     private final TurnFlowService turns = new TurnFlowService(lifecycle, mock(GamePlayService.class), sender,
-            mock(GameNotificationService.class), mock(PayoutCalculator.class));
+            mock(GameNotificationService.class), mock(PayoutCalculator.class), sessions);
     private PreGameFlowService flow;
     private final Sinks.Empty<Void> sendRelease = Sinks.empty();
     private final GameState initial = GameState.builder().roomId(ROOM_ID)

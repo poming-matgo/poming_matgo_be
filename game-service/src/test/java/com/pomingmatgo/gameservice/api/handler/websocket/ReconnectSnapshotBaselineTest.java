@@ -436,7 +436,7 @@ class ReconnectSnapshotBaselineTest {
 
     @ParameterizedTest
     @ValueSource(booleans = {false, true})
-    void baselineNextAutoplayCanAnnounceBeforePreviousActionsDelayedTurn(boolean delayFirstSend) throws Exception {
+    void nextAutoplayWaitsForPreviousActionsEntireNotification(boolean delayFirstSend) throws Exception {
         TestSession reconnecting = newSession("multiple-actions", false);
         reconnecting.emit(connectJson(USER_2));
         assertEquals(1, reconnecting.data("RECONNECT_STATE").path("currentTurn").asInt());
@@ -465,24 +465,29 @@ class ReconnectSnapshotBaselineTest {
             // 정상 등록된 다음 턴의 기한만 앞당긴다. 상태·phase·실행 플래그는 변경하지 않는다.
             autoPlay.scheduleAutoPlay(ROOM_ID, next.getRound(), next.getCurrentTurn(),
                     next.getCurrentPlayer(), System.nanoTime(), next.getPhase());
-            await(() -> reconnecting.outbox().stream().anyMatch(node ->
-                    "ANNOUNCE_TURN_INFORMATION".equals(node.path("status").asText())
-                            && node.path("data").path("turn").asInt() == 1));
+            await(() -> states.findById(ROOM_ID).block(TIMEOUT).getRound() == 2);
             assertEquals(1, states.findById(ROOM_ID).block(TIMEOUT).getCurrentTurn());
             assertEquals(2, states.findById(ROOM_ID).block(TIMEOUT).getRound());
             assertEquals(9, cards.getPlayerCards(ROOM_ID, Player.PLAYER_1).block(TIMEOUT).size());
             assertEquals(9, cards.getPlayerCards(ROOM_ID, Player.PLAYER_2).block(TIMEOUT).size());
+            if (delayFirstSend) {
+                assertEquals(1, reconnecting.count("SUBMIT_CARD"));
+                assertEquals(0, reconnecting.count("SCORE_UPDATE"));
+                assertEquals(0, reconnecting.count("ANNOUNCE_TURN_INFORMATION"));
+            }
             assertEquals(Sinks.EmitResult.OK, firstSend.tryEmitEmpty());
             await(() -> reconnecting.count("ANNOUNCE_TURN_INFORMATION") == 2);
 
-            // 미해결 순서 기준선: 등록별 스냅샷 장벽은 독립 액션의 안내를 직렬화하지 않는다.
-            List<String> expected = delayFirstSend ? List.of("2:1", "1:2") : List.of("1:2", "2:1");
+            List<String> expected = List.of("1:2", "2:1");
             for (TestSession client : List.of(opponent, reconnecting)) {
                 assertEquals(expected, client.outbox().stream()
                         .filter(node -> "ANNOUNCE_TURN_INFORMATION".equals(node.path("status").asText()))
                         .map(node -> node.path("data").path("round").asInt() + ":"
                                 + node.path("data").path("turn").asInt()).toList());
                 assertEquals(2, client.count("SUBMIT_CARD"));
+                List<String> statuses = client.outbox().stream().map(node -> node.path("status").asText()).toList();
+                assertTrue(statuses.indexOf("SCORE_UPDATE") < statuses.indexOf("ANNOUNCE_TURN_INFORMATION"));
+                assertTrue(statuses.indexOf("ANNOUNCE_TURN_INFORMATION") < statuses.lastIndexOf("SUBMIT_CARD"));
                 assertTrue(client.outbox().stream().noneMatch(node -> node.has("errorCode")));
             }
             assertSame(opponent.session(), sessions.getSession(ROOM_ID, 1));

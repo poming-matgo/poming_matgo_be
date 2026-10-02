@@ -13,6 +13,7 @@ import com.pomingmatgo.gameservice.infrastructure.repository.inmemory.InMemoryIn
 import com.pomingmatgo.gameservice.global.exception.WebSocketBusinessException;
 import com.pomingmatgo.gameservice.global.exception.WebSocketErrorCode;
 import com.pomingmatgo.gameservice.infrastructure.scheduler.TurnScheduler;
+import com.pomingmatgo.gameservice.infrastructure.session.SessionManager;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -59,6 +60,7 @@ class GameActionCancellationTest {
 
     @Autowired GamePlayService gamePlayService;
     @Autowired TurnFlowService turnFlowService;
+    @Autowired SessionManager sessions;
     @SpyBean GameStateRepository gameStateRepository;
     @Autowired AcquiredCardRepository acquiredCardRepository;
     @Autowired RoomCleanupService roomCleanupService;
@@ -96,6 +98,7 @@ class GameActionCancellationTest {
     @ValueSource(booleans = {false, true})
     @DisplayName("손패 또는 손패·덱 제거 후 호출자가 취소해도 카드와 다음 턴 저장을 완료한다")
     void cancellationFinishesAcceptedActionBeforeReleasingLock(boolean afterDraw) {
+        sessions.addRoom(ROOM_ID).block(TIMEOUT);
         pauseDraw(afterDraw);
 
         StepVerifier.create(turnFlowService.processNormalSubmit(ROOM_ID, Player.PLAYER_1, 0,
@@ -121,6 +124,10 @@ class GameActionCancellationTest {
                 .expectErrorSatisfies(error -> assertCode(error, WebSocketErrorCode.NOT_YOUR_TURN))
                 .verify(TIMEOUT);
         assertEquals(INITIAL_CARDS, storedCards());
+        // 호출자 취소 뒤 완료 콜백이 만든 안내 예약도 회수되어 다음 액션을 막지 않는다.
+        turnFlowService.processNormalSubmit(ROOM_ID, Player.PLAYER_2, 0,
+                GameActionSource.USER, scheduler).block(TIMEOUT);
+        assertEquals(2, gameStateRepository.findById(ROOM_ID).block(TIMEOUT).getRound());
     }
 
     @Test
