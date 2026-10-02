@@ -434,6 +434,124 @@ class ReconnectSnapshotBaselineTest {
         opponent.emit("{\"eventType\":{\"subType\":\"NORMAL_SUBMIT\"},\"data\":{\"cardIndex\":0}}");
     }
 
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void baselineNextAutoplayCanAnnounceBeforePreviousActionsDelayedTurn(boolean delayFirstSend) throws Exception {
+        TestSession reconnecting = newSession("multiple-actions", false);
+        reconnecting.emit(connectJson(USER_2));
+        assertEquals(1, reconnecting.data("RECONNECT_STATE").path("currentTurn").asInt());
+        Sinks.Empty<Void> firstSend = Sinks.empty();
+        AtomicBoolean intercepted = new AtomicBoolean();
+        // 첫 사용자 액션의 송신만 지연한다. 다음 플레이어의 타이머·락·InFlight는 실제 경로를 쓴다.
+        doAnswer(invocation -> Flux.from(invocation.<Publisher<WebSocketMessage>>getArgument(0))
+                .concatMap(message -> Mono.fromCallable(() -> mapper.readTree(message.getPayloadAsText())))
+                .concatMap(node -> {
+                    opponent.outbox().add(node);
+                    if (delayFirstSend && "SUBMIT_CARD".equals(node.path("status").asText())
+                            && intercepted.compareAndSet(false, true)) return firstSend.asMono();
+                    return Mono.empty();
+                }).then()).when(opponent.session()).send(any());
+        try {
+            submit();
+            GameState next = states.findById(ROOM_ID).block(TIMEOUT);
+            assertEquals(2, next.getCurrentTurn());
+            assertEquals(GamePhase.IN_PROGRESS, next.getPhase());
+            assertEquals(Player.PLAYER_2, next.getCurrentPlayer());
+            verify(autoPlay).scheduleAutoPlay(eq(ROOM_ID), eq(1), eq(2), eq(Player.PLAYER_2),
+                    anyLong(), eq(GamePhase.IN_PROGRESS));
+            assertEquals(delayFirstSend ? 1 : 0, firstSend.currentSubscriberCount());
+            assertEquals(delayFirstSend ? 0 : 1, reconnecting.count("ANNOUNCE_TURN_INFORMATION"));
+
+            // 정상 등록된 다음 턴의 기한만 앞당긴다. 상태·phase·실행 플래그는 변경하지 않는다.
+            autoPlay.scheduleAutoPlay(ROOM_ID, next.getRound(), next.getCurrentTurn(),
+                    next.getCurrentPlayer(), System.nanoTime(), next.getPhase());
+            await(() -> reconnecting.outbox().stream().anyMatch(node ->
+                    "ANNOUNCE_TURN_INFORMATION".equals(node.path("status").asText())
+                            && node.path("data").path("turn").asInt() == 1));
+            assertEquals(1, states.findById(ROOM_ID).block(TIMEOUT).getCurrentTurn());
+            assertEquals(2, states.findById(ROOM_ID).block(TIMEOUT).getRound());
+            assertEquals(9, cards.getPlayerCards(ROOM_ID, Player.PLAYER_1).block(TIMEOUT).size());
+            assertEquals(9, cards.getPlayerCards(ROOM_ID, Player.PLAYER_2).block(TIMEOUT).size());
+            assertEquals(Sinks.EmitResult.OK, firstSend.tryEmitEmpty());
+            await(() -> reconnecting.count("ANNOUNCE_TURN_INFORMATION") == 2);
+
+            // 미해결 순서 기준선: 등록별 스냅샷 장벽은 독립 액션의 안내를 직렬화하지 않는다.
+            List<String> expected = delayFirstSend ? List.of("2:1", "1:2") : List.of("1:2", "2:1");
+            for (TestSession client : List.of(opponent, reconnecting)) {
+                assertEquals(expected, client.outbox().stream()
+                        .filter(node -> "ANNOUNCE_TURN_INFORMATION".equals(node.path("status").asText()))
+                        .map(node -> node.path("data").path("round").asInt() + ":"
+                                + node.path("data").path("turn").asInt()).toList());
+                assertEquals(2, client.count("SUBMIT_CARD"));
+                assertTrue(client.outbox().stream().noneMatch(node -> node.has("errorCode")));
+            }
+            assertSame(opponent.session(), sessions.getSession(ROOM_ID, 1));
+            assertSame(reconnecting.session(), sessions.getSession(ROOM_ID, 2));
+        } finally {
+            firstSend.tryEmitEmpty();
+        }
+    }
+
+    @Test
+    void sessionPreservingRestartCompletesWhileGameOverWaitsForSnapshot() throws Exception {
+        TestSession playing = newSession("playing-before-restart", false);
+        playing.emit(connectJson(USER_2));
+        // 종료 직전 상태를 주입하지 않고 고정 덱의 실제 WS 제출로 세 번째 뻑 직전에 도달한다.
+        GameState state = states.findById(ROOM_ID).block(TIMEOUT);
+        for (int actions = 0; actions < 60
+                && state.getPlayerState(state.getCurrentPlayer()).getPpeokCount() < 2; actions++) {
+            assertTrue(state.getPhase().isPlayerActionPhase());
+            TestSession actor = state.getCurrentPlayer() == Player.PLAYER_1 ? opponent : playing;
+            String action = state.getPhase() == GamePhase.AWAITING_FLOOR_CARD_CHOICE
+                    ? "FLOOR_SELECT" : "NORMAL_SUBMIT";
+            actor.emit("{\"eventType\":{\"subType\":\"" + action + "\"},\"data\":{\"cardIndex\":0}}");
+            GameState before = state;
+            await(() -> states.findById(ROOM_ID).block(TIMEOUT) != before);
+            state = states.findById(ROOM_ID).block(TIMEOUT);
+            assertTrue(actor.outbox().stream().noneMatch(node -> node.has("errorCode")));
+        }
+        assertEquals(2, state.getPlayerState(state.getCurrentPlayer()).getPpeokCount());
+        assertEquals(GamePhase.IN_PROGRESS, state.getPhase());
+        playing.drop();
+        await(() -> sessions.getSession(ROOM_ID, 2) == null);
+
+        TestSession reconnecting = newSession("snapshot-across-restart", true);
+        var connect = reconnectWorker.submit(() -> reconnecting.emit(connectJson(USER_2)));
+        try {
+            assertTrue(paused.await(TIMEOUT.toMillis(), TimeUnit.MILLISECONDS));
+            autoPlay.scheduleAutoPlay(ROOM_ID, state.getRound(), state.getCurrentTurn(),
+                    state.getCurrentPlayer(), System.nanoTime(), state.getPhase());
+            await(() -> {
+                GameState recreated = states.findById(ROOM_ID).block(TIMEOUT);
+                return recreated != null && recreated.getPhase() == GamePhase.NONE;
+            });
+            assertEquals(GamePhase.NONE, states.findById(ROOM_ID).block(TIMEOUT).getPhase());
+            assertTrue(cards.getPlayerCards(ROOM_ID, Player.PLAYER_1).block(TIMEOUT).isEmpty());
+            assertTrue(cards.getPlayerCards(ROOM_ID, Player.PLAYER_2).block(TIMEOUT).isEmpty());
+            assertSame(opponent.session(), sessions.getSession(ROOM_ID, 1));
+            assertSame(reconnecting.session(), sessions.getSession(ROOM_ID, 2));
+            assertEquals(0, reconnecting.count("RECONNECT_STATE"));
+            assertEquals(0, reconnecting.count("GAME_OVER"));
+
+            resume.countDown();
+            connect.get(TIMEOUT.toMillis(), TimeUnit.MILLISECONDS);
+            await(() -> reconnecting.count("GAME_OVER") == 1);
+            assertEquals("IN_PROGRESS", reconnecting.data("RECONNECT_STATE").path("phase").asText());
+            assertEquals(state.getRound(), reconnecting.data("RECONNECT_STATE").path("round").asInt());
+            assertEquals(state.getCurrentTurn(), reconnecting.data("RECONNECT_STATE").path("currentTurn").asInt());
+            assertEquals(1, opponent.count("GAME_OVER"));
+            assertEquals(1, reconnecting.count("THREE_PPEOK"));
+            assertEquals(state.getCurrentPlayer().name(), reconnecting.data("GAME_OVER").path("winner").asText());
+            List<String> order = reconnecting.outbox().stream().map(node -> node.path("status").asText()).toList();
+            assertTrue(order.indexOf("RECONNECT_STATE") < order.indexOf("SUBMIT_CARD"));
+            assertTrue(order.indexOf("RECONNECT_STATE") < order.indexOf("GAME_OVER"));
+            assertTrue(reconnecting.outbox().stream().noneMatch(node -> node.has("errorCode")));
+            assertSame(reconnecting.session(), sessions.getSession(ROOM_ID, 2));
+        } finally {
+            resume.countDown();
+        }
+    }
+
     @Test
     void reconnectAfterCompletedActionReadsTheNewTurnAndCards() throws Exception {
         opponent.emit("{\"eventType\":{\"subType\":\"NORMAL_SUBMIT\"},\"data\":{\"cardIndex\":0}}");
