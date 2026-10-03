@@ -227,6 +227,85 @@ class PreGameNotificationBaselineTest {
         assertTrue(first.outbox().stream().noneMatch(node -> node.has("errorCode")));
     }
 
+    @Test
+    void cleanupLeavesSocketOpenButRequiresRoomAndMembershipBeforeConnect() throws Exception {
+        assertEquals(Sinks.EmitResult.OK, second.inbound().tryEmitComplete());
+        await(() -> sessions.getAllUser(ROOM_ID).isEmpty());
+        assertNull(states.findById(ROOM_ID).block(TIMEOUT));
+
+        first.emit("{\"eventType\":{\"subType\":\"READY\"}}");
+        first.emit(connectJson(USER_1));
+        await(() -> errors(first).size() == 2);
+        assertEquals(List.of("NOT_IN_ROOM", "NOT_EXISTED_ROOM"), errors(first));
+
+        rooms.createRoom(ROOM_ID).block(TIMEOUT);
+        first.emit(connectJson(USER_1));
+        await(() -> errors(first).size() == 3);
+        assertEquals("NOT_IN_ROOM", errors(first).get(2));
+        assertFalse(sessions.getPlayerContext(first.session()).hasElement().block(TIMEOUT));
+
+        rooms.joinRoom(USER_1, ROOM_ID).block(TIMEOUT);
+        long connects = first.count("CONNECT");
+        first.emit(connectJson(USER_1));
+        await(() -> first.count("CONNECT") == connects + 1);
+        assertSame(first.session(), sessions.getSession(ROOM_ID, 1));
+        assertFalse(first.subscription().isDisposed());
+        verify(first.session(), never()).close();
+        assertEquals(0, first.count("RECONNECT_STATE"));
+        assertEquals(GamePhase.NONE, states.findById(ROOM_ID).block(TIMEOUT).getPhase());
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void sameSocketCanRejoinRecreatedRoomAfterEarlierSelectionSendFinishes(boolean delayed) throws Exception {
+        holdSend(first, "LEADER_SELECTION", delayed);
+        select(first, 0);
+        assertEquals(delayed ? 1 : 0, releaseSend.currentSubscriberCount());
+        assertEquals(Sinks.EmitResult.OK, second.inbound().tryEmitComplete());
+        await(() -> first.count("OPPONENT_DISCONNECTED") == 1 && sessions.getAllUser(ROOM_ID).isEmpty());
+        assertNull(states.findById(ROOM_ID).block(TIMEOUT));
+
+        rooms.createRoom(ROOM_ID).block(TIMEOUT);
+        rooms.joinRoom(USER_1, ROOM_ID).block(TIMEOUT);
+        rooms.joinRoom(USER_2, ROOM_ID).block(TIMEOUT);
+        long connects = first.count("CONNECT");
+        // 기존 핸들러에 요청을 넣어 concatMap 순서를 유지한다. 새 방 생성·참여만 독립 HTTP 서비스 경로다.
+        first.emit(connectJson(USER_1));
+        if (delayed) {
+            assertEquals(connects, first.count("CONNECT"));
+            assertNull(sessions.getSession(ROOM_ID, 1));
+            assertEquals(1, releaseSend.currentSubscriberCount());
+        }
+        releaseSend.tryEmitEmpty();
+        await(() -> first.count("CONNECT") == connects + 1);
+        assertSame(first.session(), sessions.getSession(ROOM_ID, 1));
+        assertFalse(first.subscription().isDisposed());
+        verify(first.session(), never()).close();
+        assertEquals(0, first.count("RECONNECT_STATE"));
+
+        List<String> statuses = first.outbox().stream().map(node -> node.path("status").asText()).toList();
+        assertTrue(statuses.lastIndexOf("LEADER_SELECTION") < statuses.lastIndexOf("CONNECT"));
+
+        TestSession peer = newSession("new-peer");
+        peer.emit(connectJson(USER_2));
+        await(() -> peer.count("CONNECT") == 1);
+        assertEquals(0, peer.count("LEADER_SELECTION"));
+        assertEquals(0, peer.count("LEADER_SELECTION_RESULT"));
+        first.emit("{\"eventType\":{\"subType\":\"READY\"}}");
+        peer.emit("{\"eventType\":{\"subType\":\"READY\"}}");
+        await(() -> first.count("START") == 2 && peer.count("START") == 1);
+        assertEquals(GamePhase.DETERMINING_STARTING_PLAYER, states.findById(ROOM_ID).block(TIMEOUT).getPhase());
+        assertEquals(0, first.count("LEADER_SELECTION_RESULT"));
+        assertEquals(0, first.count("DISTRIBUTE_CARD"));
+        assertTrue(errors(first).isEmpty());
+        assertTrue(errors(peer).isEmpty());
+    }
+
+    private static List<String> errors(TestSession client) {
+        return client.outbox().stream().filter(node -> node.has("errorCode"))
+                .map(node -> node.path("errorCode").asText()).toList();
+    }
+
     private void select(TestSession client, int index) {
         client.emit("{\"eventType\":{\"subType\":\"LEADER_SELECTION\"},\"data\":{\"cardIndex\":" + index + "}}");
     }
