@@ -1,9 +1,9 @@
 import http from 'k6/http';
 import { check, sleep } from 'k6';
-import { vu } from 'k6/execution';
+import { vu, test as executionTest } from 'k6/execution';
 import { WebSocket } from 'k6/websockets';
 import { Trend, Counter } from 'k6/metrics';
-import { createRoomRun } from './loadtest/room-run.js';
+import { createRoomRun, createPreparationFlow } from './loadtest/room-run.js';
 
 // 게임 액션(카드 제출/바닥 선택/고스톱 선택) 전송 → 첫 응답 메시지 수신까지의 RTT
 const actionRtt = new Trend('gostop_action_rtt', true);
@@ -33,8 +33,8 @@ export const options = {
     summaryTrendStats: ['avg', 'min', 'med', 'max', 'p(90)', 'p(95)', 'p(99)'],
 };
 
-const BASE_HTTP_URL = 'http://127.0.0.1:8084';
-const BASE_WS_URL = 'ws://127.0.0.1:8084/gostop';
+const BASE_HTTP_URL = __ENV.BASE_HTTP_URL || 'http://127.0.0.1:8084';
+const BASE_WS_URL = __ENV.BASE_WS_URL || 'ws://127.0.0.1:8084/gostop';
 
 export default async function () {
     const roomId = vu.idInTest;
@@ -49,6 +49,7 @@ export default async function () {
     
     if (!created) {
         console.error(`[Room:${roomId}] 방 생성 실패: ${createRes.status}`);
+        executionTest.abort('방 생성 또는 입장 실패');
         return; 
     }
 
@@ -64,6 +65,7 @@ export default async function () {
 
     if (!joined) {
         console.error(`[Room:${roomId}] 유저 입장 실패. P1:${join1.status}, P2:${join2.status}`);
+        executionTest.abort('방 생성 또는 입장 실패');
         return; 
     }
 
@@ -73,6 +75,15 @@ export default async function () {
         console.error(`[Room:${roomId}] 방 실행 실패: ${reason}`);
     });
     roomFailures.add(0);
+    serverErrors.add(0);
+    clientTimeouts.add(0);
+
+    const clients = {};
+    const preparation = createPreparationFlow(
+        (type) => clients[type].ready(),
+        (type) => clients[type].select(),
+        () => clients.PLAYER_1.restart()
+    );
 
     // 3. 웹소켓 연결 및 게임 로직
     function connectPlayer(userId, playerType) {
@@ -106,6 +117,13 @@ export default async function () {
                 catch (err) { run.fail(`송신 실패: ${err.message}`); }
             }
 
+            clients[playerType] = {
+                ready: () => sendReq({ eventType: { type: 'ROOM', subType: 'READY' } }, 'ROOM_READY'),
+                select: () => sendReq({ eventType: { type: 'PREGAME', subType: 'LEADER_SELECTION' },
+                    data: { cardIndex: playerType === 'PLAYER_1' ? '1' : '2' } }, 'PREGAME_LEADER_SELECTION'),
+                restart: () => player.schedule(() => preparation.restart(), 1000),
+            };
+
             startTimeoutTimer('소켓 연결');
 
             ws.onopen = () => {
@@ -130,8 +148,8 @@ export default async function () {
                         return;
                     }
 
-                    // 정상 메시지를 받았으므로 타임아웃 해제
-                    player.cancel(activityTimer);
+                    // 상대의 준비·선택 안내를 기다리는 동안에도 무응답을 감지한다.
+                    startTimeoutTimer(lastSentReq);
 
                     // 게임 액션 RTT: 액션 전송 후 서버가 처리 결과를 처음 밀어준 시점까지
                     if (pendingActionSentAt !== null) {
@@ -142,19 +160,9 @@ export default async function () {
                     let status = res.status || (res.eventType && res.eventType.subType);
                     if (!status) return;
 
+                    preparation.onMessage(playerType, res);
+
                     switch (status) {
-                        case 'CONNECT':
-                            sendReq({ eventType: { type: "ROOM", subType: "READY" } }, "ROOM_READY (준비)");
-                            break;
-
-                        case 'START':
-                            let cardIdx = (playerType === "PLAYER_1") ? "1" : "2";
-                            sendReq(
-                                { eventType: { type: "PREGAME", subType: "LEADER_SELECTION" }, data: { cardIndex: cardIdx } },
-                                `PREGAME_LEADER_SELECTION (선택 카드: ${cardIdx})`
-                            );
-                            break;
-
                         case 'ANNOUNCE_TURN_INFORMATION':
                             let currentPlayer = (res.data && res.data.curPlayer) || res.curPlayer;
                             if (currentPlayer === playerType) {
@@ -204,9 +212,6 @@ export default async function () {
                         case 'GAME_OVER':
                             // 방당 1회만 집계 (양쪽 모두 수신하므로 PLAYER_1 기준)
                             if (playerType === "PLAYER_1") gamesCompleted.add(1);
-                            player.schedule(() => {
-                                sendReq({ eventType: { type: "ROOM", subType: "READY" } }, "ROOM_READY (게임 종료 후 재준비)");
-                            }, 1000);
                             break;
                     }
                 } catch (err) {
@@ -230,4 +235,6 @@ export default async function () {
         connectPlayer(p1_userId, "PLAYER_1"),
         connectPlayer(p2_userId, "PLAYER_2")
     ]);
+    // close 요청은 서버 정리 완료가 아니다. 실패 iteration의 roomId를 다시 만들지 않는다.
+    if (run.failed) executionTest.abort('방 실행 실패 — 부하 실행 중단');
 }

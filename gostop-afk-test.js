@@ -7,7 +7,7 @@ import http from 'k6/http';
 import { check, sleep } from 'k6';
 import { WebSocket } from 'k6/websockets';
 import { Counter } from 'k6/metrics';
-import { createRoomRun } from './loadtest/room-run.js';
+import { createRoomRun, createPreparationFlow } from './loadtest/room-run.js';
 
 export const options = {
     thresholds: { checks: ['rate==1'] },
@@ -21,8 +21,8 @@ export const options = {
     },
 };
 
-const BASE_HTTP_URL = 'http://127.0.0.1:8084';
-const BASE_WS_URL = 'ws://127.0.0.1:8084/gostop';
+const BASE_HTTP_URL = __ENV.BASE_HTTP_URL || 'http://127.0.0.1:8084';
+const BASE_WS_URL = __ENV.BASE_WS_URL || 'ws://127.0.0.1:8084/gostop';
 // 턴 자동플레이(12초) + 바닥 카드 자동 선택(12초)이 연달아 이어져도 걸리지 않는 정지 판정 한계
 const STALL_LIMIT_MS = 30000;
 
@@ -31,7 +31,7 @@ const goStopChoiceCounter = new Counter('afk_go_stop_choices');
 const turnCounter = new Counter('afk_turn_announcements');
 const threePpeokCounter = new Counter('afk_three_ppeok_wins');
 
-function connectPlayer(userId, playerType, roomId, result, run) {
+function connectPlayer(userId, playerType, roomId, result, run, clients, preparation) {
     return new Promise((resolve) => {
         const ws = new WebSocket(BASE_WS_URL);
         const logPrefix = `[Room:${roomId} | ${playerType}]`;
@@ -53,6 +53,11 @@ function connectPlayer(userId, playerType, roomId, result, run) {
             }, STALL_LIMIT_MS);
         }
 
+        clients[playerType] = {
+            ready: () => sendReq({ eventType: { type: 'ROOM', subType: 'READY' } }),
+            select: () => sendReq({ eventType: { type: 'PREGAME', subType: 'LEADER_SELECTION' },
+                data: { cardIndex: playerType === 'PLAYER_1' ? '1' : '2' } }),
+        };
         resetWatchdog();
 
         ws.onopen = () => {
@@ -77,17 +82,9 @@ function connectPlayer(userId, playerType, roomId, result, run) {
 
             resetWatchdog();
 
+            preparation.onMessage(playerType, res);
+
             switch (status) {
-                case 'CONNECT':
-                    sendReq({ eventType: { type: 'ROOM', subType: 'READY' } });
-                    break;
-
-                case 'START': {
-                    const cardIdx = playerType === 'PLAYER_1' ? '1' : '2';
-                    sendReq({ eventType: { type: 'PREGAME', subType: 'LEADER_SELECTION' }, data: { cardIndex: cardIdx } });
-                    break;
-                }
-
                 case 'ANNOUNCE_TURN_INFORMATION':
                     // AFK: 카드를 내지 않는다 → 서버 자동플레이가 12초 후 대신 제출해야 함
                     result.turns++;
@@ -159,9 +156,13 @@ export default async function () {
         console.error(`[Room:${roomId}] AFK 실행 실패: ${reason}`);
     });
 
+    const clients = {};
+    const preparation = createPreparationFlow(
+        (type) => clients[type].ready(), (type) => clients[type].select()
+    );
     await Promise.all([
-        connectPlayer(1, 'PLAYER_1', roomId, r1, run),
-        connectPlayer(2, 'PLAYER_2', roomId, r2, run),
+        connectPlayer(1, 'PLAYER_1', roomId, r1, run, clients, preparation),
+        connectPlayer(2, 'PLAYER_2', roomId, r2, run, clients, preparation),
     ]);
 
     check(null, {
