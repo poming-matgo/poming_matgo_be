@@ -1,105 +1,89 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 950 710" font-family="Pretendard, 'Noto Sans KR', 'Malgun Gothic', 'Apple SD Gothic Neo', 'Segoe UI', sans-serif">
+<svg xmlns="http://www.w3.org/2000/svg" width="1100" height="940" viewBox="0 0 1100 940" role="img" aria-labelledby="title desc">
+  <title id="title">Poming Matgo — 동시성 제어 아키텍처</title>
+  <desc id="desc">단일 인스턴스 인메모리 동시성 아키텍처. 사용자와 자동플레이는 공통 게임 경로를 사용한다. GameLock의 executor는 수락 후 필수 실행을 호출자 취소와 분리하며, 실행 게이트는 기존 실행과 방 정리·재생성을 조정한다. 락 안에서 수신자와 안내 순서를 확정하고, 락 밖에서는 ActionNotificationOrder와 SnapshotDelivery로 이전 안내·스냅샷 송신을 기다린 뒤 메시지를 보낸다. 주요 연결만 표시한다.</desc>
   <defs>
-    <marker id="arw" markerWidth="9" markerHeight="8" refX="7" refY="4" orient="auto" markerUnits="userSpaceOnUse">
-      <path d="M0,0 L8,4 L0,8 Z" fill="#8b949e"/>
+    <marker id="arrow" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto">
+      <path d="M1 1 L7 4 L1 7" fill="none" stroke="#adbed1" stroke-width="1.5" />
     </marker>
   </defs>
   <style>
-    .box{fill:#161b22;stroke:#3d444d;stroke-width:1.5}
-    .a1{fill:rgba(56,139,253,.13);stroke:#4493f8;stroke-width:1.5}
-    .a2{fill:rgba(240,136,62,.12);stroke:#f0883e;stroke-width:1.5}
-    .a3{fill:rgba(63,185,80,.12);stroke:#3fb950;stroke-width:1.5}
-    .store{fill:#1c2128;stroke:#3d444d;stroke-width:1.5;stroke-dasharray:5 3}
-    .t{fill:#e6edf3;font-size:13.5px;font-weight:600;text-anchor:middle}
-    .c1{fill:#58a6ff}
-    .c2{fill:#f0883e}
-    .c3{fill:#3fb950}
-    .s{fill:#9198a1;font-size:11px;text-anchor:middle}
-    .lbl{fill:#9198a1;font-size:11px}
-    .edge{stroke:#8b949e;stroke-width:1.5;fill:none;marker-end:url(#arw)}
-  </style>
-
-  <!-- edges -->
-  <path class="edge" d="M150,44 H280"/>
-  <text class="lbl" x="205" y="37">WS</text>
-  <path class="edge" d="M400,64 V80 H150 V185"/>
-  <path class="edge" d="M400,64 V185"/>
-  <path class="edge" d="M400,64 V80 H680 V95"/>
-  <path class="edge" d="M680,164 V185"/>
-  <path class="edge" d="M150,230 V265"/>
-  <path class="edge" d="M400,230 V257"/>
-  <path class="edge" d="M400,298 V305"/>
-  <path class="edge" d="M680,230 V265"/>
-  <path class="edge" d="M150,310 V373"/>
-  <path class="edge" d="M400,346 V373"/>
-  <path class="edge" d="M325,328 H200 V373"/>
-  <path class="edge" d="M680,338 V373"/>
-  <path class="edge" d="M680,418 V441"/>
-  <path class="edge" d="M680,512 V535"/>
-  <path class="edge" d="M680,625 V597"/>
-  <text class="lbl" x="690" y="611">발사 시 상태 재검증</text>
-  <path class="edge" d="M810,322 H860 V640 H826"/>
-  <text class="lbl" x="848" y="480" text-anchor="middle" transform="rotate(-90 848 480)">타이머 등록</text>
-  <path class="edge" d="M820,653 H890 V304 H816"/>
-  <text class="lbl" x="906" y="480" text-anchor="middle" transform="rotate(-90 906 480)">타이머 발사 → 실행 위임</text>
-
-  <!-- top row -->
-  <rect class="box" x="40" y="24" width="110" height="40" rx="6"/>
-  <text class="t" x="95" y="49">Client</text>
-  <rect class="box" x="285" y="24" width="230" height="40" rx="6"/>
-  <text class="t" x="400" y="49">GameWebSocketHandler</text>
-
-  <!-- ① InFlightManager -->
-  <rect class="a1" x="540" y="100" width="280" height="64" rx="6"/>
-  <text class="t c1" x="680" y="122">① InFlightManager</text>
-  <text class="s" x="680" y="140">자동플레이 ↔ 정상 요청 race 1차 fail-fast</text>
-  <text class="s" x="680" y="155">NORMAL / AUTOPLAY 키 분리</text>
-
-  <!-- handlers -->
-  <rect class="box" x="75" y="190" width="150" height="40" rx="6"/>
-  <text class="t" x="150" y="215">WsRoomHandler</text>
-  <rect class="box" x="315" y="190" width="170" height="40" rx="6"/>
-  <text class="t" x="400" y="215">WsPreGameHandler</text>
-  <rect class="box" x="605" y="190" width="150" height="40" rx="6"/>
-  <text class="t" x="680" y="215">WsGameHandler</text>
-
-  <!-- services -->
-  <rect class="box" x="80" y="270" width="140" height="40" rx="6"/>
-  <text class="t" x="150" y="295">RoomService</text>
-  <rect class="box" x="315" y="262" width="170" height="36" rx="6"/>
-  <text class="t" x="400" y="285">PreGameFlowService</text>
-  <rect class="box" x="325" y="310" width="150" height="36" rx="6"/>
-  <text class="t" x="400" y="333">PreGameService</text>
-  <rect class="box" x="550" y="270" width="260" height="68" rx="6"/>
-  <text class="t" x="680" y="292">TurnFlowService</text>
-  <text class="s" x="680" y="310">유저/자동 공통 후처리: 메시지 전송</text>
-  <text class="s" x="680" y="325">→ 타이머 재등록 (전이는 락 안)</text>
-
-  <!-- ② concurrency layer -->
-  <rect class="a2" x="40" y="378" width="220" height="66" rx="6"/>
-  <text class="t c2" x="150" y="400">② RoomLockManager</text>
-  <text class="s" x="150" y="418">방 단위 Semaphore</text>
-  <text class="s" x="150" y="433">Ready/Join·선 선택 직렬화</text>
-  <rect class="a2" x="285" y="378" width="230" height="66" rx="6"/>
-  <text class="t c2" x="400" y="400">② AtomicTrigger</text>
-  <text class="s" x="400" y="418">LeadingPlayer putIfAbsent</text>
-  <text class="s" x="400" y="433">후속 트리거 1회 발사 보장</text>
-
-  <!-- game path -->
-  <rect class="box" x="595" y="378" width="170" height="40" rx="6"/>
-  <text class="t" x="680" y="403">GamePlayService</text>
-  <rect class="a2" x="560" y="446" width="240" height="66" rx="6"/>
-  <text class="t c2" x="680" y="468">② @GameLock AOP</text>
-  <text class="s" x="680" y="486">방 단위 게임 액션 Semaphore</text>
-  <text class="s" x="680" y="501">race final guard</text>
-
-  <!-- state store -->
-  <rect class="store" x="540" y="540" width="280" height="52" rx="6"/>
-  <text class="t" x="680" y="562">ConcurrentHashMap</text>
-  <text class="s" x="680" y="580">In-Memory Game State</text>
-
-  <!-- ③ AutoPlayScheduler -->
-  <rect class="a3" x="540" y="625" width="280" height="56" rx="6"/>
-  <text class="t c3" x="680" y="648">③ AutoPlayScheduler</text>
-  <text class="s" x="680" y="666">턴 타임아웃 시 자동 액션 발사</text>
+text { font-family: 'Noto Sans KR', 'Malgun Gothic', 'Apple SD Gothic Neo', sans-serif; fill: #eef4fc; }
+.heading { font-size: 28px; font-weight: 700; }
+.label { font-size: 20px; font-weight: 700; }
+.body { font-size: 16px; fill: #adbed1; }
+.code { font-family: 'DejaVu Sans', sans-serif; font-size: 16px; fill: #adbed1; }
+.small { font-size: 14px; fill: #adbed1; }
+.route { fill: none; stroke: #adbed1; stroke-width: 1.7; marker-end: url(#arrow); }
+.wire { fill: none; stroke: #adbed1; stroke-width: 1.7; }
+</style>
+  <rect width="1100" height="940" rx="20" fill="#101925" />
+  <text x="40" y="53" class="heading" text-anchor="start">동시성 제어 아키텍처</text>
+  <text x="1060" y="51" class="body" text-anchor="end">단일 인스턴스 · in-memory</text>
+  <rect x="40" y="407" width="1000" height="280" rx="16" fill="#1b3051" />
+  <text x="60" y="441" class="label" text-anchor="start" style="fill:#91b7ff">@GameLock · 같은 방의 보호 메서드</text>
+  <path class="route" d="M150 186 V407" />
+  <path class="wire" d="M505 186 V207" />
+  <path class="route" d="M505 207 H235 V407" />
+  <path class="route" d="M505 207 H525 V285" />
+  <path class="route" d="M505 207 H710 V240 H745" />
+  <path class="route" d="M915 186 V199 H890 V217" />
+  <path class="route" d="M890 263 V285" />
+  <path class="route" d="M525 361 V407" />
+  <path class="route" d="M890 361 V407" />
+  <rect x="40" y="110" width="240" height="76" rx="12" fill="#182536" stroke="#3e526c" />
+  <text x="60" y="140" class="label" text-anchor="start">HTTP</text>
+  <text x="60" y="168" class="body" text-anchor="start">RoomHandler · 입퇴장</text>
+  <rect x="330" y="110" width="350" height="76" rx="12" fill="#182536" stroke="#3e526c" />
+  <text x="350" y="140" class="label" text-anchor="start">WebSocket</text>
+  <text x="350" y="168" class="code" text-anchor="start">GameWebSocketHandler</text>
+  <rect x="770" y="110" width="290" height="76" rx="12" fill="#182536" stroke="#3e526c" />
+  <text x="790" y="140" class="label" text-anchor="start">자동플레이</text>
+  <text x="790" y="168" class="code" text-anchor="start">AutoPlayScheduler</text>
+  <rect x="745" y="217" width="295" height="46" rx="12" fill="#3a3021" />
+  <text x="892" y="246" class="label" text-anchor="middle" style="fill:#edc179">InFlightManager</text>
+  <rect x="370" y="285" width="310" height="76" rx="12" fill="#182536" stroke="#3e526c" />
+  <text x="390" y="316" class="label" text-anchor="start">게임 준비</text>
+  <text x="390" y="345" class="code" text-anchor="start">PreGameFlowService</text>
+  <rect x="730" y="285" width="310" height="76" rx="12" fill="#182536" stroke="#3e526c" />
+  <text x="750" y="316" class="label" text-anchor="start">사용자 · 자동플레이 공통 경로</text>
+  <text x="750" y="345" class="code" text-anchor="start">TurnFlowService</text>
+  <text x="172" y="310" class="body" text-anchor="start">입퇴장</text>
+  <text x="255" y="345" class="body" text-anchor="start">준비</text>
+  <rect x="60" y="575" width="290" height="96" rx="12" fill="#182536" />
+  <text x="78" y="605" class="label" text-anchor="start">방 입퇴장 · 준비</text>
+  <text x="78" y="633" class="code" text-anchor="start">RoomService</text>
+  <rect x="395" y="575" width="290" height="96" rx="12" fill="#182536" />
+  <text x="413" y="605" class="label" text-anchor="start">선 선택 · 게임 시작</text>
+  <text x="413" y="633" class="code" text-anchor="start">PreGameStartService</text>
+  <rect x="730" y="575" width="290" height="96" rx="12" fill="#182536" />
+  <text x="748" y="605" class="label" text-anchor="start">게임 액션</text>
+  <text x="748" y="633" class="code" text-anchor="start">GamePlayService</text>
+  <rect x="60" y="455" width="465" height="100" rx="12" fill="#182536" />
+  <text x="78" y="484" class="label" style="fill:#91b7ff">수락한 실행 보호</text>
+  <text x="78" y="513" class="code">InMemoryGameActionExecutor</text>
+  <text x="78" y="539" class="body">호출자 취소와 필수 처리 분리</text>
+  <rect x="555" y="455" width="465" height="100" rx="12" fill="#182536" />
+  <text x="573" y="484" class="label" style="fill:#91b7ff">정리·재생성 조정</text>
+  <text x="573" y="513" class="code">InMemoryRoomExecutionGate</text>
+  <text x="573" y="539" class="body">진행 중 실행 대기 · 새 액션 차단</text>
+  <path class="route" d="M525 505 H550" />
+  <path class="route" d="M190 687 V751" />
+  <text x="210" y="725" class="body">상태 저장·조회</text>
+  <path class="route" d="M590 687 V751" stroke-dasharray="5 5" />
+  <text x="610" y="725" class="body">락 안에서 수신자·순서 확정</text>
+  <path class="route" d="M1040 323 H1070 V777 H1040" />
+  <rect x="40" y="751" width="300" height="84" rx="12" fill="#182536" stroke="#3e526c" />
+  <text x="60" y="784" class="label">인메모리 저장소</text>
+  <text x="60" y="815" class="code">ConcurrentHashMap</text>
+  <rect x="380" y="751" width="660" height="151" rx="12" fill="#173b3a" />
+  <text x="400" y="784" class="label" style="fill:#72dcc6">락 밖 안내 · 순서와 재접속 보호</text>
+  <rect x="400" y="800" width="340" height="84" rx="12" fill="#182536" />
+  <text x="416" y="824" class="code">ActionNotificationOrder</text>
+  <text x="416" y="849" class="code">SnapshotDelivery</text>
+  <text x="416" y="873" class="body">이전 안내·스냅샷 송신 완료 대기</text>
+  <path class="route" d="M740 843 H778" />
+  <text x="795" y="829" class="label" style="fill:#72dcc6">메시지 송신</text>
+  <text x="795" y="859" class="code">GameMessageSender</text>
+  <text x="40" y="926" class="small">주요 연결만 표시 · 점선은 보호 상태 전달 · 상세 보장 범위는 본문 참조</text>
+  <text x="78" y="657" class="code">RoomReadyService</text>
 </svg>
