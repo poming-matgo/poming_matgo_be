@@ -11,20 +11,15 @@ import com.pomingmatgo.gameservice.domain.card.Card;
 import com.pomingmatgo.gameservice.domain.score.PayoutCalculator;
 import com.pomingmatgo.gameservice.infrastructure.scheduler.TurnScheduler;
 import com.pomingmatgo.gameservice.infrastructure.scheduler.RoomTimerLifecycle;
-import com.pomingmatgo.gameservice.infrastructure.session.ActionNotificationOrder;
 import com.pomingmatgo.gameservice.infrastructure.session.SessionManager;
+import com.pomingmatgo.gameservice.infrastructure.messaging.ActionNotificationScope;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import reactor.core.publisher.Mono;
-import reactor.core.Disposable;
-import reactor.core.Disposables;
-import reactor.util.context.Context;
 
 import java.util.List;
 import java.util.Objects;
 import java.util.function.Function;
-import java.util.function.UnaryOperator;
-import java.util.concurrent.atomic.AtomicReference;
 
 import static com.pomingmatgo.gameservice.domain.TurnTiming.TURN_TIMEOUT_MILLIS;
 import static com.pomingmatgo.gameservice.domain.TurnTiming.nextDeadlineNanos;
@@ -88,9 +83,8 @@ public class TurnFlowService {
         return Mono.defer(() -> {
             Objects.requireNonNull(source, "source");
             TurnScheduler bound = timerLifecycle.bind(roomId, Objects.requireNonNull(scheduler, "scheduler"));
-            AtomicReference<UnaryOperator<Context>> recipients = new AtomicReference<>();
-            AtomicReference<ActionNotificationOrder.Reservation> order = new AtomicReference<>();
-            Disposable.Swap owned = Disposables.swap();
+            ActionNotificationScope notifications = new ActionNotificationScope(roomId, sessionManager,
+                    () -> gameMessageSender.captureRecipients(roomId));
             GameActionCompletion completion = state -> Mono.defer(() -> {
                 // 자동플레이는 이미 발사한 타이머를 별도로 취소하지 않는다.
                 if (source == GameActionSource.USER) bound.cancelAutoPlay(roomId);
@@ -98,22 +92,11 @@ public class TurnFlowService {
                 Mono<Void> finish = state.getPhase() == GamePhase.END
                         ? gamePlayService.gameOver(state).then() : Mono.empty();
                 // 후속 안내 대기 중 접속한 세션은 이미 이 액션을 포함한 스냅샷을 받는다.
-                return finish.then(Mono.fromRunnable(() -> {
-                    recipients.set(gameMessageSender.captureRecipients(roomId));
-                    ActionNotificationOrder.Reservation reservation = sessionManager.reserveNotifications(roomId);
-                    order.set(reservation);
-                    // 수락 후 호출자가 먼저 취소됐어도 나중에 만든 예약이 남지 않아야 한다.
-                    if (reservation != null) owned.update(reservation);
-                }));
+                return finish.then(Mono.fromRunnable(notifications::capture));
             });
             return action.apply(completion)
-                    .flatMap(result -> {
-                        ActionNotificationOrder.Reservation reservation = order.get();
-                        Mono<Void> send = Mono.defer(() -> notification.apply(result)).contextWrite(recipients.get());
-                        return reservation == null ? send : reservation.ready()
-                                .flatMap(allowed -> allowed ? send : Mono.empty());
-                    })
-                    .doFinally(signal -> owned.dispose());
+                    .flatMap(result -> notifications.send(() -> notification.apply(result)))
+                    .doFinally(signal -> notifications.dispose());
         });
     }
 
