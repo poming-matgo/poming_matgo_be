@@ -432,6 +432,56 @@ class ReconnectSnapshotBaselineTest {
         }
     }
 
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void ordinarySendFailureKeepsConnectionAndOnlyNewConnectRefreshesSnapshotBaseline(boolean failSend)
+            throws Exception {
+        TestSession connected = newSession("ordinary-send", false);
+        connected.emit(connectJson(USER_2));
+        AtomicBoolean failed = new AtomicBoolean();
+        doAnswer(invocation -> Flux.from(invocation.<Publisher<WebSocketMessage>>getArgument(0))
+                .concatMap(message -> Mono.fromCallable(() -> mapper.readTree(message.getPayloadAsText())))
+                .concatMap(node -> {
+                    if (failSend && "SUBMIT_CARD".equals(node.path("status").asText())
+                            && failed.compareAndSet(false, true)) {
+                        return Mono.error(new IllegalStateException("ordinary notification failed"));
+                    }
+                    connected.outbox().add(node);
+                    return Mono.empty();
+                }).then()).when(connected.session()).send(any());
+
+        submit();
+        await(() -> connected.count("ANNOUNCE_TURN_INFORMATION") == 1);
+        assertEquals(failSend, failed.get());
+        assertEquals(failSend ? 0 : 1, connected.count("SUBMIT_CARD"));
+        assertEquals(1, opponent.count("SUBMIT_CARD"));
+        assertEquals(1, connected.count("CARD_REVEALED"));
+        assertEquals(2, states.findById(ROOM_ID).block(TIMEOUT).getCurrentTurn());
+        verify(autoPlay).scheduleAutoPlay(eq(ROOM_ID), eq(1), eq(2), eq(Player.PLAYER_2),
+                anyLong(), eq(GamePhase.IN_PROGRESS));
+        assertSame(connected.session(), sessions.getSession(ROOM_ID, 2));
+        assertFalse(connected.subscription().isDisposed());
+        assertTrue(connected.outbox().stream().noneMatch(node -> node.has("errorCode")));
+
+        // 일반 안내 실패는 스냅샷 실패처럼 매핑을 해제하지 않으므로 반복 CONNECT로 복구할 수 없다.
+        connected.emit(connectJson(USER_2));
+        assertEquals("ALREADY_JOIN", connected.outbox().getLast().path("errorCode").asText());
+        assertEquals(1, connected.count("RECONNECT_STATE"));
+        assertEquals(1, connected.data("RECONNECT_STATE").path("currentTurn").asInt());
+
+        TestSession replacement = newSession("refresh-after-notification", false);
+        replacement.emit(connectJson(USER_2));
+        await(() -> replacement.count("RECONNECT_STATE") == 1 && connected.subscription().isDisposed());
+        assertSame(replacement.session(), sessions.getSession(ROOM_ID, 2));
+        JsonNode snapshot = replacement.data("RECONNECT_STATE");
+        assertEquals(2, snapshot.path("currentTurn").asInt());
+        assertEquals("PLAYER_2", snapshot.path("currentPlayer").asText());
+        assertEquals(9, snapshot.path("opponentCardCount").asInt());
+        assertEquals(10, snapshot.path("myCards").size());
+        assertEquals(0, replacement.count("SUBMIT_CARD"));
+        assertTrue(replacement.outbox().stream().noneMatch(node -> node.has("errorCode")));
+    }
+
     private void submit() {
         opponent.emit("{\"eventType\":{\"subType\":\"NORMAL_SUBMIT\"},\"data\":{\"cardIndex\":0}}");
     }

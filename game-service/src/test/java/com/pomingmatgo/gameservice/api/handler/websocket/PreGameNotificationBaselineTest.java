@@ -196,6 +196,37 @@ class PreGameNotificationBaselineTest {
         assertTrue(replacement.outbox().stream().noneMatch(node -> node.has("errorCode")));
     }
 
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void disconnectCleanupDoesNotWaitForAlreadyStartedSelectionSendBaseline(boolean delayed) throws Exception {
+        holdSend(first, "LEADER_SELECTION", delayed);
+        select(first, 0);
+        assertEquals(delayed ? 1 : 0, releaseSend.currentSubscriberCount());
+        assertEquals(GamePhase.DETERMINING_STARTING_PLAYER, states.findById(ROOM_ID).block(TIMEOUT).getPhase());
+
+        // 상대 연결의 정상 종료는 첫 연결의 선택 송신과 독립적이다.
+        assertEquals(Sinks.EmitResult.OK, second.inbound().tryEmitComplete());
+        await(() -> first.count("OPPONENT_DISCONNECTED") == 1 && sessions.getAllUser(ROOM_ID).isEmpty());
+        assertNull(states.findById(ROOM_ID).block(TIMEOUT));
+        assertFalse(sessions.getPlayerContext(first.session()).hasElement().block(TIMEOUT));
+        assertFalse(first.subscription().isDisposed());
+        assertEquals(delayed ? 0 : 1, first.count("LEADER_SELECTION"));
+        // 현재 정리는 매핑·예약을 제거하지만 이미 시작한 호출자 소유 송신은 취소하지 않는다.
+        assertEquals(delayed ? 1 : 0, releaseSend.currentSubscriberCount());
+        releaseSend.tryEmitEmpty();
+        await(() -> first.count("LEADER_SELECTION") == 1);
+        assertEquals(delayed
+                        ? List.of("OPPONENT_DISCONNECTED", "LEADER_SELECTION")
+                        : List.of("LEADER_SELECTION", "OPPONENT_DISCONNECTED"),
+                first.outbox().stream().map(node -> node.path("status").asText())
+                        .filter(status -> List.of("LEADER_SELECTION", "OPPONENT_DISCONNECTED").contains(status))
+                        .toList());
+        assertEquals(0, first.count("LEADER_SELECTION_RESULT"));
+        assertEquals(0, first.count("DISTRIBUTE_CARD"));
+        assertEquals(0, releaseSend.currentSubscriberCount());
+        assertTrue(first.outbox().stream().noneMatch(node -> node.has("errorCode")));
+    }
+
     private void select(TestSession client, int index) {
         client.emit("{\"eventType\":{\"subType\":\"LEADER_SELECTION\"},\"data\":{\"cardIndex\":" + index + "}}");
     }
