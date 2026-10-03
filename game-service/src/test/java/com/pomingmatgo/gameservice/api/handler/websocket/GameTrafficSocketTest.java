@@ -7,6 +7,9 @@ import com.pomingmatgo.gameservice.application.room.RoomCleanupService;
 import com.pomingmatgo.gameservice.domain.*;
 import com.pomingmatgo.gameservice.domain.card.Card;
 import com.pomingmatgo.gameservice.domain.repository.GameStateRepository;
+import com.pomingmatgo.gameservice.infrastructure.lock.InFlightManager;
+import com.pomingmatgo.gameservice.infrastructure.scheduler.AutoPlayScheduler;
+import com.pomingmatgo.gameservice.infrastructure.scheduler.RoomTimerLifecycle;
 import com.pomingmatgo.gameservice.infrastructure.scheduler.TurnScheduler;
 import com.pomingmatgo.gameservice.infrastructure.session.SessionManager;
 import org.junit.jupiter.api.AfterEach;
@@ -18,9 +21,11 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.http.server.reactive.ReactorHttpHandlerAdapter;
 import org.springframework.test.context.ActiveProfiles;
+import org.springframework.test.util.ReflectionTestUtils;
 import org.springframework.web.reactive.socket.*;
 import org.springframework.web.reactive.socket.server.support.HandshakeWebSocketService;
 import org.springframework.web.server.adapter.WebHttpHandlerBuilder;
+import reactor.core.Disposable;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 import reactor.core.publisher.Sinks;
@@ -49,6 +54,7 @@ import static org.mockito.Mockito.*;
 class GameTrafficSocketTest {
     private static final Duration TIMEOUT = Duration.ofSeconds(10);
     private static final long ROOM = 981_001L;
+    private static final long OTHER_ROOM = 981_002L;
     @Autowired TurnFlowService turns;
     @Autowired GamePlayService gameplay;
     @Autowired PreGameService pregame;
@@ -56,6 +62,10 @@ class GameTrafficSocketTest {
     @Autowired RoomCleanupService cleanup;
     @Autowired SessionManager sessions;
     @Autowired ObjectMapper mapper;
+    @Autowired GameWebSocketHandler socketHandler;
+    @Autowired AutoPlayScheduler autoPlay;
+    @Autowired RoomTimerLifecycle timerLifecycle;
+    @Autowired InFlightManager inFlight;
     private final List<Peer> peers = new ArrayList<>();
     private final AtomicReference<Connection> accepted = new AtomicReference<>();
     private final AtomicReference<Peer> handshaking = new AtomicReference<>();
@@ -64,9 +74,12 @@ class GameTrafficSocketTest {
     @AfterEach
     void tearDown() throws Exception {
         try {
-            cleanup.cleanupRoom(ROOM).block(TIMEOUT);
-            assertNull(states.findById(ROOM).block(TIMEOUT));
-            assertTrue(sessions.getAllUser(ROOM).isEmpty());
+            for (long room : List.of(ROOM, OTHER_ROOM)) {
+                cleanup.cleanupRoom(room).block(TIMEOUT);
+                assertNull(states.findById(room).block(TIMEOUT));
+                assertTrue(sessions.getAllUser(room).isEmpty());
+                assertFalse(scheduled().containsKey(room));
+            }
         } finally {
             for (Peer peer : peers) {
                 peer.socket.close();
@@ -75,8 +88,14 @@ class GameTrafficSocketTest {
                     peer.connection.onDispose().block(TIMEOUT);
                 }
                 if (peer.session != null) peer.ended.asMono().block(TIMEOUT);
+                if (peer.connection != null) {
+                    assertFalse(peer.state().active());
+                    assertEquals(0, peer.state().pendingBytes());
+                }
             }
             if (server != null) server.disposeNow(TIMEOUT);
+            await(() -> runningAutoPlays().size() == 0 &&
+                    ((Disposable.Composite) ReflectionTestUtils.getField(socketHandler, "pendingDisconnects")).size() == 0);
         }
     }
 
@@ -166,6 +185,111 @@ class GameTrafficSocketTest {
                 config.getWriteBufferWaterMark(), beforeDrain, target.state(), events);
     }
 
+    @ParameterizedTest(name = "mixed WS/autoplay, pauseReading={0}")
+    @ValueSource(booleans = {false, true})
+    void twoRoomsProgressThroughWebSocketAndAutoplayWithDefaultBuffers(boolean pauseReading) throws Exception {
+        startServer();
+        Peer[] players = {connect(), connect(), connect(), connect()};
+        for (int roomIndex = 0; roomIndex < 2; roomIndex++) {
+            long room = roomIndex == 0 ? ROOM : OTHER_ROOM;
+            states.create(GameState.builder().roomId(room).leadingPlayer(1).currentTurn(1)
+                    .round(1).phase(GamePhase.IN_PROGRESS).build()).block(TIMEOUT);
+            timerLifecycle.open(room);
+            List<Card> deck = new ArrayList<>(Arrays.asList(Card.values()));
+            Collections.shuffle(deck, new Random(20260731L));
+            pregame.distributeCards(room, deck).block(TIMEOUT);
+            sessions.addPlayer(room, Player.PLAYER_1, 101L, players[roomIndex * 2].session).block(TIMEOUT);
+            sessions.addPlayer(room, Player.PLAYER_2, 102L, players[roomIndex * 2 + 1].session).block(TIMEOUT);
+        }
+        List<List<String>> pausedBatches = new ArrayList<>();
+        int[] actions = new int[2];
+        int automatic = 0;
+        long began = System.nanoTime();
+        for (int step = 0; step < 80; step++) {
+            boolean finished = true;
+            for (int roomIndex = 0; roomIndex < 2; roomIndex++) {
+                long room = roomIndex == 0 ? ROOM : OTHER_ROOM;
+                GameState state = states.findById(room).block(TIMEOUT);
+                if (state.getPhase() == GamePhase.NONE) continue;
+                finished = false;
+                assertTrue(System.nanoTime() - began < Duration.ofSeconds(30).toNanos());
+                Peer first = players[roomIndex * 2];
+                Peer second = players[roomIndex * 2 + 1];
+                int beforeFirst = first.outbound.size();
+                int beforeSecond = second.outbound.size();
+                Player actor = state.getCurrentPlayer();
+                if (roomIndex == 0 && actor == Player.PLAYER_1) {
+                    // 만료 시각만 앞당긴다. 발사·InFlight·게임 처리·다음 예약은 실제 스케줄러를 통과한다.
+                    autoPlay.scheduleAutoPlay(room, state.getRound(), state.getCurrentTurn(), actor,
+                            System.nanoTime(), state.getPhase());
+                    automatic++;
+                } else {
+                    String event = switch (state.getPhase()) {
+                        case IN_PROGRESS -> "NORMAL_SUBMIT";
+                        case AWAITING_FLOOR_CARD_CHOICE -> "FLOOR_SELECT";
+                        case AWAITING_GO_STOP_CHOICE -> "GO_STOP_CHOICE";
+                        default -> throw new AssertionError(state.getPhase());
+                    };
+                    (actor == Player.PLAYER_1 ? first : second).write(
+                            "{\"eventType\":{\"subType\":\"" + event + "\"},\"data\":{\"cardIndex\":0,\"go\":false}}");
+                }
+                await(() -> first.outbound.size() > beforeFirst
+                        && runningAutoPlays().size() == 0
+                        && !inFlight.isSet(InFlightManager.normalKey(room, actor.getNumber())).block(TIMEOUT));
+                GameState next = states.findById(room).block(TIMEOUT);
+                if (next.getPhase() != GamePhase.NONE) {
+                    Object timer = scheduled().get(room);
+                    assertNotNull(timer, "후속 행동 타이머 등록");
+                    Object nextStep = ReflectionTestUtils.getField(timer, "step");
+                    assertEquals(next.getRound(), ReflectionTestUtils.getField(nextStep, "round"));
+                    assertEquals(next.getCurrentTurn(), ReflectionTestUtils.getField(nextStep, "turn"));
+                    assertEquals(next.getPhase(), ReflectionTestUtils.getField(nextStep, "phase"));
+                }
+                List<String> batch = List.copyOf(first.outbound.subList(beforeFirst, first.outbound.size()));
+                if (pauseReading && roomIndex == 0) pausedBatches.add(batch);
+                else drainBatch(first, batch);
+                drainBatch(second, List.copyOf(second.outbound.subList(beforeSecond, second.outbound.size())));
+                actions[roomIndex]++;
+            }
+            if (finished) break;
+        }
+        for (long room : List.of(ROOM, OTHER_ROOM)) {
+            assertEquals(GamePhase.NONE, states.findById(room).block(TIMEOUT).getPhase());
+            assertFalse(scheduled().containsKey(room));
+        }
+        assertTrue(automatic > 0);
+        assertTrue(actions[0] > 5 && actions[1] > 5);
+        TransportState beforeDrain = players[0].state();
+        if (pauseReading) {
+            assertEquals(0, players[0].received);
+            for (List<String> batch : pausedBatches) drainBatch(players[0], batch);
+        }
+        for (Peer peer : players) {
+            assertEquals(peer.outbound.size(), peer.received);
+            assertEquals(1, peer.outbound.stream().filter(p -> status(p).equals("GAME_OVER")).count());
+            assertTrue(peer.outbound.stream().noneMatch(p -> status(p).equals("ERROR")));
+            assertEquals(0, peer.state().pendingBytes());
+        }
+        assertEquals(0, runningAutoPlays().size());
+        System.out.printf("mixedGame pause=%s actions=%s autoplay=%d frames=%s beforeDrain=%s%n",
+                pauseReading, Arrays.toString(actions), automatic,
+                peers.stream().map(p -> p.received).toList(), beforeDrain);
+    }
+
+    private Map<?, ?> scheduled() {
+        return (Map<?, ?>) ReflectionTestUtils.getField(autoPlay, "scheduled");
+    }
+
+    private Disposable.Composite runningAutoPlays() {
+        return (Disposable.Composite) ReflectionTestUtils.getField(autoPlay, "runningAutoPlays");
+    }
+
+    private void await(java.util.function.BooleanSupplier condition) {
+        Mono.defer(() -> condition.getAsBoolean() ? Mono.just(true) : Mono.empty())
+                .repeatWhen(repeat -> repeat.delayElements(Duration.ofMillis(10)))
+                .next().block(TIMEOUT);
+    }
+
     private String status(String payload) {
         try {
             return mapper.readTree(payload).get("status").asText();
@@ -204,7 +328,7 @@ class GameTrafficSocketTest {
                         peer.outbound.add(message.getPayloadAsText())));
             }).when(observed).send(any());
             peer.ready.tryEmitValue(observed);
-            return session.receive().then().doFinally(signal -> peer.ended.tryEmitValue(true));
+            return socketHandler.handle(observed).doFinally(signal -> peer.ended.tryEmitValue(true));
         })).build();
         server = HttpServer.create().host("127.0.0.1").port(0)
                 .doOnConnection(accepted::set)
@@ -246,6 +370,19 @@ class GameTrafficSocketTest {
         int received;
         Connection connection;
         WebSocketSession session;
+
+        void write(String payload) throws Exception {
+            byte[] body = payload.getBytes(StandardCharsets.UTF_8);
+            assertTrue(body.length < 126);
+            ByteArrayOutputStream frame = new ByteArrayOutputStream();
+            frame.write(0x81);
+            frame.write(0x80 | body.length);
+            byte[] mask = {17, 31, 47, 61};
+            frame.write(mask);
+            for (int i = 0; i < body.length; i++) frame.write(body[i] ^ mask[i % 4]);
+            socket.getOutputStream().write(frame.toByteArray());
+            socket.getOutputStream().flush();
+        }
 
         String read() throws Exception {
             DataInputStream input = new DataInputStream(socket.getInputStream());
