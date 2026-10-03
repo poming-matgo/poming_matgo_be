@@ -1,6 +1,16 @@
 package com.pomingmatgo.gameservice.api.handler.websocket;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.pomingmatgo.gameservice.application.game.InMemoryGameActionExecutor;
+import com.pomingmatgo.gameservice.application.room.RoomCleanupService;
+import com.pomingmatgo.gameservice.domain.GameState;
+import com.pomingmatgo.gameservice.domain.Player;
+import com.pomingmatgo.gameservice.infrastructure.lock.InMemoryRoomExecutionGate;
+import com.pomingmatgo.gameservice.infrastructure.repository.inmemory.InMemoryAcquiredCardRepository;
+import com.pomingmatgo.gameservice.infrastructure.repository.inmemory.InMemoryGameStateRepository;
+import com.pomingmatgo.gameservice.infrastructure.repository.inmemory.InMemoryInstalledCardRepository;
+import com.pomingmatgo.gameservice.infrastructure.repository.inmemory.InMemoryLeadingPlayerRepository;
+import com.pomingmatgo.gameservice.infrastructure.scheduler.RoomTimerLifecycle;
 import com.pomingmatgo.gameservice.global.metrics.ThroughputRecorder;
 import com.pomingmatgo.gameservice.infrastructure.messaging.MessageSender;
 import com.pomingmatgo.gameservice.infrastructure.session.SessionManager;
@@ -23,6 +33,7 @@ import reactor.netty.DisposableServer;
 import reactor.netty.http.server.HttpServer;
 
 import java.io.ByteArrayOutputStream;
+import java.io.DataInputStream;
 import java.net.InetSocketAddress;
 import java.net.Socket;
 import java.nio.charset.StandardCharsets;
@@ -45,6 +56,8 @@ class WebSocketSlowReceiverTest {
     private DisposableServer server;
     private Socket peer;
     private Disposable send;
+
+    enum AfterCleanup { RESUME_READING, CALLER_CANCEL_THEN_RESUME_READING, PEER_RESET }
 
     enum Termination { PEER_RESET, CALLER_CANCEL_THEN_PEER_RESET }
 
@@ -110,6 +123,109 @@ class WebSocketSlowReceiverTest {
         assertEquals(0, recorder.snapshot().totalSkipped());
         System.out.printf("%s: stalled=%s, closed=%s, outcome=%s%n",
                 termination, stalled, closed, recorder.snapshot());
+    }
+
+    @ParameterizedTest
+    @EnumSource(AfterCleanup.class)
+    void roomCleanupDoesNotRecallAnAlreadyStartedTcpFrame(AfterCleanup followup) throws Exception {
+        long roomId = 970_002L;
+        WebSocketSession session = connectWithoutReadingFrames();
+        var executionGate = new InMemoryRoomExecutionGate();
+        var state = new InMemoryGameStateRepository(new RoomTimerLifecycle(), executionGate);
+        var executor = new InMemoryGameActionExecutor(executionGate, event -> {});
+        var cleanup = new RoomCleanupService(state, new InMemoryInstalledCardRepository(),
+                new InMemoryAcquiredCardRepository(), new InMemoryLeadingPlayerRepository(),
+                executor, event -> {}, sessions);
+        @SuppressWarnings("unchecked")
+        ObjectProvider<ThroughputRecorder> provider = mock(ObjectProvider.class);
+        when(provider.getIfAvailable()).thenReturn(recorder);
+        MessageSender sender = new MessageSender(new ObjectMapper(), sessions, provider);
+        Sinks.One<SignalType> notificationEnded = Sinks.one();
+        try {
+            state.create(GameState.createEmptyRoom(roomId)).block(TIMEOUT);
+            sessions.addPlayer(roomId, Player.PLAYER_1, 101L, session).block(TIMEOUT);
+            var recipients = sender.captureRecipients(roomId);
+            String payload = "x".repeat(PAYLOAD_BYTES);
+            send = sender.sendPayload(session, payload).contextWrite(recipients)
+                    .doFinally(sendEnded::tryEmitValue)
+                    .subscribe(ignored -> {}, sendFailure::set);
+            TransportState stalled = awaitStalledWrite();
+
+            // 종료 안내를 포함한 정리 서비스 경계다. WS 선택/disconnect 전체 경로 재현은 아니다.
+            cleanup.cleanupRoom(roomId, sender.sendPayload(session, "room-closed")
+                    .doFinally(notificationEnded::tryEmitValue)).block(TIMEOUT);
+            assertEquals(SignalType.CANCEL, notificationEnded.asMono().block(TIMEOUT));
+            assertNull(state.findById(roomId).block(TIMEOUT));
+            assertNull(sessions.getPlayerContext(session).block(TIMEOUT));
+            assertTrue(sessions.getAllUser(roomId).isEmpty());
+            assertTrue(session.isOpen());
+            assertFalse(send.isDisposed());
+            TransportState afterCleanup = awaitStalledWrite();
+            assertEquals(1, recorder.snapshot().totalCancelled());
+            assertEquals(0, recorder.snapshot().totalSent());
+
+            // 정리 이후 아직 시작하지 않은 같은 액션의 안내는 기존 수신자 검사로 제외한다.
+            sender.sendPayload(session, "must-be-skipped").contextWrite(recipients).block(TIMEOUT);
+            assertEquals(1, recorder.snapshot().totalSkipped());
+
+            if (followup == AfterCleanup.CALLER_CANCEL_THEN_RESUME_READING) {
+                send.dispose();
+                assertEquals(SignalType.CANCEL, sendEnded.asMono().block(TIMEOUT));
+                assertEquals(2, recorder.snapshot().totalCancelled());
+                assertTrue(transportState().pendingBytes() > 0);
+            }
+            if (followup == AfterCleanup.PEER_RESET) {
+                peer.setSoLinger(true, 0);
+                peer.close();
+                connection.get().onDispose().block(TIMEOUT);
+                handlerEnded.asMono().block(TIMEOUT);
+                assertEquals(SignalType.ON_COMPLETE, sendEnded.asMono().block(TIMEOUT));
+                assertEquals(1, recorder.snapshot().totalSent());
+                assertFalse(session.isOpen());
+            } else {
+                // TCP에 이미 들어간 프레임은 Publisher 취소 뒤에도 수신될 수 있다.
+                assertEquals("\"" + payload + "\"", readTextFrame());
+                assertEquals("\"room-closed\"", readTextFrame());
+                SignalType terminal = sendEnded.asMono().block(TIMEOUT);
+                assertEquals(followup == AfterCleanup.RESUME_READING
+                        ? SignalType.ON_COMPLETE : SignalType.CANCEL, terminal);
+                assertEquals(followup == AfterCleanup.RESUME_READING ? 1 : 0,
+                        recorder.snapshot().totalSent());
+                assertTrue(session.isOpen());
+            }
+            assertEquals(0, transportState().pendingBytes());
+            assertNull(sendFailure.get());
+            assertEquals(0, recorder.snapshot().totalFailed());
+            System.out.printf("cleanup/%s: stalled=%s, afterCleanup=%s, final=%s, outcome=%s%n",
+                    followup, stalled, afterCleanup, transportState(), recorder.snapshot());
+        } finally {
+            cleanup.shutdown();
+            executor.shutdown();
+        }
+    }
+
+    private String readTextFrame() throws Exception {
+        DataInputStream input = new DataInputStream(peer.getInputStream());
+        assertEquals(0x81, input.readUnsignedByte(), "단일 FIN text frame");
+        int lengthByte = input.readUnsignedByte();
+        assertEquals(0, lengthByte & 0x80, "서버 프레임은 마스킹하지 않는다");
+        long length = lengthByte & 0x7f;
+        if (length == 126) length = input.readUnsignedShort();
+        else if (length == 127) length = input.readLong();
+        assertTrue(length >= 0 && length <= PAYLOAD_BYTES + 2L, "프레임 길이 상한");
+        byte[] body = new byte[(int) length];
+        long deadline = System.nanoTime() + TIMEOUT.toNanos();
+        int offset = 0;
+        while (offset < body.length) {
+            long remaining = deadline - System.nanoTime();
+            assertTrue(remaining > 0, "프레임 읽기 총 시간 상한 초과");
+            peer.setSoTimeout((int) Math.max(1, Duration.ofNanos(remaining).toMillis()));
+            int read = input.read(body, offset, body.length - offset);
+            assertNotEquals(-1, read, "프레임 본문 도중 연결 종료");
+            offset += read;
+        }
+        peer.setSoTimeout((int) TIMEOUT.toMillis());
+        return new String(body, StandardCharsets.UTF_8);
     }
 
     private WebSocketSession connectWithoutReadingFrames() throws Exception {
